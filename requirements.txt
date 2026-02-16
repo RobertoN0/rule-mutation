@@ -1,0 +1,25 @@
+# Experiment 02: Metamorphic Testing on Project CodeGuard (MCP-based)
+# Python 3.11+
+
+# Core
+openai>=1.0
+python-dotenv
+
+# LLM Agent framework
+langchain>=0.3
+langchain-openai>=0.3
+langgraph>=0.2
+
+# MCP (Model Context Protocol)
+mcp>=1.0
+nest-asyncio
+
+# Dataset
+datasets
+pandas
+
+# Static analysis
+semgrep
+
+# Rule parsing
+pyyaml
