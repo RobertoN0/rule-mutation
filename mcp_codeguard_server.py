@@ -3,8 +3,8 @@ MCP Server for Project CodeGuard Security Rules.
 
 This server exposes CodeGuard security rules to AI agents via the
 Model Context Protocol (MCP). It provides two tools:
-  1. search_security_guidelines — semantic keyword search over rules
-  2. list_available_guidelines  — lists all rule IDs and descriptions
+  1. list_available_guidelines  — lists all rule IDs and descriptions
+  2. search_security_guidelines — search over rules by ID
 
 Usage (stdio transport — intended to be launched by the notebook):
     python mcp_codeguard_server.py
@@ -58,60 +58,40 @@ mcp = FastMCP(
     "codeguard-rules",
     instructions=(
         "Provides Project CodeGuard security rules. "
-        "Use search_security_guidelines to find the rule that matches "
-        "a security concern, and list_available_guidelines to browse all rules."
+        "First call list_available_guidelines to see all available rules, "
+        "then use get_guideline_by_id to retrieve specific rules by their ID. "
     ),
 )
 
-
-@mcp.tool()
-def search_security_guidelines(query: str) -> str:
-    """Search the CodeGuard security-rule library for a relevant rule.
-
-    The search uses simple keyword matching against rule descriptions
-    and content.  Returns the full text of the best-matching rule.
-
-    Args:
-        query: Natural-language description of the security concern
-               (e.g. "SQL injection prevention", "password hashing").
-
-    Returns:
-        The full Markdown content of the best-matching rule, prefixed
-        with its rule ID.
-    """
-    query_lower = query.lower()
-    query_tokens = set(re.findall(r"\w+", query_lower))
-
-    best_id: str | None = None
-    best_score = -1
-
-    for rule_id, data in _RULES.items():
-        # Build a corpus from description + first 2 000 chars of content
-        corpus = (data["description"] + " " + data["content"][:2000]).lower()
-        corpus_tokens = set(re.findall(r"\w+", corpus))
-        score = len(query_tokens & corpus_tokens)
-        if score > best_score:
-            best_score = score
-            best_id = rule_id
-
-    if best_id is None:
-        return "No security guidelines found."
-
-    rule = _RULES[best_id]
-    return f"# Retrieved Rule: {best_id}\n\n{rule['content']}"
-
-
 @mcp.tool()
 def list_available_guidelines() -> str:
-    """List all available CodeGuard security guidelines.
+    """List all available CodeGuard guidelines.
 
     Returns:
         A bulleted list of rule IDs and their one-line descriptions.
     """
-    lines: list[str] = ["Available Security Guidelines:\n"]
+    lines: list[str] = ["Available Guidelines:\n"]
     for rule_id, data in _RULES.items():
         lines.append(f"- {rule_id}: {data['description']}")
     return "\n".join(lines)
+
+
+@mcp.tool()
+def get_guideline_by_id(rule_id: str) -> str:
+    """Retrieve a specific CodeGuard guideline by its ID.
+
+    Args:
+        rule_id: The rule ID to retrieve (e.g., "codeguard-0-input-validation-injection").
+
+    Returns:
+        The full Markdown content of the requested rule, or an error message if not found.
+    """
+    if rule_id not in _RULES:
+        available = ", ".join(sorted(_RULES.keys()))
+        return f"Error: Rule ID '{rule_id}' not found.\n\nAvailable rule IDs: {available}"
+    
+    rule = _RULES[rule_id]
+    return f"# Retrieved Rule: {rule_id}\n\n{rule['content']}"
 
 
 if __name__ == "__main__":
