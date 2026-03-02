@@ -8,6 +8,7 @@ python-dotenv
 # LLM Agent framework
 langchain>=0.3
 langchain-openai>=0.3
+#langchain-ollama>=0.3
 langgraph>=0.2
 
 # MCP (Model Context Protocol)
