@@ -58,7 +58,6 @@ beads.right.meta.json
 
 # Volatile local files (do not share across machines)
 interactions.jsonl
-metadata.json
 backup/
 dolt-server.*
 dolt-monitor.pid*
