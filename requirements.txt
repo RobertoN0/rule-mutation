@@ -11,6 +11,11 @@ langchain-openai>=0.3
 #langchain-ollama>=0.3
 langgraph>=0.2
 
+# Local DelftBlue HuggingFace backend
+transformers>=4.45
+accelerate>=0.34
+bitsandbytes>=0.43
+
 # MCP (Model Context Protocol)
 mcp>=1.0
 nest-asyncio

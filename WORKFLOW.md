@@ -50,7 +50,7 @@ This script breaks down the agentic workflow, by performing an agent like rule r
 Execute the hill climbing optimization:
 
 ```bash
-python scripts/run_with_rules_map.py \
+python scripts/experiments/run_with_rules_map.py \
     --interesting-cases data/interesting_cases.json \
     --rules-map data/rule_mapping.json \
     --n-cases 10 \
@@ -205,7 +205,7 @@ Best fitness: 15.0
 
 ```bash
 # 2 cases, 1 iteration, small model
-python scripts/run_with_rules_map.py \
+python scripts/experiments/run_with_rules_map.py \
     --interesting-cases data/cases.json \
     --rules-map data/mapping.json \
     --n-cases 2 \
@@ -220,7 +220,7 @@ python scripts/run_with_rules_map.py \
 
 ```bash
 # All cases, 5 iterations, large model
-python scripts/run_with_rules_map.py \
+python scripts/experiments/run_with_rules_map.py \
     --interesting-cases data/cases.json \
     --rules-map data/mapping.json \
     --model llama-3.3-70b-versatile \
@@ -234,7 +234,7 @@ python scripts/run_with_rules_map.py \
 
 ```bash
 # Filter cases, target specific vulnerability class
-python scripts/run_with_rules_map.py \
+python scripts/experiments/run_with_rules_map.py \
     --interesting-cases data/cases.json \
     --rules-map data/mapping.json \
     --diff-types rules_helped rules_hurt \

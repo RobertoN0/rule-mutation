@@ -7,6 +7,10 @@ Provides a unified interface for different LLM providers (Groq, OpenRouter, Toge
 from .base import LLMBackend, LLMResponse, LLMConfig, LLMError, RateLimitError
 from .groq_backend import GroqBackend, create_groq_backend
 from .openrouter_backend import OpenRouterBackend, create_openrouter_backend
+from .delftblue_local_backend import (
+    DelftBlueLocalBackend,
+    create_delftblue_local_backend,
+)
 from .quota import (
     QuotaTracker,
     QuotaUsage,
@@ -27,6 +31,8 @@ __all__ = [
     "create_groq_backend",
     "OpenRouterBackend",
     "create_openrouter_backend",
+    "DelftBlueLocalBackend",
+    "create_delftblue_local_backend",
     # Quota tracking
     "QuotaTracker",
     "QuotaUsage",

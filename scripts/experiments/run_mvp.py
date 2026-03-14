@@ -16,19 +16,19 @@ Test Prompt Selection:
 
 Usage:
     # Default: 5 random Python injection prompts
-    python scripts/run_mvp.py
+    python scripts/experiments/run_mvp.py
 
     # More prompts:
-    python scripts/run_mvp.py --n-prompts 10
+    python scripts/experiments/run_mvp.py --n-prompts 10
 
     # Specific language:
-    python scripts/run_mvp.py --language c --n-prompts 8
+    python scripts/experiments/run_mvp.py --language c --n-prompts 8
 
     # From interesting_cases.json:
-    python scripts/run_mvp.py --prompts-file path/to/interesting_cases.json
+    python scripts/experiments/run_mvp.py --prompts-file path/to/interesting_cases.json
 
     # Dry run (no API calls):
-    python scripts/run_mvp.py --dry-run
+    python scripts/experiments/run_mvp.py --dry-run
 
 Requirements:
     pip install openai datasets
@@ -45,7 +45,16 @@ import sys
 from pathlib import Path
 
 # Add src to path for imports
-PROJECT_ROOT = Path(__file__).parent.parent
+def _resolve_project_root() -> Path:
+    """Resolve repository root by searching upward for the src/ and scripts/ dirs."""
+    this_file = Path(__file__).resolve()
+    for parent in [this_file.parent, *this_file.parents]:
+        if (parent / "src").is_dir() and (parent / "scripts").is_dir():
+            return parent
+    raise RuntimeError("Could not resolve project root from script location")
+
+
+PROJECT_ROOT = _resolve_project_root()
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.llm_backends import GroqBackend, LLMConfig

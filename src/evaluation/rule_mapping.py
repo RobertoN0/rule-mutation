@@ -365,7 +365,18 @@ def create_rule_loader(rules_dir: Path | str | None = None) -> RuleLoader:
     """
     if rules_dir is None:
         # Default to project-codeguard rules
-        default = Path(__file__).parent.parent.parent / "project-codeguard" / "skills" / "software-security" / "rules"
+        module_path = Path(__file__).resolve()
+        repo_root: Path | None = None
+        for parent in [module_path.parent, *module_path.parents]:
+            candidate = parent / "project-codeguard" / "skills" / "software-security" / "rules"
+            if candidate.is_dir():
+                repo_root = parent
+                break
+        if repo_root is None:
+            raise FileNotFoundError(
+                "Could not locate project root containing project-codeguard/skills/software-security/rules"
+            )
+        default = repo_root / "project-codeguard" / "skills" / "software-security" / "rules"
         rules_dir = default
     
     return RuleLoader(rules_dir)

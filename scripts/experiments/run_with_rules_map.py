@@ -11,20 +11,20 @@ rule selection rather than a single hardcoded rule.
 
 Usage:
     # Run with 5 interesting cases, using per-prompt rules
-    python scripts/run_with_rules_map.py \
+    python scripts/experiments/run_with_rules_map.py \
         --interesting-cases pipeline_breakdown/generation_results/interesting_cases_96_sonnet_4_6.json \
         --rules-map pipeline_breakdown/rule_retrieval_output/retrieval_map_96_sonnet_4_6.json \
         --n-cases 5
     
     # Full run with specific model
-    python scripts/run_with_rules_map.py \
+    python scripts/experiments/run_with_rules_map.py \
         --interesting-cases interesting_cases.json \
         --rules-map retrieval_map.json \
         --model llama-3.3-70b-versatile \
         --iterations 10
     
     # Dry run (no API calls)
-    python scripts/run_with_rules_map.py \
+    python scripts/experiments/run_with_rules_map.py \
         --interesting-cases interesting_cases.json \
         --rules-map retrieval_map.json \
         --dry-run
@@ -39,10 +39,19 @@ import sys
 from pathlib import Path
 
 # Add src to path for imports
-PROJECT_ROOT = Path(__file__).parent.parent
+def _resolve_project_root() -> Path:
+    """Resolve repository root by searching upward for the src/ and scripts/ dirs."""
+    this_file = Path(__file__).resolve()
+    for parent in [this_file.parent, *this_file.parents]:
+        if (parent / "src").is_dir() and (parent / "scripts").is_dir():
+            return parent
+    raise RuntimeError("Could not resolve project root from script location")
+
+
+PROJECT_ROOT = _resolve_project_root()
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.llm_backends import GroqBackend, LLMConfig
+from src.llm_backends import GroqBackend, LLMConfig, DelftBlueLocalBackend
 from src.llm_backends.base import LLMError
 from src.mutation import FluffMutator
 from src.optimizer import HillClimber, HillClimbConfig
@@ -55,6 +64,12 @@ from src.evaluation import (
     PromptWithRules,
 )
 from src.evaluation.fitness import FitnessStrategy
+from src.evaluation.semgrep_runner import (
+    configure_semgrep,
+    configure_semgrep_debug,
+    get_semgrep_config,
+    warmup_semgrep,
+)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -79,6 +94,9 @@ def load_prompts_with_rules(
     rule_loader: RuleLoader,
     n_cases: int | None = None,
     diff_types: list[str] | None = None,
+    languages: list[str] | None = None,
+    selection: str = "first",
+    seed: int = 42,
 ) -> list[PromptWithRules]:
     """Load interesting cases and enrich with rules from mapping.
     
@@ -93,18 +111,31 @@ def load_prompts_with_rules(
         List of PromptWithRules ready for optimization
     """
     # Load interesting cases
-    cases = load_interesting_cases(interesting_cases_path) # type: ignore
+    cases = list(load_interesting_cases(interesting_cases_path)) # type: ignore
     print(f"📥 Loaded {len(cases)} interesting cases")
     
     # Filter by diff_type if specified
     if diff_types:
         cases = [c for c in cases if c.diff_type in diff_types]
         print(f"   Filtered to {len(cases)} cases with diff_types: {diff_types}")
-    
+
+    # Filter by language if specified
+    if languages:
+        languages_lower = [lang.lower() for lang in languages]
+        cases = [c for c in cases if c.language.lower() in languages_lower]  # type: ignore
+        print(f"   Filtered to {len(cases)} cases with languages: {languages_lower}")
+
+    # Selection strategy (applied before n_cases limit)
+    if selection == "random":
+        import random
+        rng = random.Random(seed)
+        rng.shuffle(cases)  # type: ignore
+        print(f"   Shuffled cases with seed={seed} (random selection)")
+
     # Limit number of cases
     if n_cases and len(cases) > n_cases:
-        cases = cases[:n_cases] # type: ignore
-        print(f"   Limited to first {n_cases} cases")
+        cases = cases[:n_cases]  # type: ignore
+        print(f"   Selected {n_cases} cases ({selection} selection, seed={seed})")
     
     # Load rule mapping
     rule_mapping = load_rule_mapping(rules_map_path)
@@ -240,6 +271,22 @@ def main():
         help="Filter by diff_type (e.g., rules_helped mutation_improved)"
     )
     parser.add_argument(
+        "--languages",
+        nargs="+",
+        default=None,
+        metavar="LANG",
+        help="Filter by language (e.g., c python java javascript). Case-insensitive.",
+    )
+    parser.add_argument(
+        "--selection",
+        default="first",
+        choices=["first", "random"],
+        help=(
+            "Case selection strategy: 'first' takes the first N cases in file "
+            "order; 'random' shuffles with --seed before selecting N (default: first)"
+        ),
+    )
+    parser.add_argument(
         "--iterations", "-i",
         type=int,
         default=5,
@@ -248,7 +295,19 @@ def main():
     parser.add_argument(
         "--model", "-m",
         default="llama-3.3-70b-versatile",
-        help="Groq model to use (default: llama-3.3-70b-versatile)"
+        help="Model to use (default: llama-3.3-70b-versatile for Groq, or HF model path for local)"
+    )
+    parser.add_argument(
+        "--backend", "-b",
+        default="groq",
+        choices=["groq", "local", "delftblue"],
+        help="LLM backend: groq (default), local/delftblue (HuggingFace local inference)"
+    )
+    parser.add_argument(
+        "--quantization",
+        default="fp16",
+        choices=["fp16", "4bit"],
+        help="Quantization for local backend: fp16 (default) or 4bit"
     )
     parser.add_argument(
         "--dry-run",
@@ -266,6 +325,27 @@ def main():
         type=int,
         default=42,
         help="Random seed for reproducibility"
+    )
+    parser.add_argument(
+        "--semgrep-config",
+        default=os.getenv("SEMGREP_RULESET"),
+        help=(
+            "Semgrep rule config to use. Can be a registry shorthand like "
+            "'p/security-audit' or a local rule file/directory. Defaults to "
+            "SEMGREP_RULESET if set."
+        ),
+    )
+    parser.add_argument(
+        "--semgrep-timeout-seconds",
+        type=int,
+        default=int(os.getenv("SEMGREP_TIMEOUT_SECONDS", "180")),
+        help="Whole-process timeout for one Semgrep run (default: 180)",
+    )
+    parser.add_argument(
+        "--semgrep-jobs",
+        type=int,
+        default=int(os.getenv("SEMGREP_JOBS", "1")),
+        help="Semgrep parallel jobs per scan (default: 1)",
     )
     
     args = parser.parse_args()
@@ -295,6 +375,9 @@ def main():
         rule_loader=rule_loader,
         n_cases=args.n_cases,
         diff_types=args.diff_types,
+        languages=args.languages,
+        selection=args.selection,
+        seed=args.seed,
     )
     
     if not prompts_with_rules:
@@ -305,7 +388,34 @@ def main():
     if args.dry_run:
         print("\n🔧 DRY RUN MODE: Using mock backend")
         backend = create_mock_backend()
+    elif args.backend in ("local", "delftblue"):
+        # Local HuggingFace backend for DelftBlue GPU nodes
+        print(f"\n🤖 Initializing DelftBlue local backend: {args.model}")
+        print(f"   Quantization: {args.quantization}")
+        
+        config = LLMConfig(
+            model=args.model,
+            temperature=0.0,
+            max_tokens=4096,
+            extra={
+                "quantization": args.quantization,
+                "local_files_only": True,
+                "trust_remote_code": True,
+            },
+        )
+        try:
+            backend = DelftBlueLocalBackend(config)
+            if backend.is_available():
+                print("   ✅ Model found in local cache")
+            else:
+                print("   ⚠️  Model not found in local cache or CUDA unavailable")
+                print("   Hint: Set HF_HOME and TRANSFORMERS_CACHE to your model directory")
+                sys.exit(1)
+        except LLMError as e:
+            print(f"❌ Error initializing local backend: {e}")
+            sys.exit(1)
     else:
+        # Groq API backend
         api_key = os.getenv("GROQ_API_KEY")
         if not api_key:
             print("\n❌ Error: GROQ_API_KEY environment variable not set")
@@ -353,7 +463,34 @@ def main():
     # Estimate LLM calls
     estimated_calls = len(prompts_with_rules) * (1 + args.iterations)  # baseline + iterations
     print(f"\n📊 Estimated LLM calls: ~{estimated_calls}")
-    
+
+    # Configure Semgrep execution
+    configure_semgrep(
+        rule_config=args.semgrep_config,
+        subprocess_timeout_seconds=args.semgrep_timeout_seconds,
+        jobs=args.semgrep_jobs,
+    )
+    semgrep_config = get_semgrep_config()
+
+    # Configure Semgrep debug output (helps diagnose zero-fitness / fence issues)
+    semgrep_debug_dir = args.output_dir / "semgrep_debug"
+    configure_semgrep_debug(semgrep_debug_dir)
+    print(f"🔎 Semgrep config: {semgrep_config['rule_config']}")
+    print(f"   Semgrep timeout: {semgrep_config['subprocess_timeout_seconds']}s")
+    print(f"   Semgrep jobs: {semgrep_config['jobs']}")
+    print(f"\U0001f50d Semgrep inputs/outputs → {semgrep_debug_dir}/semgrep_debug.jsonl", flush=True)
+
+    print("🔥 Warming up Semgrep...", flush=True)
+    warmup_elapsed_s, warmup_result = warmup_semgrep(args.semgrep_config)
+    if warmup_result.error:
+        print(
+            f"   ⚠️  Semgrep warm-up finished with error after {warmup_elapsed_s:.1f}s: "
+            f"{warmup_result.error}",
+            flush=True,
+        )
+    else:
+        print(f"   ✅ Semgrep warm-up complete in {warmup_elapsed_s:.1f}s", flush=True)
+
     # Create hill climber
     climber = HillClimber(backend, mutator, hc_config)
     
@@ -400,36 +537,90 @@ def main():
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         results_file = args.output_dir / f"per_prompt_rules_results_{timestamp}.json"
         
-        # Serialize results
+        # Serialize results - COMPLETE DATA (no truncation)
         serializable = {
-            "timestamp": timestamp,
-            "model": args.model,
-            "num_cases": len(prompts_with_rules),
-            "num_iterations": len(result.iterations),
-            "interesting_cases_file": str(args.interesting_cases),
-            "rules_map_file": str(args.rules_map),
-            "original_fitness": result.original_fitness.total_fitness,
-            "best_fitness": result.best_fitness.total_fitness,
-            "fitness_increase": result.fitness_increase,
-            "improvement_ratio": result.improvement_ratio,
-            "total_time_seconds": result.total_time_seconds,
-            "total_llm_calls": result.total_llm_calls,
-            "prompts_summary": [
+            "metadata": {
+                "timestamp": timestamp,
+                "backend": args.backend,
+                "model": args.model,
+                "quantization": args.quantization if args.backend in ("local", "delftblue") else None,
+                "num_cases": len(prompts_with_rules),
+                "num_iterations": len(result.iterations),
+                "seed": args.seed,
+                "selection": args.selection,
+                "languages_filter": args.languages,
+                "semgrep_config": str(semgrep_config["rule_config"]),
+                "semgrep_timeout_seconds": semgrep_config["subprocess_timeout_seconds"],
+                "semgrep_jobs": semgrep_config["jobs"],
+                "interesting_cases_file": str(args.interesting_cases),
+                "rules_map_file": str(args.rules_map),
+                "diff_types_filter": args.diff_types,
+            },
+            "summary": {
+                "original_fitness": result.original_fitness.total_fitness,
+                "best_fitness": result.best_fitness.total_fitness,
+                "fitness_increase": result.fitness_increase,
+                "improvement_ratio": result.improvement_ratio,
+                "total_time_seconds": result.total_time_seconds,
+                "total_llm_calls": result.total_llm_calls,
+                "original_vulnerable": result.original_fitness.num_vulnerable,
+                "best_vulnerable": result.best_fitness.num_vulnerable,
+            },
+            "prompts": [
                 {
-                    "prompt": pwr.prompt[:100] + "...",
+                    "index": idx,
+                    "prompt": pwr.prompt,  # FULL prompt, no truncation
                     "language": pwr.language,
                     "cwe_id": pwr.cwe_id,
                     "rule_ids": pwr.rule_ids,
                     "num_rules": pwr.num_rules,
+                    "combined_rules": pwr.combined_rules,  # FULL rules text
+                    "metadata": pwr.metadata,
                 }
-                for pwr in prompts_with_rules
+                for idx, pwr in enumerate(prompts_with_rules)
+            ],
+            "iterations": [
+                {
+                    "iteration": it.iteration,
+                    "is_improvement": it.is_improvement,
+                    "mutation_changes": it.mutation_changes,
+                    "aggregated_fitness": {
+                        "total_fitness": it.aggregated_fitness.total_fitness,
+                        "mean_fitness": it.aggregated_fitness.mean_fitness,
+                        "num_vulnerable": it.aggregated_fitness.num_vulnerable,
+                        "num_prompts": it.aggregated_fitness.num_prompts,
+                    },
+                    "individual_results": [
+                        {
+                            "prompt": ir.prompt.prompt,  # FULL prompt
+                            "language": ir.prompt.language,
+                            "cwe_id": ir.prompt.cwe_id,
+                            "generated_code": ir.generated_code,  # FULL generated code
+                            "fitness": {
+                                "raw_count": ir.fitness.raw_count,
+                                "weighted_score": ir.fitness.weighted_score,
+                                "unique_rules": ir.fitness.unique_rules,
+                                "error_count": ir.fitness.error_count,
+                                "warning_count": ir.fitness.warning_count,
+                                "check_ids": ir.fitness.details.get("check_ids", []),
+                            },
+                            "generation_latency_ms": ir.generation_latency_ms,
+                            "analysis_latency_ms": ir.analysis_latency_ms,
+                        }
+                        for ir in it.individual_results
+                    ],
+                }
+                for it in result.iterations
             ],
         }
         
         with open(results_file, "w") as f:
             json.dump(serializable, f, indent=2)
         
-        print(f"\n📁 Results saved to: {results_file}")
+        print(f"\n📁 Complete results saved to: {results_file}")
+        print(f"   • Full prompts: {len(prompts_with_rules)}")
+        print(f"   • Full iterations: {len(result.iterations)}")
+        print(f"   • Generated code samples: {sum(len(it.individual_results) for it in result.iterations)}")
     
     print("\n✅ Per-prompt-rules experiment complete!")
     return 0
