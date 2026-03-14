@@ -1,5 +1,20 @@
 .env
 .venv
-__pycache__/ *.pyc
+__pycache__/
+*.pyc
 .ipynb_checkpoints/
 /.github/instructions
+
+# Dolt database files
+.dolt/
+*.db
+
+# Local experiment outputs
+experiments/results/
+logs/
+
+# Local Beads runtime artifacts (shared repo, machine-specific)
+.beads/backup/
+.beads/dolt-server.*
+.beads/*.pid
+.beads/*.pid.lock
