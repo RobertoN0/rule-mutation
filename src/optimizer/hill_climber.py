@@ -21,7 +21,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
-from ..evaluation import run_semgrep, calculate_fitness, FitnessResult
+from ..evaluation import run_semgrep, run_semgrep_batch_dir, calculate_fitness, FitnessResult
 from ..evaluation.fitness import aggregate_fitness, AggregatedFitness, FitnessStrategy
 from ..llm_backends import LLMBackend
 from ..mutation import Mutator
@@ -299,79 +299,89 @@ class HillClimber:
         phase: str = "baseline",
     ) -> tuple[AggregatedFitness, list[EvaluationResult]]:
         """Evaluate prompts where each has its own rules.
-        
+
+        All LLM code-generation calls are completed first, then a single
+        Semgrep subprocess is run on the full batch — eliminating per-sample
+        process startup overhead.
+
         Args:
             prompts_with_rules: List of PromptWithRules with pre-combined rules.
             mutator_fn: Optional function to mutate each rule before use.
             iteration: Current iteration number (for mutation tracking).
             phase: Phase name ('baseline' or 'mutation').
-            
+
         Returns:
             Tuple of (aggregated_fitness, individual_results).
         """
         # Import here to avoid circular dependency
         from ..evaluation.rule_mapping import PromptWithRules
-        
-        results: list[EvaluationResult] = []
-        fitness_results: list[FitnessResult] = []
-        
+
+        # ------------------------------------------------------------------
+        # Phase 1 — Generate code for every prompt (sequential LLM calls)
+        # ------------------------------------------------------------------
+        # Each item: (code, gen_latency_ms, test_prompt, pwr, mutated_rule_file, rule_ids)
+        generated: list[tuple[str, float, TestPrompt, Any, str | None, list[str]]] = []
+
         for idx, pwr in enumerate(prompts_with_rules):
-            # Get rules for this prompt
             rule_text = pwr.combined_rules if pwr.combined_rules else None
             mutated_rule_file = None
-            
-            # Apply mutation if provided
+
             if rule_text and mutator_fn:
                 rule_text = mutator_fn(rule_text)
-                # Save mutated rule to file
                 tc_id = pwr.metadata.get('test_case_id', f'case_{idx}')
                 mutated_rule_file = self._save_mutated_rule(
                     rule_text, tc_id, idx, iteration, pwr.rule_ids
                 )
-            
-            # Create a TestPrompt for compatibility
+
             test_prompt = TestPrompt(
                 prompt=pwr.prompt,
                 language=pwr.language,
                 cwe_id=pwr.cwe_id,
                 metadata=pwr.metadata,
             )
-            
+
             tc_id = pwr.metadata.get('test_case_id', f'case_{idx}')
-            self._log(f"   [{idx+1}/{len(prompts_with_rules)}] Evaluating TC#{tc_id}...")
-            
-            # Generate code
+            self._log(f"   [{idx+1}/{len(prompts_with_rules)}] Generating code for TC#{tc_id}...")
+
             code, gen_latency = self._generate_code(rule_text, test_prompt)
-            
-            # Run Semgrep analysis
-            analysis_start = time.perf_counter()
-            semgrep_result = run_semgrep(
-                code,
-                language=pwr.language,
-                strip_fences=True,
-            )
-            analysis_latency = (time.perf_counter() - analysis_start) * 1000
-            
-            # Calculate fitness
+            generated.append((code, gen_latency, test_prompt, pwr, mutated_rule_file, pwr.rule_ids))
+
+        # ------------------------------------------------------------------
+        # Phase 2 — Batch Semgrep on all generated code (single subprocess)
+        # ------------------------------------------------------------------
+        self._log(f"   ⚡ Running Semgrep batch on {len(generated)} samples...")
+        code_samples = [(item[0], item[2].language) for item in generated]
+
+        analysis_start = time.perf_counter()
+        semgrep_results = run_semgrep_batch_dir(code_samples)
+        total_analysis_ms = (time.perf_counter() - analysis_start) * 1000
+        per_sample_ms = total_analysis_ms / max(len(generated), 1)
+
+        # ------------------------------------------------------------------
+        # Phase 3 — Compute fitness and persist results
+        # ------------------------------------------------------------------
+        results: list[EvaluationResult] = []
+        fitness_results: list[FitnessResult] = []
+
+        for idx, (semgrep_result, item) in enumerate(zip(semgrep_results, generated)):
+            code, gen_latency, test_prompt, pwr, mutated_rule_file, rule_ids = item
+
             fitness = calculate_fitness(semgrep_result, self.config.fitness_strategy)
             fitness_results.append(fitness)
-            
+
             eval_result = EvaluationResult(
                 prompt=test_prompt,
                 generated_code=code,
                 fitness=fitness,
                 generation_latency_ms=gen_latency,
-                analysis_latency_ms=analysis_latency,
+                analysis_latency_ms=per_sample_ms,
             )
             results.append(eval_result)
-            
-            # Save intermediate result immediately
-            self._save_intermediate_result(
-                eval_result, idx, phase, mutated_rule_file, pwr.rule_ids
-            )
-            
-            self._log(f"       → Fitness: {fitness.weighted_score:.1f}, Vulns: {fitness.raw_count}")
-        
+
+            self._save_intermediate_result(eval_result, idx, phase, mutated_rule_file, rule_ids)
+            tc_id = test_prompt.metadata.get('test_case_id', f'case_{idx}')
+            self._log(f"       → TC#{tc_id}: Fitness={fitness.weighted_score:.1f}, Vulns={fitness.raw_count}")
+
         aggregated = aggregate_fitness(fitness_results, self.config.fitness_strategy)
         return aggregated, results
     

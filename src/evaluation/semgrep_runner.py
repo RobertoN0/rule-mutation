@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -378,11 +379,11 @@ def run_semgrep_batch(
     rule_config: str | None = None,
 ) -> list[SemgrepResult]:
     """Run Semgrep on multiple code samples.
-    
+
     Args:
         code_samples: List of (code, language) tuples.
         rule_config: Semgrep ruleset to use.
-        
+
     Returns:
         List of SemgrepResult objects, one per input sample.
     """
@@ -390,3 +391,124 @@ def run_semgrep_batch(
         run_semgrep(code, language=lang, rule_config=rule_config)
         for code, lang in code_samples
     ]
+
+
+def run_semgrep_batch_dir(
+    code_samples: list[tuple[str, str]],
+    rule_config: str | None = None,
+    strip_fences: bool = True,
+) -> list[SemgrepResult]:
+    """Run Semgrep on multiple code samples using a single subprocess.
+
+    Writes all samples to a temporary directory and invokes Semgrep once,
+    eliminating per-sample process startup overhead.  The subprocess timeout
+    is scaled proportionally: ``len(code_samples) × _semgrep_subprocess_timeout_seconds``.
+
+    Args:
+        code_samples: List of ``(code, language)`` tuples to analyze.
+        rule_config: Semgrep ruleset to use. Falls back to global default.
+        strip_fences: Strip markdown code fences before analysis.
+
+    Returns:
+        List of :class:`SemgrepResult` in the same order as *code_samples*.
+    """
+    if not code_samples:
+        return []
+
+    resolved_rule_config = _resolve_rule_config(rule_config)
+    timeout = _semgrep_subprocess_timeout_seconds * len(code_samples)
+
+    # Pre-process: strip fences, mark empty samples as None
+    codes_cleaned: list[str | None] = []
+    for code, _ in code_samples:
+        if strip_fences:
+            code = strip_markdown_fences(code)
+        codes_cleaned.append(code if code.strip() else None)
+
+    tmpdir = tempfile.mkdtemp()
+    try:
+        # Write non-empty samples to named temp files
+        idx_to_path: dict[int, str] = {}
+        for idx, code in enumerate(codes_cleaned):
+            if code is None:
+                continue
+            _, lang = code_samples[idx]
+            suffix = LANG_EXTENSIONS.get(lang, ".py")
+            filepath = os.path.join(tmpdir, f"sample_{idx:04d}{suffix}")
+            with open(filepath, "w", encoding="utf-8") as fh:
+                fh.write(code)
+            idx_to_path[idx] = filepath
+
+        if not idx_to_path:
+            return [SemgrepResult(error="Empty code content") for _ in code_samples]
+
+        if (
+            resolved_rule_config.startswith(("/", ".", "~"))
+            and not Path(resolved_rule_config).exists()
+        ):
+            err = SemgrepResult(error=f"Local Semgrep config not found: {resolved_rule_config}")
+            return [err] * len(code_samples)
+
+        cmd = [
+            "semgrep", "scan",
+            "--config", resolved_rule_config,
+            "--json",
+            "--disable-version-check",
+            "--metrics", "off",
+            "--quiet",
+            "--jobs", str(_semgrep_jobs),
+            tmpdir,
+        ]
+
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+
+        if not proc.stdout.strip():
+            err = SemgrepResult(error=proc.stderr or "Semgrep returned no output")
+            return [
+                err if i in idx_to_path else SemgrepResult(error="Empty code content")
+                for i in range(len(code_samples))
+            ]
+
+        data = json.loads(proc.stdout)
+
+        # Group findings by sample index extracted from filename "sample_NNNN.ext"
+        findings_by_idx: dict[int, list[SemgrepFinding]] = {
+            i: [] for i in range(len(code_samples))
+        }
+        for r in data.get("results", []):
+            basename = os.path.basename(r["path"])
+            try:
+                idx = int(basename.split("_")[1].split(".")[0])
+            except (IndexError, ValueError):
+                continue
+            sev = r["extra"]["severity"].upper()
+            if sev not in DEFAULT_SEVERITY_FILTER:
+                continue
+            findings_by_idx[idx].append(SemgrepFinding(
+                check_id=r["check_id"],
+                message=r["extra"]["message"],
+                severity=sev,
+                line=r["start"]["line"],
+            ))
+
+        return [
+            SemgrepResult(findings=findings_by_idx.get(i, []))
+            if i in idx_to_path
+            else SemgrepResult(error="Empty code content")
+            for i in range(len(code_samples))
+        ]
+
+    except subprocess.TimeoutExpired:
+        err = SemgrepResult(error=f"Semgrep batch timed out ({timeout}s)")
+        return [err] * len(code_samples)
+    except json.JSONDecodeError as e:
+        err = SemgrepResult(error=f"Failed to parse Semgrep output: {e}")
+        return [err] * len(code_samples)
+    except FileNotFoundError:
+        err = SemgrepResult(error="Semgrep not installed or not in PATH")
+        return [err] * len(code_samples)
+    except Exception as e:
+        err = SemgrepResult(error=f"Unexpected error: {e}")
+        return [err] * len(code_samples)
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
