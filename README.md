@@ -52,7 +52,7 @@ export GROQ_API_KEY="your_key_here"
 ### Running an Experiment
 
 ```bash
-python scripts/run_with_rules_map.py \
+python scripts/experiments/run_with_rules_map.py \
     --interesting-cases data/interesting_cases.json \
     --rules-map data/rule_mapping.json \
     --n-cases 10 \

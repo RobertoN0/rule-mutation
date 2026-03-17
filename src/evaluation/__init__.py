@@ -24,7 +24,7 @@ Test Prompt Selection:
         ))
 """
 
-from .semgrep_runner import run_semgrep, strip_markdown_fences, LANG_EXTENSIONS
+from .semgrep_runner import run_semgrep, run_semgrep_batch_dir, strip_markdown_fences, LANG_EXTENSIONS
 from .fitness import calculate_fitness, FitnessResult
 from .dataset import (
     CyberSecEvalDataset,
@@ -73,6 +73,7 @@ from .rule_mapping import (
 __all__ = [
     # Semgrep evaluation
     "run_semgrep",
+    "run_semgrep_batch_dir",
     "strip_markdown_fences",
     "LANG_EXTENSIONS",
     "calculate_fitness",

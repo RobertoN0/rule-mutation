@@ -9,14 +9,14 @@ Supports two modes:
 
 Usage:
     # From interesting_cases file:
-    python scripts/run_batched_experiment.py \
+    python scripts/experiments/run_batched_experiment.py \
         --cases pipeline_breakdown/generation_results/interesting_cases_96_sonnet_4_6.json \
         --batch-size 4 \
         --iterations 5 \
         --dry-run
 
     # From CyberSecEval dataset (no pre-screened cases):
-    python scripts/run_batched_experiment.py \
+    python scripts/experiments/run_batched_experiment.py \
         --from-dataset \
         --language python \
         --n-prompts 20 \
@@ -24,7 +24,7 @@ Usage:
         --iterations 10
 
     # For real execution:
-    python scripts/run_batched_experiment.py \
+    python scripts/experiments/run_batched_experiment.py \
         --cases interesting_cases.json \
         --batch-size 8 \
         --iterations 10
@@ -40,7 +40,16 @@ from datetime import datetime
 from pathlib import Path
 
 # Add src to path
-PROJECT_ROOT = Path(__file__).parent.parent
+def _resolve_project_root() -> Path:
+    """Resolve repository root by searching upward for the src/ and scripts/ dirs."""
+    this_file = Path(__file__).resolve()
+    for parent in [this_file.parent, *this_file.parents]:
+        if (parent / "src").is_dir() and (parent / "scripts").is_dir():
+            return parent
+    raise RuntimeError("Could not resolve project root from script location")
+
+
+PROJECT_ROOT = _resolve_project_root()
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.evaluation import (

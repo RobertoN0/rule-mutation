@@ -7,10 +7,11 @@ This directory contains the core SBST framework modules for mutation-based secur
 ```
 src/
 ├── __init__.py
-├── llm_backends/           # LLM provider abstractions (Groq, OpenRouter)
+├── llm_backends/           # LLM provider abstractions (Groq, OpenRouter, DelftBlue local)
 │   ├── base.py             # LLMBackend ABC, LLMConfig, LLMResponse
 │   ├── groq_backend.py     # Groq implementation
-│   └── openrouter_backend.py  # OpenRouter fallback
+│   ├── openrouter_backend.py  # OpenRouter fallback
+│   └── delftblue_local_backend.py  # Local HF inference (FP16 / 4-bit)
 ├── mutation/               # Rule mutation strategies
 │   ├── base.py             # Mutator ABC, MutationResult
 │   └── rule_based.py       # FluffMutator, VerbWeakening, etc.
@@ -33,6 +34,14 @@ backend = GroqBackend(LLMConfig(
     model="llama-3.3-70b-versatile",
     api_key="your_key_here",
 ))
+
+# DelftBlue local model (A100) - FP16 default
+from src.llm_backends import create_delftblue_local_backend
+
+local_backend = create_delftblue_local_backend(
+    model="Qwen/Qwen2.5-Coder-32B-Instruct",
+    quantization="fp16",  # or "4bit"
+)
 ```
 
 ### Create and Use a Mutator

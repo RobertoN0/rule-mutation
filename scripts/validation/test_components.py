@@ -11,7 +11,16 @@ import sys
 from pathlib import Path
 
 # Add src to path
-PROJECT_ROOT = Path(__file__).parent.parent
+def _resolve_project_root() -> Path:
+    """Resolve repository root by searching upward for the src/ and scripts/ dirs."""
+    this_file = Path(__file__).resolve()
+    for parent in [this_file.parent, *this_file.parents]:
+        if (parent / "src").is_dir() and (parent / "scripts").is_dir():
+            return parent
+    raise RuntimeError("Could not resolve project root from script location")
+
+
+PROJECT_ROOT = _resolve_project_root()
 sys.path.insert(0, str(PROJECT_ROOT))
 
 
