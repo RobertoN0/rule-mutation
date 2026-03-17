@@ -25,7 +25,7 @@ while IFS= read -r rule_file; do
     dest_path="$TARGET_DIR/$rel_path"
     mkdir -p "$(dirname "$dest_path")"
     cp "$rule_file" "$dest_path"
-done < <(find "$REPO_DIR" -path '*/security/audit/*' \( -name '*.yml' -o -name '*.yaml' \) | sort)
+done < <(find "$REPO_DIR" -path '*/security/*' \( -name '*.yml' -o -name '*.yaml' \) | sort)
 
 find "$TARGET_DIR" \( -name '*.yml' -o -name '*.yaml' \) | sort > "$TARGET_DIR/manifest.txt"
 

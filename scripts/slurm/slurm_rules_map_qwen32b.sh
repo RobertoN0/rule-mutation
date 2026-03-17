@@ -6,8 +6,8 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --gpus-per-task=1
 #SBATCH --mem-per-cpu=8000M
-#SBATCH --output=logs/sbst_rules_map_%j.out
-#SBATCH --error=logs/sbst_rules_map_%j.err
+#SBATCH --output=/home/rnegro/thesis/rule-mutation/logs/sbst_rules_map_%j.out
+#SBATCH --error=/home/rnegro/thesis/rule-mutation/logs/sbst_rules_map_%j.err
 
 #############################################################################
 # SBST Experiment: Per-Prompt Rules Hill Climbing with Qwen 32B
@@ -106,8 +106,11 @@ echo "=== Starting Experiment ==="
 echo "Output directory: $OUTPUT_DIR"
 echo ""
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# SLURM copies the script to a spool directory, so BASH_SOURCE[0] is unreliable.
+# Absolute path to the repo root. SLURM copies this script to a spool directory,
+# making BASH_SOURCE[0] and SLURM_SUBMIT_DIR unreliable for path resolution.
+# Override by setting REPO_ROOT in the environment before sbatch if the repo moves.
+REPO_ROOT="${REPO_ROOT:-/home/rnegro/thesis/rule-mutation}"
 cd "$REPO_ROOT"
 
 # Ensure Python output is never buffered in SLURM log files
