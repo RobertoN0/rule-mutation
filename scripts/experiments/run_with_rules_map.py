@@ -68,7 +68,6 @@ from src.evaluation.semgrep_runner import (
     configure_semgrep,
     configure_semgrep_debug,
     get_semgrep_config,
-    warmup_semgrep,
 )
 
 
@@ -479,17 +478,6 @@ def main():
     print(f"   Semgrep timeout: {semgrep_config['subprocess_timeout_seconds']}s")
     print(f"   Semgrep jobs: {semgrep_config['jobs']}")
     print(f"\U0001f50d Semgrep inputs/outputs → {semgrep_debug_dir}/semgrep_debug.jsonl", flush=True)
-
-    print("🔥 Warming up Semgrep...", flush=True)
-    warmup_elapsed_s, warmup_result = warmup_semgrep(args.semgrep_config)
-    if warmup_result.error:
-        print(
-            f"   ⚠️  Semgrep warm-up finished with error after {warmup_elapsed_s:.1f}s: "
-            f"{warmup_result.error}",
-            flush=True,
-        )
-    else:
-        print(f"   ✅ Semgrep warm-up complete in {warmup_elapsed_s:.1f}s", flush=True)
 
     # Create hill climber
     climber = HillClimber(backend, mutator, hc_config)

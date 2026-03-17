@@ -360,39 +360,6 @@ def run_semgrep(
     return sem_result
 
 
-def warmup_semgrep(rule_config: str | None = None) -> tuple[float, SemgrepResult]:
-    """Warm up Semgrep once so the first real scan does not pay the cold-start cost."""
-    start_time = datetime.now(timezone.utc)
-    result = run_semgrep(
-        "def _semgrep_warmup():\n    return 1\n",
-        language="python",
-        rule_config=rule_config,
-        strip_fences=False,
-        write_debug=False,
-    )
-    elapsed_seconds = (datetime.now(timezone.utc) - start_time).total_seconds()
-    return elapsed_seconds, result
-
-
-def run_semgrep_batch(
-    code_samples: list[tuple[str, str]],
-    rule_config: str | None = None,
-) -> list[SemgrepResult]:
-    """Run Semgrep on multiple code samples.
-
-    Args:
-        code_samples: List of (code, language) tuples.
-        rule_config: Semgrep ruleset to use.
-
-    Returns:
-        List of SemgrepResult objects, one per input sample.
-    """
-    return [
-        run_semgrep(code, language=lang, rule_config=rule_config)
-        for code, lang in code_samples
-    ]
-
-
 def run_semgrep_batch_dir(
     code_samples: list[tuple[str, str]],
     rule_config: str | None = None,
@@ -491,12 +458,27 @@ def run_semgrep_batch_dir(
                 line=r["start"]["line"],
             ))
 
-        return [
+        results = [
             SemgrepResult(findings=findings_by_idx.get(i, []))
             if i in idx_to_path
             else SemgrepResult(error="Empty code content")
             for i in range(len(code_samples))
         ]
+
+        for i, sem_result in enumerate(results):
+            code_raw, lang = code_samples[i]
+            _write_semgrep_debug(
+                code_raw,
+                codes_cleaned[i] or "",
+                lang,
+                resolved_rule_config,
+                codes_cleaned[i] != code_raw,
+                proc,
+                sem_result,
+                cmd,
+            )
+
+        return results
 
     except subprocess.TimeoutExpired:
         err = SemgrepResult(error=f"Semgrep batch timed out ({timeout}s)")
