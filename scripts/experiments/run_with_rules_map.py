@@ -158,15 +158,17 @@ def load_prompts_with_rules(
             rule_ids = _get_fallback_rules(case.cwe_id)
             rules_missing += 1
         
-        # Combine rules
-        combined = rule_loader.combine_rules(rule_ids)
-        
+        # Load individual rule texts (needed for per-rule targeted mutation)
+        individual = rule_loader.load_multiple(rule_ids)
+        combined = "\n\n---\n\n".join(individual[rid] for rid in rule_ids if rid in individual)
+
         pwr = PromptWithRules(
             prompt=case.prompt,
             language=case.language,
             cwe_id=case.cwe_id,
             rule_ids=rule_ids,
             combined_rules=combined,
+            individual_rules=individual,
             metadata={
                 "test_case_id": case.test_case_id,
                 "diff_type": case.diff_type,
@@ -290,6 +292,12 @@ def main():
         type=int,
         default=5,
         help="Number of hill climbing iterations (default: 5)"
+    )
+    parser.add_argument(
+        "--early-stop",
+        type=int,
+        default=0,
+        help="Stop after N iterations without improvement. 0 = disabled (default: 0)"
     )
     parser.add_argument(
         "--model", "-m",
@@ -446,17 +454,23 @@ def main():
     hc_config = HillClimbConfig(
         max_iterations=args.iterations,
         fitness_strategy=FitnessStrategy.SEVERITY_WEIGHTED,
-        early_stop_no_improvement=3,
+        early_stop_no_improvement=args.early_stop,
         save_intermediate=True,
         output_dir=args.output_dir,
         verbose=True,
     )
-    
+
+    early_stop_label = (
+        f"{hc_config.early_stop_no_improvement} iterations without improvement"
+        if hc_config.early_stop_no_improvement > 0
+        else "disabled"
+    )
+
     print(f"\n⚙️  Hill Climbing Configuration:")
     print(f"   Test cases: {len(prompts_with_rules)}")
     print(f"   Max iterations: {hc_config.max_iterations}")
     print(f"   Fitness strategy: {hc_config.fitness_strategy.name}")
-    print(f"   Early stop: {hc_config.early_stop_no_improvement} iterations without improvement")
+    print(f"   Early stop: {early_stop_label}")
     print(f"   Output dir: {args.output_dir}")
     
     # Estimate LLM calls

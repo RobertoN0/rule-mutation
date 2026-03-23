@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name="sbst_rules_map"
 #SBATCH --partition=gpu-a100
-#SBATCH --time=02:00:00
+#SBATCH --time=10:00:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --gpus-per-task=1
@@ -31,8 +31,9 @@
 set -e  # Exit on error
 
 # Configuration (override via environment variables before sbatch)
-N_CASES=${N_CASES:-3}
-N_ITERATIONS=${N_ITERATIONS:-3}
+N_CASES=${N_CASES:-16}
+N_ITERATIONS=${N_ITERATIONS:-10}
+EARLY_STOP=${EARLY_STOP:-0}        # 0 = disabled; run all iterations
 QUANTIZATION=${QUANTIZATION:-fp16}
 SEED=${SEED:-42}
 SELECTION=${SELECTION:-random}
@@ -60,6 +61,7 @@ echo "  Model: $MODEL_ID"
 echo "  Quantization: $QUANTIZATION"
 echo "  Test cases: $N_CASES"
 echo "  Iterations: $N_ITERATIONS"
+echo "  Early stop: ${EARLY_STOP} (0=disabled)"
 echo "  Seed: $SEED"
 echo "  Selection: $SELECTION"
 echo "  Languages: ${LANGUAGES:-all}"
@@ -141,6 +143,7 @@ python scripts/experiments/run_with_rules_map.py \
     --rules-map "$RULES_MAP" \
     --n-cases "$N_CASES" \
     --iterations "$N_ITERATIONS" \
+    --early-stop "$EARLY_STOP" \
     --seed "$SEED" \
     --selection "$SELECTION" \
     --semgrep-config "$SEMGREP_RULESET" \

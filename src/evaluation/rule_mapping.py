@@ -261,7 +261,10 @@ class PromptWithRules:
     
     combined_rules: str = ""
     """Pre-combined rule text (for efficiency)."""
-    
+
+    individual_rules: dict[str, str] = field(default_factory=dict)
+    """Per-rule content keyed by rule_id. Populated when a RuleLoader is provided."""
+
     metadata: dict[str, Any] = field(default_factory=dict)
     """Additional metadata."""
     
@@ -298,17 +301,20 @@ class PromptWithRules:
         if not rule_ids and default_rule_ids:
             rule_ids = list(default_rule_ids)
         
-        # Combine rules if loader provided
+        # Load individual rule texts and combine if loader provided
+        individual: dict[str, str] = {}
         combined = ""
         if rule_ids and rule_loader:
-            combined = rule_loader.combine_rules(rule_ids)
-        
+            individual = rule_loader.load_multiple(rule_ids)
+            combined = "\n\n---\n\n".join(individual[rid] for rid in rule_ids if rid in individual)
+
         return cls(
             prompt=prompt.prompt,
             language=prompt.language,
             cwe_id=prompt.cwe_id,
             rule_ids=rule_ids,
             combined_rules=combined,
+            individual_rules=individual,
             metadata=prompt.metadata,
         )
 
