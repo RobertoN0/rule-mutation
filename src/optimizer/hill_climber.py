@@ -114,32 +114,64 @@ class IterationResult:
 
 
 @dataclass
+class PerRuleResult:
+    """Fitness outcome for one iteration that targeted a specific rule."""
+
+    rule_id: str
+    """The rule that was mutated in this iteration."""
+
+    iteration: int
+    """Iteration index (0-based)."""
+
+    fitness_delta: float
+    """Change in aggregated fitness vs the original baseline (positive = more vulns)."""
+
+    aggregated_fitness: AggregatedFitness
+    """Full fitness for this iteration."""
+
+    mutation_changes: list[str]
+    """Description of mutations applied to this rule."""
+
+    is_improvement: bool
+    """Whether this iteration improved the overall best fitness."""
+
+    num_prompts_affected: int
+    """Number of prompts that include this rule (the rest are unaffected)."""
+
+
+@dataclass
 class HillClimbResult:
     """Final result of hill climbing optimization."""
-    
+
     original_rule: str
     """The original (unmutated) rule text."""
-    
+
     best_rule: str
     """The worst-case mutation found (highest fitness)."""
-    
+
     original_fitness: AggregatedFitness
     """Fitness of the original rule."""
-    
+
     best_fitness: AggregatedFitness
     """Fitness of the best (worst-case) mutation."""
-    
+
     iterations: list[IterationResult]
     """All iteration results."""
-    
+
     total_time_seconds: float
     """Total optimization time."""
-    
+
     total_llm_calls: int
     """Total number of LLM API calls."""
-    
+
     config: HillClimbConfig
     """Configuration used."""
+
+    per_rule_results: list[PerRuleResult] = field(default_factory=list)
+    """One entry per iteration, capturing which rule was targeted and the outcome."""
+
+    per_rule_best_delta: dict[str, float] = field(default_factory=dict)
+    """Maximum fitness delta observed per rule_id across all iterations."""
     
     @property
     def improvement_ratio(self) -> float:
@@ -291,9 +323,52 @@ class HillClimber:
         aggregated = aggregate_fitness(fitness_results, self.config.fitness_strategy)
         return aggregated, results
     
+    def _apply_targeted_mutation(
+        self,
+        pwr: "PromptWithRules",  # type: ignore
+        target_rule_id: str,
+        pre_mutated_text: str,
+    ) -> str:
+        """Reassemble combined_rules with only target_rule_id replaced by pre_mutated_text.
+
+        The mutation is pre-computed once per iteration so all prompts within
+        the same iteration receive the identical mutation of the target rule.
+        Rules that are not the target are kept at their original text.
+        The separator matches the one used in RuleLoader.combine_rules.
+
+        Args:
+            pwr: Prompt with its per-rule texts in individual_rules.
+            target_rule_id: The single rule to replace.
+            pre_mutated_text: Already-mutated text for target_rule_id.
+
+        Returns:
+            Combined rule text with the target rule replaced.
+            Returns pwr.combined_rules unchanged if individual_rules is not
+            populated or target_rule_id is not in this prompt's rules.
+        """
+        SEPARATOR = "\n\n---\n\n"
+
+        # If individual_rules not populated (legacy), return unchanged
+        if not pwr.individual_rules:
+            return pwr.combined_rules
+
+        # target rule not applicable to this prompt — leave unchanged
+        if target_rule_id not in pwr.individual_rules:
+            return pwr.combined_rules
+
+        parts: list[str] = []
+        for rule_id in pwr.rule_ids:
+            if rule_id == target_rule_id:
+                parts.append(pre_mutated_text)
+            else:
+                parts.append(pwr.individual_rules.get(rule_id, ""))
+
+        return SEPARATOR.join(parts)
+
     def _evaluate_with_per_prompt_rules(
         self,
         prompts_with_rules: list["PromptWithRules"], # type: ignore
+        target_rule_id: str | None = None,
         mutator_fn: Callable[[str], str] | None = None,
         iteration: int | None = None,
         phase: str = "baseline",
@@ -311,10 +386,33 @@ class HillClimber:
             phase: Phase name ('baseline' or 'mutation').
 
         Returns:
-            Tuple of (aggregated_fitness, individual_results).
+            Tuple of (aggregated_fitness, individual_results, sample_mutation_changes).
+            sample_mutation_changes: changes from the first prompt that had the target rule applied.
         """
         # Import here to avoid circular dependency
         from ..evaluation.rule_mapping import PromptWithRules
+
+        # ------------------------------------------------------------------
+        # Pre-compute a single mutation for the entire iteration.
+        # All prompts that have target_rule_id will receive the identical
+        # mutated text, making per-rule attribution unambiguous.
+        # ------------------------------------------------------------------
+        pre_mutated_text: str | None = None
+        pre_mutation_changes: list[str] = []
+
+        if target_rule_id is not None and mutator_fn is not None:
+            original_text = next(
+                (
+                    pwr.individual_rules[target_rule_id]
+                    for pwr in prompts_with_rules
+                    if target_rule_id in pwr.individual_rules
+                ),
+                None,
+            )
+            if original_text:
+                mutation_result = self.mutator.mutate(original_text)
+                pre_mutated_text = mutation_result.mutated
+                pre_mutation_changes = mutation_result.changes
 
         # ------------------------------------------------------------------
         # Phase 1 — Generate code for every prompt (sequential LLM calls)
@@ -327,11 +425,20 @@ class HillClimber:
             mutated_rule_file = None
 
             if rule_text and mutator_fn:
-                rule_text = mutator_fn(rule_text)
-                tc_id = pwr.metadata.get('test_case_id', f'case_{idx}')
-                mutated_rule_file = self._save_mutated_rule(
-                    rule_text, tc_id, idx, iteration, pwr.rule_ids
+                if target_rule_id is not None and pre_mutated_text is not None:
+                    rule_text = self._apply_targeted_mutation(pwr, target_rule_id, pre_mutated_text)
+                else:
+                    rule_text = mutator_fn(rule_text)
+                # Only save when the target rule is present in this prompt
+                rule_was_mutated = (
+                    target_rule_id is None
+                    or (target_rule_id in pwr.rule_ids and bool(pwr.individual_rules))
                 )
+                if rule_was_mutated:
+                    tc_id = pwr.metadata.get('test_case_id', f'case_{idx}')
+                    mutated_rule_file = self._save_mutated_rule(
+                        rule_text, tc_id, idx, iteration, pwr.rule_ids, target_rule_id
+                    )
 
             test_prompt = TestPrompt(
                 prompt=pwr.prompt,
@@ -378,13 +485,19 @@ class HillClimber:
             )
             results.append(eval_result)
 
-            self._save_intermediate_result(eval_result, idx, phase, mutated_rule_file, rule_ids)
+            self._save_intermediate_result(
+                eval_result, idx, phase, mutated_rule_file, rule_ids, target_rule_id
+            )
             tc_id = test_prompt.metadata.get('test_case_id', f'case_{idx}')
             self._log(f"       → TC#{tc_id}: Fitness={fitness.weighted_score:.1f}, Vulns={fitness.raw_count}")
 
         aggregated = aggregate_fitness(fitness_results, self.config.fitness_strategy)
-        return aggregated, results
-    
+
+        # Mutation changes were pre-computed once for the whole iteration
+        sample_changes = pre_mutation_changes
+
+        return aggregated, results, sample_changes
+
     def optimize_per_prompt_rules(
         self,
         prompts_with_rules: list["PromptWithRules"], # type: ignore
@@ -426,106 +539,136 @@ class HillClimber:
                 short_name = rule_id.replace('codeguard-', 'cg-').replace('-0-', '0-').replace('-1-', '1-')
                 self._log(f"       • {short_name}")
         
+        # Collect all unique rule IDs across prompts, sorted for determinism
+        all_rule_ids: list[str] = sorted(
+            {rid for pwr in prompts_with_rules for rid in pwr.rule_ids}
+        )
+        self._log(f"\nUnique rules in experiment ({len(all_rule_ids)} total):")
+        for rid in all_rule_ids:
+            n_prompts = sum(1 for pwr in prompts_with_rules if rid in pwr.rule_ids)
+            short = rid.replace('codeguard-', 'cg-')
+            self._log(f"   • {short} — applies to {n_prompts}/{len(prompts_with_rules)} prompts")
+
         # Evaluate original rules (baseline)
         self._log("\n📊 Evaluating with original rules...")
         try:
-            original_fitness, original_results = self._evaluate_with_per_prompt_rules(
-                prompts_with_rules, mutator_fn=None, iteration=None, phase="baseline"
+            original_fitness, original_results, _ = self._evaluate_with_per_prompt_rules(
+                prompts_with_rules, target_rule_id=None, mutator_fn=None,
+                iteration=None, phase="baseline"
             )
         except Exception as e:
-            # Save partial results before re-raising
             if "rate_limit" in str(e).lower() or "429" in str(e):
                 self._log(f"\n⚠️  Rate limit hit during baseline evaluation")
-                # Can't continue without baseline
                 raise
             raise
-        
+
         self._log(f"   Original fitness: {original_fitness.total_fitness:.1f} "
                   f"({original_fitness.num_vulnerable}/{original_fitness.num_prompts} vulnerable)")
-        
-        # Store "original" as the combined rules
+
+        # Store "original" as the combined rules (truncated — for metadata only)
         original_rule = "\n---\n".join(
             pwr.combined_rules for pwr in prompts_with_rules if pwr.combined_rules
-        )[:5000] + "..."  # Truncate for storage
-        
+        )[:5000] + "..."
+
         # Initialize best
         best_fitness = original_fitness
         best_results = original_results
-        
+
         iterations: list[IterationResult] = []
+        per_rule_results: list[PerRuleResult] = []
+        per_rule_best_delta: dict[str, float] = {rid: 0.0 for rid in all_rule_ids}
         no_improvement_count = 0
-        
-        # Mutation function that applies mutator to rule text
+
+        # Mutation function (mutates individual rule text → mutated text)
         def apply_mutation(rule_text: str) -> str:
-            mutation = self.mutator.mutate(rule_text)
-            return mutation.mutated
-        
-        # Hill climbing loop
+            return self.mutator.mutate(rule_text).mutated
+
+        # ── Hill climbing loop ───────────────────────────────────────────────
         rate_limit_hit = False
         for i in range(self.config.max_iterations):
-            self._log(f"\n🔄 Iteration {i+1}/{self.config.max_iterations}")
-            
-            # Evaluate with mutated rules
+            # Round-robin rule selection
+            target_rule_id = all_rule_ids[i % len(all_rule_ids)]
+            num_affected = sum(1 for pwr in prompts_with_rules if target_rule_id in pwr.rule_ids)
+
+            self._log(f"\n🔄 Iteration {i+1}/{self.config.max_iterations} "
+                      f"— targeting: {target_rule_id.replace('codeguard-', 'cg-')} "
+                      f"({num_affected}/{len(prompts_with_rules)} prompts)")
+
             try:
-                candidate_fitness, candidate_results = self._evaluate_with_per_prompt_rules(
-                    prompts_with_rules, mutator_fn=apply_mutation, iteration=i+1, phase="mutation"
+                candidate_fitness, candidate_results, mutation_changes = (
+                    self._evaluate_with_per_prompt_rules(
+                        prompts_with_rules,
+                        target_rule_id=target_rule_id,
+                        mutator_fn=apply_mutation,
+                        iteration=i + 1,
+                        phase=f"mutation_iter{i+1}_{target_rule_id.replace('codeguard-', 'cg-')}",
+                    )
                 )
             except Exception as e:
-                # Check if it's a rate limit error
                 if "rate_limit" in str(e).lower() or "429" in str(e) or "413" in str(e):
                     self._log(f"\n⚠️  Rate limit hit at iteration {i+1}")
                     self._log(f"   Error: {str(e)}")
                     rate_limit_hit = True
                     break
-                # Re-raise other errors
                 raise
-            
-            # Get mutation changes for logging (apply to first prompt's rules as example)
-            sample_mutation = self.mutator.mutate(
-                prompts_with_rules[0].combined_rules if prompts_with_rules else ""
-            )
-            self._log(f"   Mutations applied: {len(sample_mutation.changes)}")
-            for change in sample_mutation.changes[:3]:
-                self._log(f"     - {change}")
-            
-            # Check if improvement
-            is_improvement = (
-                candidate_fitness.total_fitness > best_fitness.total_fitness
-            )
-            
+
+            if mutation_changes:
+                self._log(f"   Mutations applied to rule ({len(mutation_changes)}):")
+                for change in mutation_changes[:3]:
+                    self._log(f"     - {change}")
+
+            fitness_delta = candidate_fitness.total_fitness - original_fitness.total_fitness
+            is_improvement = candidate_fitness.total_fitness > best_fitness.total_fitness
+
+            # Update per-rule best delta
+            if fitness_delta > per_rule_best_delta[target_rule_id]:
+                per_rule_best_delta[target_rule_id] = fitness_delta
+
+            per_rule_results.append(PerRuleResult(
+                rule_id=target_rule_id,
+                iteration=i,
+                fitness_delta=fitness_delta,
+                aggregated_fitness=candidate_fitness,
+                mutation_changes=mutation_changes,
+                is_improvement=is_improvement,
+                num_prompts_affected=num_affected,
+            ))
+
             iteration_result = IterationResult(
                 iteration=i,
-                rule_text="[per-prompt rules - see individual results]",
+                rule_text=f"[targeted: {target_rule_id}]",
                 aggregated_fitness=candidate_fitness,
                 individual_results=candidate_results,
                 is_improvement=is_improvement,
-                mutation_changes=sample_mutation.changes,
+                mutation_changes=mutation_changes,
             )
             iterations.append(iteration_result)
-            
+
             if callback:
                 callback(iteration_result)
-            
+
             if is_improvement:
                 self._log(f"   ✅ Improvement! {best_fitness.total_fitness:.1f} → "
-                          f"{candidate_fitness.total_fitness:.1f}")
+                          f"{candidate_fitness.total_fitness:.1f} (Δ={fitness_delta:+.1f})")
                 best_fitness = candidate_fitness
                 best_results = candidate_results
                 no_improvement_count = 0
             else:
                 self._log(f"   ❌ No improvement: {candidate_fitness.total_fitness:.1f} "
-                          f"≤ {best_fitness.total_fitness:.1f}")
+                          f"≤ {best_fitness.total_fitness:.1f} (Δ={fitness_delta:+.1f})")
                 no_improvement_count += 1
-            
-            # Early stopping
-            if no_improvement_count >= self.config.early_stop_no_improvement:
+
+            if (
+                self.config.early_stop_no_improvement > 0
+                and no_improvement_count >= self.config.early_stop_no_improvement
+            ):
                 self._log(f"\n⏹️  Early stopping: no improvement for "
                           f"{no_improvement_count} iterations")
                 break
-        
+
         total_time = time.perf_counter() - start_time
-        
-        # Summary
+
+        # ── Summary ─────────────────────────────────────────────────────────
         self._log(f"\n{'═' * 60}")
         if rate_limit_hit:
             self._log(f"⚠️  Optimization stopped due to rate limit")
@@ -534,24 +677,38 @@ class HillClimber:
         self._log(f"Total LLM calls: {self._total_llm_calls}")
         self._log(f"Completed iterations: {len(iterations)}/{self.config.max_iterations}")
         self._log(f"Original fitness: {original_fitness.total_fitness:.1f}")
-        self._log(f"Best fitness: {best_fitness.total_fitness:.1f}")
-        self._log(f"Improvement: {best_fitness.total_fitness - original_fitness.total_fitness:+.1f}")
-        
+        self._log(f"Best fitness:     {best_fitness.total_fitness:.1f}")
+        self._log(f"Improvement:      {best_fitness.total_fitness - original_fitness.total_fitness:+.1f}")
+
+        # Per-rule summary table
+        self._log(f"\n{'─' * 60}")
+        self._log(f"{'Rule':<45} {'Iters':>5} {'Best Δ':>7} {'Prompts':>8}")
+        self._log(f"{'─' * 45} {'─'*5} {'─'*7} {'─'*8}")
+        for rid in all_rule_ids:
+            iters_for_rule = sum(1 for r in per_rule_results if r.rule_id == rid)
+            best_d = per_rule_best_delta.get(rid, 0.0)
+            n_affected = sum(1 for pwr in prompts_with_rules if rid in pwr.rule_ids)
+            short = rid.replace('codeguard-', 'cg-')[:44]
+            self._log(f"{short:<45} {iters_for_rule:>5} {best_d:>+7.1f} "
+                      f"{n_affected:>4}/{len(prompts_with_rules)}")
+        self._log(f"{'─' * 60}")
+
         result = HillClimbResult(
             original_rule=original_rule,
-            best_rule="[per-prompt rules with mutations applied]",
+            best_rule="[per-prompt rules with targeted mutations — see per_rule_results]",
             original_fitness=original_fitness,
             best_fitness=best_fitness,
             iterations=iterations,
             total_time_seconds=total_time,
             total_llm_calls=self._total_llm_calls,
             config=self.config,
+            per_rule_results=per_rule_results,
+            per_rule_best_delta=per_rule_best_delta,
         )
-        
-        # Save results if configured
+
         if self.config.save_intermediate and self.config.output_dir:
             self._save_results(result)
-        
+
         return result
     
     def optimize(
@@ -681,44 +838,41 @@ class HillClimber:
         index: int,
         iteration: int | None,
         original_rule_ids: list[str],
+        target_rule_id: str | None = None,
     ) -> str:
         """Save mutated rule to file and return the filename.
-        
-        Args:
-            mutated_text: The mutated rule content.
-            test_case_id: Test case identifier.
-            index: Prompt index.
-            iteration: Iteration number (None for non-iterative).
-            original_rule_ids: List of original rule IDs that were combined.
-            
+
+        When target_rule_id is set, the filename encodes which rule was targeted
+        so outputs can be grouped and attributed per rule.
+
         Returns:
             Relative path to the saved mutated rule file.
         """
         output_dir = self.config.output_dir
         if not output_dir:
             return "[not_saved]"
-        
-        # Create mutated_rules subdirectory
+
         mutated_dir = output_dir / "mutated_rules"
         mutated_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Create filename: iter{N}_tc{ID}_rules{COUNT}.md
-        iter_part = f"iter{iteration}" if iteration is not None else "baseline"
-        tc_part = f"tc{test_case_id}"
-        rules_part = f"rules{len(original_rule_ids)}"
-        filename = f"{iter_part}_{tc_part}_{rules_part}.md"
-        
+
+        iter_part = f"iter{iteration:03d}" if iteration is not None else "baseline"
+        if target_rule_id:
+            rule_short = target_rule_id.replace("codeguard-", "cg-")
+            filename = f"{iter_part}_{rule_short}_tc{test_case_id}.md"
+        else:
+            filename = f"{iter_part}_tc{test_case_id}_rules{len(original_rule_ids)}.md"
+
         filepath = mutated_dir / filename
         with open(filepath, "w") as f:
-            f.write(f"# Mutated Rules for Test Case {test_case_id}\n\n")
-            f.write(f"**Iteration:** {iteration if iteration is not None else 'N/A'}\n\n")
-            f.write(f"**Original Rules Combined:** {len(original_rule_ids)}\n")
+            f.write(f"# Mutated Rules — Iteration {iteration}, TC {test_case_id}\n\n")
+            f.write(f"**Targeted rule:** {target_rule_id or 'all (legacy)'}\n\n")
+            f.write(f"**All rules for this prompt ({len(original_rule_ids)}):**\n")
             for rule_id in original_rule_ids:
-                f.write(f"- {rule_id}\n")
+                marker = " ← mutated" if rule_id == target_rule_id else ""
+                f.write(f"- {rule_id}{marker}\n")
             f.write(f"\n---\n\n")
             f.write(mutated_text)
-        
-        # Return relative path from output_dir
+
         return f"mutated_rules/{filename}"
     
     def _save_intermediate_result(
@@ -728,9 +882,10 @@ class HillClimber:
         phase: str,
         mutated_rule_file: str | None,
         original_rule_ids: list[str],
+        target_rule_id: str | None = None,
     ) -> None:
         """Save individual prompt result immediately after evaluation.
-        
+
         This ensures we don't lose data if rate limits are hit mid-evaluation.
         """
         output_dir = self.config.output_dir
@@ -754,6 +909,10 @@ class HillClimber:
             "prompt": result.prompt.prompt,
             "rules_used": {
                 "original_rule_ids": original_rule_ids,
+                "target_rule_id": target_rule_id,
+                "rule_was_applicable": (
+                    target_rule_id in original_rule_ids if target_rule_id else None
+                ),
                 "mutated_rule_file": mutated_rule_file,
             },
             "generated_code": result.generated_code,
@@ -801,5 +960,41 @@ class HillClimber:
         summary_path = output_dir / f"hillclimb_summary_{timestamp}.json"
         with open(summary_path, "w") as f:
             json.dump(summary, f, indent=2)
-        
+
+        # Per-rule summary (only written for optimize_per_prompt_rules runs)
+        if result.per_rule_results:
+            # Build aggregated view per rule
+            per_rule_data: dict[str, Any] = {}
+            for pr in result.per_rule_results:
+                entry = per_rule_data.setdefault(pr.rule_id, {
+                    "iterations_targeted": 0,
+                    "best_fitness_delta": 0.0,
+                    "num_prompts_affected": pr.num_prompts_affected,
+                    "results": [],
+                })
+                entry["iterations_targeted"] += 1
+                entry["best_fitness_delta"] = max(
+                    entry["best_fitness_delta"], pr.fitness_delta
+                )
+                entry["results"].append({
+                    "iteration": pr.iteration,
+                    "fitness_delta": pr.fitness_delta,
+                    "total_fitness": pr.aggregated_fitness.total_fitness,
+                    "num_vulnerable": pr.aggregated_fitness.num_vulnerable,
+                    "is_improvement": pr.is_improvement,
+                    "mutation_changes": pr.mutation_changes[:5],
+                })
+
+            per_rule_summary = {
+                "timestamp": timestamp,
+                "original_fitness": result.original_fitness.total_fitness,
+                "best_fitness": result.best_fitness.total_fitness,
+                "all_rules_tested": sorted(per_rule_data.keys()),
+                "per_rule": per_rule_data,
+            }
+            per_rule_path = output_dir / f"hillclimb_per_rule_{timestamp}.json"
+            with open(per_rule_path, "w") as f:
+                json.dump(per_rule_summary, f, indent=2)
+            self._log(f"📊 Per-rule summary saved to {per_rule_path.name}")
+
         self._log(f"📁 Results saved to {output_dir}")
