@@ -1,7 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name="sbst_rules_map"
+#SBATCH --account=education-eemcs-msc-cs
 #SBATCH --partition=gpu-a100
-#SBATCH --time=10:00:00
+#SBATCH --time=01:30:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --gpus-per-task=1
@@ -18,13 +19,24 @@
 # - Local Qwen2.5-Coder-32B-Instruct on A100 80GB GPU
 # 
 # Usage:
-#   # Default (3 cases, 3 iterations, FP16)
+#   # Default (16 cases, 10 iterations, FP16, first selection, 1h30 wall-time)
 #   sbatch scripts/slurm/slurm_rules_map_qwen32b.sh
 #
-#   # Custom configuration
-#   N_CASES=5 N_ITERATIONS=5 sbatch scripts/slurm/slurm_rules_map_qwen32b.sh
+#   # Validation run (4 C-language cases, 5 iterations, specific mutator)
+#   N_CASES=4 N_ITERATIONS=5 MUTATOR=paraphrase LANGUAGES=c ENABLE_VALIDATION=1 \
+#     sbatch --job-name="paraphrase_map" \
+#            --output="/home/rnegro/thesis/rule-mutation/logs/paraphrase_%j.out" \
+#            --error="/home/rnegro/thesis/rule-mutation/logs/paraphrase_%j.err" \
+#            scripts/slurm/slurm_rules_map_qwen32b.sh
 #
-#   # With 4-bit quantization (18GB VRAM)
+#   # Scale-up run (all languages, 2h wall-time override)
+#   N_CASES=16 N_ITERATIONS=10 MUTATOR=fluff ENABLE_VALIDATION=1 \
+#     sbatch --time=2:00:00 --job-name="fluff_map" \
+#            --output="/home/rnegro/thesis/rule-mutation/logs/fluff_%j.out" \
+#            --error="/home/rnegro/thesis/rule-mutation/logs/fluff_%j.err" \
+#            scripts/slurm/slurm_rules_map_qwen32b.sh
+#
+#   # With 4-bit quantization (18GB VRAM, use gpu-a100-small partition)
 #   QUANTIZATION=4bit sbatch scripts/slurm/slurm_rules_map_qwen32b.sh
 #############################################################################
 
@@ -36,11 +48,14 @@ N_ITERATIONS=${N_ITERATIONS:-10}
 EARLY_STOP=${EARLY_STOP:-0}        # 0 = disabled; run all iterations
 QUANTIZATION=${QUANTIZATION:-fp16}
 SEED=${SEED:-42}
-SELECTION=${SELECTION:-random}
+SELECTION=${SELECTION:-first}
 LANGUAGES=${LANGUAGES:-}  # space-separated, e.g. "c python"; empty = all
 SEMGREP_RULESET=${SEMGREP_RULESET:-/scratch/$USER/semgrep-rules/security-audit}
 SEMGREP_TIMEOUT_SECONDS=${SEMGREP_TIMEOUT_SECONDS:-180}
 SEMGREP_JOBS=${SEMGREP_JOBS:-1}
+MUTATOR=${MUTATOR:-fluff}          # mutator name; LLM mutators require --backend local
+ENABLE_VALIDATION=${ENABLE_VALIDATION:-0}   # 1 = run SBERT quality gate after each mutation
+MUTATION_MAX_RETRIES=${MUTATION_MAX_RETRIES:-2}
 
 MODEL_ID="Qwen/Qwen2.5-Coder-32B-Instruct"
 
@@ -68,6 +83,8 @@ echo "  Languages: ${LANGUAGES:-all}"
 echo "  Semgrep rules: $SEMGREP_RULESET"
 echo "  Semgrep timeout: ${SEMGREP_TIMEOUT_SECONDS}s"
 echo "  Semgrep jobs: $SEMGREP_JOBS"
+echo "  Mutator: $MUTATOR"
+echo "  Validation: ${ENABLE_VALIDATION} (1=enabled)"
 echo ""
 echo "Input files:"
 echo "  Interesting cases: $INTERESTING_CASES"
@@ -98,9 +115,11 @@ echo "=== GPU Check ==="
 nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv
 echo ""
 
-# Create output directory with timestamp
+# Create output directory — job ID prefix ensures sort order; date is month+day only
+# (full timestamp is already captured inside run_config.json and results filenames)
+DATE=$(date +%m%d)
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-OUTPUT_DIR="experiments/results/rules_map_${TIMESTAMP}_job${SLURM_JOB_ID}"
+OUTPUT_DIR="experiments/results/job${SLURM_JOB_ID}_${MUTATOR}_${DATE}"
 mkdir -p "$OUTPUT_DIR"
 mkdir -p logs
 
@@ -135,6 +154,12 @@ if [ -n "$LANGUAGES" ]; then
     LANG_ARG="--languages $LANGUAGES"
 fi
 
+# Build optional validation flag
+VALIDATION_FLAG=""
+if [ "$ENABLE_VALIDATION" = "1" ]; then
+    VALIDATION_FLAG="--enable-validation --mutation-max-retries $MUTATION_MAX_RETRIES"
+fi
+
 python scripts/experiments/run_with_rules_map.py \
     --backend local \
     --model "$MODEL_ID" \
@@ -149,6 +174,8 @@ python scripts/experiments/run_with_rules_map.py \
     --semgrep-config "$SEMGREP_RULESET" \
     --semgrep-timeout-seconds "$SEMGREP_TIMEOUT_SECONDS" \
     --semgrep-jobs "$SEMGREP_JOBS" \
+    --mutator "$MUTATOR" \
+    $VALIDATION_FLAG \
     $LANG_ARG \
     --output-dir "$OUTPUT_DIR"
 
