@@ -25,6 +25,7 @@ from ..evaluation import run_semgrep, run_semgrep_batch_dir, calculate_fitness, 
 from ..evaluation.fitness import aggregate_fitness, AggregatedFitness, FitnessStrategy
 from ..llm_backends import LLMBackend
 from ..mutation import Mutator
+from ..mutation.quality import MutationQualityValidator
 
 
 @dataclass
@@ -89,6 +90,12 @@ class HillClimbConfig:
     verbose: bool = True
     """Print progress information."""
 
+    enable_validation: bool = False
+    """Run MutationQualityValidator after each mutation before code generation."""
+
+    mutation_max_retries: int = 2
+    """Maximum validation retries per mutation (only effective for non-deterministic mutators)."""
+
 
 @dataclass
 class IterationResult:
@@ -111,6 +118,9 @@ class IterationResult:
     
     mutation_changes: list[str] = field(default_factory=list)
     """Description of mutations applied."""
+
+    validation_metadata: dict[str, Any] = field(default_factory=dict)
+    """Quality validation metrics from MutationQualityValidator, if enabled."""
 
 
 @dataclass
@@ -227,18 +237,24 @@ class HillClimber:
         llm_backend: LLMBackend,
         mutator: Mutator,
         config: HillClimbConfig | None = None,
+        validator: MutationQualityValidator | None = None,
     ):
         """Initialize hill climber.
-        
+
         Args:
             llm_backend: LLM backend for code generation.
             mutator: Mutation operator to apply.
             config: Optimization configuration.
+            validator: Optional quality validator.  When provided and
+                ``config.enable_validation`` is True, each mutation is
+                validated before use; failing mutations are retried or
+                replaced by an identity result.
         """
         self.llm = llm_backend
         self.mutator = mutator
         self.config = config or HillClimbConfig()
-        
+        self.validator = validator
+
         # Tracking
         self._total_llm_calls = 0
     
@@ -399,6 +415,7 @@ class HillClimber:
         # ------------------------------------------------------------------
         pre_mutated_text: str | None = None
         pre_mutation_changes: list[str] = []
+        pre_validation_metadata: dict[str, Any] = {}
 
         if target_rule_id is not None and mutator_fn is not None:
             original_text = next(
@@ -410,7 +427,19 @@ class HillClimber:
                 None,
             )
             if original_text:
-                mutation_result = self.mutator.mutate(original_text)
+                if self.validator is not None and self.config.enable_validation:
+                    mutation_result = self.validator.validate_with_retry(
+                        self.mutator, original_text,
+                        max_retries=self.config.mutation_max_retries,
+                    )
+                    pre_validation_metadata = mutation_result.metadata.get("quality", {})
+                    self._log(
+                        f"   Validation: passes_all={pre_validation_metadata.get('passes_all')}, "
+                        f"sbert={pre_validation_metadata.get('sbert_similarity')}, "
+                        f"retries_exhausted={pre_validation_metadata.get('retries_exhausted', False)}"
+                    )
+                else:
+                    mutation_result = self.mutator.mutate(original_text)
                 pre_mutated_text = mutation_result.mutated
                 pre_mutation_changes = mutation_result.changes
 
@@ -437,7 +466,9 @@ class HillClimber:
                 if rule_was_mutated:
                     tc_id = pwr.metadata.get('test_case_id', f'case_{idx}')
                     mutated_rule_file = self._save_mutated_rule(
-                        rule_text, tc_id, idx, iteration, pwr.rule_ids, target_rule_id
+                        rule_text, tc_id, idx, iteration, pwr.rule_ids, target_rule_id,
+                        mutation_changes=pre_mutation_changes,
+                        validation_metadata=pre_validation_metadata,
                     )
 
             test_prompt = TestPrompt(
@@ -496,7 +527,7 @@ class HillClimber:
         # Mutation changes were pre-computed once for the whole iteration
         sample_changes = pre_mutation_changes
 
-        return aggregated, results, sample_changes
+        return aggregated, results, sample_changes, pre_validation_metadata
 
     def optimize_per_prompt_rules(
         self,
@@ -552,7 +583,7 @@ class HillClimber:
         # Evaluate original rules (baseline)
         self._log("\n📊 Evaluating with original rules...")
         try:
-            original_fitness, original_results, _ = self._evaluate_with_per_prompt_rules(
+            original_fitness, original_results, _, _ = self._evaluate_with_per_prompt_rules(
                 prompts_with_rules, target_rule_id=None, mutator_fn=None,
                 iteration=None, phase="baseline"
             )
@@ -595,7 +626,7 @@ class HillClimber:
                       f"({num_affected}/{len(prompts_with_rules)} prompts)")
 
             try:
-                candidate_fitness, candidate_results, mutation_changes = (
+                candidate_fitness, candidate_results, mutation_changes, val_metadata = (
                     self._evaluate_with_per_prompt_rules(
                         prompts_with_rules,
                         target_rule_id=target_rule_id,
@@ -641,6 +672,7 @@ class HillClimber:
                 individual_results=candidate_results,
                 is_improvement=is_improvement,
                 mutation_changes=mutation_changes,
+                validation_metadata=val_metadata,
             )
             iterations.append(iteration_result)
 
@@ -755,10 +787,22 @@ class HillClimber:
         for i in range(self.config.max_iterations):
             self._log(f"\n🔄 Iteration {i+1}/{self.config.max_iterations}")
             
-            # Generate mutant
-            mutation = self.mutator.mutate(best_rule)
+            # Generate mutant (with optional validation)
+            if self.validator is not None and self.config.enable_validation:
+                mutation = self.validator.validate_with_retry(
+                    self.mutator, best_rule,
+                    max_retries=self.config.mutation_max_retries,
+                )
+                val_quality = mutation.metadata.get("quality", {})
+                self._log(
+                    f"   Validation: passes_all={val_quality.get('passes_all')}, "
+                    f"sbert={val_quality.get('sbert_similarity')}, "
+                    f"retries_exhausted={val_quality.get('retries_exhausted', False)}"
+                )
+            else:
+                mutation = self.mutator.mutate(best_rule)
             candidate = mutation.mutated
-            
+
             self._log(f"   Mutations applied: {len(mutation.changes)}")
             for change in mutation.changes[:3]:  # Show first 3 changes
                 self._log(f"     - {change}")
@@ -780,6 +824,7 @@ class HillClimber:
                 individual_results=candidate_results,
                 is_improvement=is_improvement,
                 mutation_changes=mutation.changes,
+                validation_metadata=mutation.metadata.get("quality", {}),
             )
             iterations.append(iteration_result)
             
@@ -839,41 +884,61 @@ class HillClimber:
         iteration: int | None,
         original_rule_ids: list[str],
         target_rule_id: str | None = None,
+        mutation_changes: list[str] | None = None,
+        validation_metadata: dict | None = None,
     ) -> str:
-        """Save mutated rule to file and return the filename.
+        """Save the mutated rule to an iteration subdirectory and return its path.
 
-        When target_rule_id is set, the filename encodes which rule was targeted
-        so outputs can be grouped and attributed per rule.
+        Structure written (once per iteration/rule combination):
+            mutated_rules/
+              iter001/
+                cg-0-file-handling-and-uploads.md   ← clean rule text only
+                meta.json                            ← changes, validation, context
+              iter002/
+                ...
+
+        The file is written only on the first call for a given (iteration,
+        target_rule_id) pair.  Subsequent calls for the same pair (different
+        test-case prompts that share the same rule) return the existing path
+        without re-writing.
 
         Returns:
-            Relative path to the saved mutated rule file.
+            Relative path to the saved rule file, e.g.
+            ``"mutated_rules/iter001/cg-0-file-handling-and-uploads.md"``.
         """
         output_dir = self.config.output_dir
         if not output_dir:
             return "[not_saved]"
 
-        mutated_dir = output_dir / "mutated_rules"
-        mutated_dir.mkdir(parents=True, exist_ok=True)
+        iter_name = f"iter{iteration:03d}" if iteration is not None else "baseline"
+        rule_short = (
+            target_rule_id.replace("codeguard-", "cg-")
+            if target_rule_id
+            else f"all_{len(original_rule_ids)}_rules"
+        )
 
-        iter_part = f"iter{iteration:03d}" if iteration is not None else "baseline"
-        if target_rule_id:
-            rule_short = target_rule_id.replace("codeguard-", "cg-")
-            filename = f"{iter_part}_{rule_short}_tc{test_case_id}.md"
-        else:
-            filename = f"{iter_part}_tc{test_case_id}_rules{len(original_rule_ids)}.md"
+        iter_dir = output_dir / "mutated_rules" / iter_name
+        iter_dir.mkdir(parents=True, exist_ok=True)
 
-        filepath = mutated_dir / filename
-        with open(filepath, "w") as f:
-            f.write(f"# Mutated Rules — Iteration {iteration}, TC {test_case_id}\n\n")
-            f.write(f"**Targeted rule:** {target_rule_id or 'all (legacy)'}\n\n")
-            f.write(f"**All rules for this prompt ({len(original_rule_ids)}):**\n")
-            for rule_id in original_rule_ids:
-                marker = " ← mutated" if rule_id == target_rule_id else ""
-                f.write(f"- {rule_id}{marker}\n")
-            f.write(f"\n---\n\n")
-            f.write(mutated_text)
+        rule_file = iter_dir / f"{rule_short}.md"
+        rel_path = f"mutated_rules/{iter_name}/{rule_short}.md"
 
-        return f"mutated_rules/{filename}"
+        # Write only once per (iteration, rule) — subsequent TCs share the same mutation
+        if not rule_file.exists():
+            rule_file.write_text(mutated_text, encoding="utf-8")
+
+            meta = {
+                "iteration": iteration,
+                "target_rule_id": target_rule_id,
+                "all_rule_ids": original_rule_ids,
+                "changes": mutation_changes or [],
+                "validation": validation_metadata or {},
+            }
+            (iter_dir / "meta.json").write_text(
+                json.dumps(meta, indent=2), encoding="utf-8"
+            )
+
+        return rel_path
     
     def _save_intermediate_result(
         self,

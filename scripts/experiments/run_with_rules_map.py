@@ -53,7 +53,18 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.llm_backends import GroqBackend, LLMConfig, DelftBlueLocalBackend
 from src.llm_backends.base import LLMError
-from src.mutation import FluffMutator
+from src.mutation import (
+    FluffMutator,
+    VerbWeakeningMutator,
+    SynonymReplacementMutator,
+    AddRandomWordMutator,
+    SectionReorderMutator,
+    NegationInjectionMutator,
+    VoiceChangeMutator,
+    ParaphraseMutator,
+    MutationQualityValidator,
+    create_mutator,
+)
 from src.optimizer import HillClimber, HillClimbConfig
 from src.evaluation import (
     load_interesting_cases,
@@ -334,6 +345,37 @@ def main():
         help="Random seed for reproducibility"
     )
     parser.add_argument(
+        "--mutator",
+        default="fluff",
+        choices=[
+            "fluff", "verb_weakening", "synonym_replacement",
+            "add_random_word", "section_reorder_shuffle", "section_reorder_degrade",
+            "negation_injection", "voice_change", "paraphrase",
+        ],
+        help=(
+            "Mutation operator to use (default: fluff). "
+            "LLM-based mutators (negation_injection, voice_change, paraphrase) "
+            "require --backend local/delftblue and share the code-gen backend."
+        ),
+    )
+    parser.add_argument(
+        "--enable-validation",
+        action="store_true",
+        help=(
+            "Enable in-loop mutation quality validation using MutationQualityValidator "
+            "(SBERT semantic similarity + structural criteria from AUGMENT paper)."
+        ),
+    )
+    parser.add_argument(
+        "--mutation-max-retries",
+        type=int,
+        default=2,
+        help=(
+            "Maximum validation retries per mutation when --enable-validation is set "
+            "(only effective for non-deterministic mutators like paraphrase; default: 2)"
+        ),
+    )
+    parser.add_argument(
         "--semgrep-config",
         default=os.getenv("SEMGREP_RULESET"),
         help=(
@@ -447,9 +489,35 @@ def main():
             sys.exit(1)
     
     # Create mutator
-    print(f"\n🧬 Initializing FluffMutator (seed={args.seed})")
-    mutator = FluffMutator(seed=args.seed)
-    
+    _LLM_MUTATORS = {"negation_injection", "voice_change", "paraphrase"}
+    is_llm_mutator = args.mutator in _LLM_MUTATORS
+
+    if is_llm_mutator and args.backend not in ("local", "delftblue"):
+        print(
+            f"\n❌ Error: LLM mutator '{args.mutator}' requires --backend local or delftblue "
+            f"(got: {args.backend}). LLM-based mutators share the code-gen backend."
+        )
+        sys.exit(1)
+
+    print(f"\n🧬 Initializing mutator: {args.mutator} (seed={args.seed})")
+    backend_for_mutator = backend if is_llm_mutator else None
+    mutator = create_mutator(args.mutator, seed=args.seed, backend=backend_for_mutator)
+
+    if is_llm_mutator:
+        print(f"   LLM mutator: shares backend with code generation (no extra model load)")
+
+    # Create validator if enabled
+    validator = None
+    if args.enable_validation:
+        print(f"\n🔬 Setting up MutationQualityValidator")
+        print(f"   SBERT semantic similarity (all-mpnet-base-v2, threshold=0.80)")
+        print(f"   Structural criteria: inline code retention + security keyword retention")
+        print(f"   Max retries: {args.mutation_max_retries}")
+        validator = MutationQualityValidator(
+            use_sbert=True,
+            use_perplexity=False,  # opt-in; requires Qwen 7B on GPU
+        )
+
     # Configure hill climber
     hc_config = HillClimbConfig(
         max_iterations=args.iterations,
@@ -458,6 +526,8 @@ def main():
         save_intermediate=True,
         output_dir=args.output_dir,
         verbose=True,
+        enable_validation=args.enable_validation,
+        mutation_max_retries=args.mutation_max_retries,
     )
 
     early_stop_label = (
@@ -471,6 +541,8 @@ def main():
     print(f"   Max iterations: {hc_config.max_iterations}")
     print(f"   Fitness strategy: {hc_config.fitness_strategy.name}")
     print(f"   Early stop: {early_stop_label}")
+    print(f"   Mutator: {args.mutator}")
+    print(f"   Validation: {'enabled (SBERT + structural)' if args.enable_validation else 'disabled'}")
     print(f"   Output dir: {args.output_dir}")
     
     # Estimate LLM calls
@@ -494,7 +566,7 @@ def main():
     print(f"\U0001f50d Semgrep inputs/outputs → {semgrep_debug_dir}/semgrep_debug.jsonl", flush=True)
 
     # Create hill climber
-    climber = HillClimber(backend, mutator, hc_config)
+    climber = HillClimber(backend, mutator, hc_config, validator=validator)
     
     # Run optimization with per-prompt rules
     print("\n" + "=" * 70)
@@ -549,6 +621,8 @@ def main():
                 "num_cases": len(prompts_with_rules),
                 "num_iterations": len(result.iterations),
                 "seed": args.seed,
+                "mutator": args.mutator,
+                "enable_validation": args.enable_validation,
                 "selection": args.selection,
                 "languages_filter": args.languages,
                 "semgrep_config": str(semgrep_config["rule_config"]),
@@ -586,6 +660,7 @@ def main():
                     "iteration": it.iteration,
                     "is_improvement": it.is_improvement,
                     "mutation_changes": it.mutation_changes,
+                    "validation_metadata": it.validation_metadata,
                     "aggregated_fitness": {
                         "total_fitness": it.aggregated_fitness.total_fitness,
                         "mean_fitness": it.aggregated_fitness.mean_fitness,
@@ -623,7 +698,97 @@ def main():
         print(f"   • Full prompts: {len(prompts_with_rules)}")
         print(f"   • Full iterations: {len(result.iterations)}")
         print(f"   • Generated code samples: {sum(len(it.individual_results) for it in result.iterations)}")
-    
+
+        # ── Rerun artefacts ──────────────────────────────────────────────────
+        # run_config.json — every CLI arg + derived runtime values
+        import shlex, subprocess as _subprocess, sys as _sys
+        try:
+            _git_sha = _subprocess.check_output(
+                ["git", "rev-parse", "HEAD"],
+                cwd=PROJECT_ROOT,
+                stderr=_subprocess.DEVNULL,
+            ).decode().strip()
+        except Exception:
+            _git_sha = None
+
+        run_config = {
+            "argv": _sys.argv,
+            "args": {
+                "backend":                args.backend,
+                "model":                  args.model,
+                "quantization":           getattr(args, "quantization", None),
+                "interesting_cases":      str(args.interesting_cases),
+                "rules_map":              str(args.rules_map),
+                "n_cases":                args.n_cases,
+                "iterations":             args.iterations,
+                "early_stop":             args.early_stop,
+                "seed":                   args.seed,
+                "selection":              args.selection,
+                "languages":              args.languages,
+                "mutator":                args.mutator,
+                "enable_validation":      args.enable_validation,
+                "mutation_max_retries":   args.mutation_max_retries,
+                "semgrep_config":         str(semgrep_config["rule_config"]),
+                "semgrep_timeout_seconds":semgrep_config["subprocess_timeout_seconds"],
+                "semgrep_jobs":           semgrep_config["jobs"],
+                "output_dir":             str(args.output_dir),
+            },
+            "timestamp": timestamp,
+            "git_sha": _git_sha,
+            "slurm_job_id": os.getenv("SLURM_JOB_ID"),
+            "hostname": os.getenv("HOSTNAME") or __import__("socket").gethostname(),
+        }
+        config_file = args.output_dir / "run_config.json"
+        with open(config_file, "w") as f:
+            json.dump(run_config, f, indent=2)
+
+        # rerun.sh — executable script that reproduces the Python command exactly
+        lang_arg = f"--languages {shlex.quote(' '.join(args.languages))}" if args.languages else ""
+        validation_flag = (
+            f"--enable-validation --mutation-max-retries {args.mutation_max_retries}"
+            if args.enable_validation else ""
+        )
+        quant_arg = (
+            f"--quantization {shlex.quote(args.quantization)}"
+            if getattr(args, "quantization", None) else ""
+        )
+        rerun_lines = [
+            "#!/bin/bash",
+            "# Auto-generated rerun script — reproduces this experiment exactly.",
+            f"# Original job: {run_config['slurm_job_id'] or 'local'}  host: {run_config['hostname']}",
+            f"# Timestamp: {timestamp}",
+            "#",
+            "# Usage (from repo root):",
+            f"#   bash {args.output_dir}/rerun.sh",
+            "#   # or override output dir:",
+            f"#   OUTPUT_DIR=experiments/results/rerun_{timestamp} bash {args.output_dir}/rerun.sh",
+            "",
+            f'OUTPUT_DIR="${{OUTPUT_DIR:-{shlex.quote(str(args.output_dir))}}}"',
+            "",
+            "python scripts/experiments/run_with_rules_map.py \\",
+            f"    --backend {shlex.quote(args.backend)} \\",
+            f"    --model {shlex.quote(args.model)} \\",
+            *([ f"    {quant_arg} \\" ] if quant_arg else []),
+            f"    --interesting-cases {shlex.quote(str(args.interesting_cases))} \\",
+            f"    --rules-map {shlex.quote(str(args.rules_map))} \\",
+            f"    --n-cases {args.n_cases} \\",
+            f"    --iterations {args.iterations} \\",
+            f"    --early-stop {args.early_stop} \\",
+            f"    --seed {args.seed} \\",
+            f"    --selection {shlex.quote(args.selection)} \\",
+            f"    --mutator {shlex.quote(args.mutator)} \\",
+            f"    --semgrep-config {shlex.quote(str(semgrep_config['rule_config']))} \\",
+            f"    --semgrep-timeout-seconds {semgrep_config['subprocess_timeout_seconds']} \\",
+            f"    --semgrep-jobs {semgrep_config['jobs']} \\",
+            *([ f"    {lang_arg} \\" ] if lang_arg else []),
+            *([ f"    {validation_flag} \\" ] if validation_flag else []),
+            '    --output-dir "$OUTPUT_DIR"',
+        ]
+        rerun_file = args.output_dir / "rerun.sh"
+        rerun_file.write_text("\n".join(rerun_lines) + "\n", encoding="utf-8")
+        rerun_file.chmod(0o755)
+        print(f"   • run_config.json + rerun.sh saved for easy reproduction")
+
     print("\n✅ Per-prompt-rules experiment complete!")
     return 0
 
