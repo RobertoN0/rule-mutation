@@ -2,7 +2,7 @@
 
 **Search-Based Software Testing for LLM Security Instruction Robustness**
 
-An MSc thesis research framework (TU Delft) that adversarially mutates LLM security coding guidelines and measures whether Semgrep still detects vulnerabilities in the generated code.
+An MSc thesis research framework that adversarially mutates LLM security coding guidelines and measures how many security vulnerabilities are present in the generated code.
 
 ---
 
