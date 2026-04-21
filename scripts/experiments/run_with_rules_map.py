@@ -64,6 +64,7 @@ from src.mutation import (
     ParaphraseMutator,
     MutationQualityValidator,
     create_mutator,
+    create_mutator_pool,
 )
 from src.optimizer import HillClimber, HillClimbConfig
 from src.evaluation import (
@@ -75,6 +76,7 @@ from src.evaluation import (
     PromptWithRules,
 )
 from src.evaluation.fitness import FitnessStrategy
+from src.evaluation.composite_fitness import CompositeFitnessEvaluator
 from src.evaluation.semgrep_runner import (
     configure_semgrep,
     configure_semgrep_debug,
@@ -207,6 +209,86 @@ def load_prompts_with_rules(
     return prompts_with_rules
 
 
+def load_prompts_from_mapping_only(
+    rules_map_path: Path,
+    rule_loader: RuleLoader,
+    n_cases: int | None = None,
+    languages: list[str] | None = None,
+    selection: str = "first",
+    seed: int = 42,
+) -> list[PromptWithRules]:
+    """Load prompts directly from the retrieval mapping (no interesting_cases file needed).
+
+    Uses all 96 entries in the retrieval map as test cases. Each RuleMapping entry
+    provides: prompt, language, cwe_id, rules_retrieved. No control_code or vuln counts
+    are available, so delta_composite code-divergence will be disabled (returns 0.0).
+
+    Args:
+        rules_map_path: Path to rule retrieval mapping JSON (retrieval_map_*.json)
+        rule_loader: Loader for rule content
+        n_cases: Limit number of cases (None = all)
+        languages: Filter by language (case-insensitive). None = all.
+        selection: "first" or "random"
+        seed: RNG seed for random selection
+
+    Returns:
+        List of PromptWithRules ready for optimization
+    """
+    rule_mapping = load_rule_mapping(rules_map_path)
+    mappings = list(rule_mapping.mappings)
+    print(f"📥 Loaded {len(mappings)} entries from retrieval map (mapping-only mode)")
+    print(f"   Unique rules used: {len(rule_mapping.all_rules)}")
+
+    if languages:
+        languages_lower = [lang.lower() for lang in languages]
+        mappings = [m for m in mappings if m.language.lower() in languages_lower]
+        print(f"   Filtered to {len(mappings)} entries with languages: {languages_lower}")
+
+    if selection == "random":
+        import random
+        rng = random.Random(seed)
+        rng.shuffle(mappings)
+        print(f"   Shuffled entries with seed={seed} (random selection)")
+
+    if n_cases and len(mappings) > n_cases:
+        mappings = mappings[:n_cases]
+        print(f"   Selected {n_cases} entries ({selection} selection, seed={seed})")
+
+    prompts_with_rules: list[PromptWithRules] = []
+    for m in mappings:
+        individual = rule_loader.load_multiple(m.rules_retrieved)
+        combined = "\n\n---\n\n".join(
+            individual[rid] for rid in m.rules_retrieved if rid in individual
+        )
+        pwr = PromptWithRules(
+            prompt=m.prompt,
+            language=m.language,
+            cwe_id=m.cwe_id,
+            rule_ids=m.rules_retrieved,
+            combined_rules=combined,
+            individual_rules=individual,
+            metadata={
+                "test_case_id": str(m.index),
+                "mapping_index": m.index,
+                "source": "mapping_only",
+            },
+        )
+        prompts_with_rules.append(pwr)
+
+    print(f"✅ Created {len(prompts_with_rules)} prompts with rules (mapping-only)")
+
+    rule_counts: dict[str, int] = {}
+    for pwr in prompts_with_rules:
+        for rid in pwr.rule_ids:
+            rule_counts[rid] = rule_counts.get(rid, 0) + 1
+
+    print(f"\n📊 Rule distribution:")
+    for rid, count in sorted(rule_counts.items(), key=lambda x: -x[1])[:8]:
+        print(f"   {rid}: {count}")
+
+    return prompts_with_rules
+
+
 def _get_fallback_rules(cwe_id: str | None) -> list[str]:
     """Get fallback rules for a CWE when not in mapping."""
     # Simple CWE-based fallback
@@ -259,10 +341,19 @@ def main():
         description="Run hill climbing with per-prompt rule mapping"
     )
     parser.add_argument(
+        "--use-mapping-only",
+        action="store_true",
+        help=(
+            "Load prompts directly from the retrieval map (bypasses interesting_cases file). "
+            "Supports up to 96 cases. Code-divergence in delta_composite will be 0.0 "
+            "(no control_code available)."
+        ),
+    )
+    parser.add_argument(
         "--interesting-cases", "-c",
         type=Path,
         default=DEFAULT_INTERESTING_CASES,
-        help="Path to interesting_cases JSON"
+        help="Path to interesting_cases JSON (not required when --use-mapping-only is set)"
     )
     parser.add_argument(
         "--rules-map", "-r",
@@ -345,17 +436,52 @@ def main():
         help="Random seed for reproducibility"
     )
     parser.add_argument(
-        "--mutator",
-        default="fluff",
-        choices=[
-            "fluff", "verb_weakening", "synonym_replacement",
-            "add_random_word", "section_reorder_shuffle", "section_reorder_degrade",
-            "negation_injection", "voice_change", "paraphrase",
-        ],
+        "--mutators",
+        nargs="+",
+        default=["fluff"],
         help=(
-            "Mutation operator to use (default: fluff). "
+            "Space-separated list of mutation operators (default: fluff). "
             "LLM-based mutators (negation_injection, voice_change, paraphrase) "
-            "require --backend local/delftblue and share the code-gen backend."
+            "require --backend local/delftblue. Single value works for backward compat."
+        ),
+    )
+    parser.add_argument(
+        "--mutator-strategy",
+        default="round_robin",
+        choices=["random", "round_robin", "ucb1", "greedy_batch"],
+        help="Mutator/rule selection strategy (default: round_robin).",
+    )
+    parser.add_argument(
+        "--ucb1-exploration",
+        type=float,
+        default=1.41,
+        help="UCB1 exploration constant c (default: 1.41, only used with --mutator-strategy ucb1).",
+    )
+    parser.add_argument(
+        "--max-mutation-depth",
+        type=int,
+        default=4,
+        help="Max compounding mutations per rule before saturation (default: 4).",
+    )
+    parser.add_argument(
+        "--fitness-strategy",
+        default="severity_weighted",
+        choices=["raw_count", "severity_weighted", "unique_rules", "delta_composite"],
+        help=(
+            "Fitness function for the hill climber (default: severity_weighted). "
+            "delta_composite adds rule-divergence and code-divergence signals to "
+            "smooth the landscape when Semgrep finds nothing."
+        ),
+    )
+    parser.add_argument(
+        "--fitness-weights",
+        nargs=3,
+        type=float,
+        default=[1.0, 0.3, 0.2],
+        metavar=("ALPHA", "BETA", "GAMMA"),
+        help=(
+            "Weights for delta_composite fitness: alpha (semgrep_delta), "
+            "beta (rule_divergence), gamma (code_divergence). Default: 1.0 0.3 0.2."
         ),
     )
     parser.add_argument(
@@ -364,6 +490,15 @@ def main():
         help=(
             "Enable in-loop mutation quality validation using MutationQualityValidator "
             "(SBERT semantic similarity + structural criteria from AUGMENT paper)."
+        ),
+    )
+    parser.add_argument(
+        "--enable-perplexity",
+        action="store_true",
+        help=(
+            "Add perplexity-ratio gate to the quality validator (ratio ≤ 2.5). "
+            "Requires --enable-validation. Reuses the already-loaded generation "
+            "model — no second model is loaded. No-op when --backend is not local/delftblue."
         ),
     )
     parser.add_argument(
@@ -382,6 +517,16 @@ def main():
             "Semgrep rule config to use. Can be a registry shorthand like "
             "'p/security-audit' or a local rule file/directory. Defaults to "
             "SEMGREP_RULESET if set."
+        ),
+    )
+    parser.add_argument(
+        "--skip-seen",
+        action="store_true",
+        help=(
+            "Skip (rule, mutator, input_text) triples that have already been "
+            "evaluated. Avoids wasting iterations on deterministic mutator "
+            "retries when the rule text hasn't changed. Terminates early when "
+            "all novel combinations are exhausted."
         ),
     )
     parser.add_argument(
@@ -404,10 +549,10 @@ def main():
     print("=" * 70)
     
     # Validate input files
-    if not args.interesting_cases.exists():
+    if not args.use_mapping_only and not args.interesting_cases.exists():
         print(f"❌ Error: Interesting cases file not found: {args.interesting_cases}")
         sys.exit(1)
-    
+
     if not args.rules_map.exists():
         print(f"❌ Error: Rules map file not found: {args.rules_map}")
         sys.exit(1)
@@ -418,16 +563,26 @@ def main():
     
     # Load prompts with rules
     print()
-    prompts_with_rules = load_prompts_with_rules(
-        interesting_cases_path=args.interesting_cases,
-        rules_map_path=args.rules_map,
-        rule_loader=rule_loader,
-        n_cases=args.n_cases,
-        diff_types=args.diff_types,
-        languages=args.languages,
-        selection=args.selection,
-        seed=args.seed,
-    )
+    if args.use_mapping_only:
+        prompts_with_rules = load_prompts_from_mapping_only(
+            rules_map_path=args.rules_map,
+            rule_loader=rule_loader,
+            n_cases=args.n_cases,
+            languages=args.languages,
+            selection=args.selection,
+            seed=args.seed,
+        )
+    else:
+        prompts_with_rules = load_prompts_with_rules(
+            interesting_cases_path=args.interesting_cases,
+            rules_map_path=args.rules_map,
+            rule_loader=rule_loader,
+            n_cases=args.n_cases,
+            diff_types=args.diff_types,
+            languages=args.languages,
+            selection=args.selection,
+            seed=args.seed,
+        )
     
     if not prompts_with_rules:
         print("❌ Error: No prompts loaded")
@@ -488,46 +643,108 @@ def main():
             print(f"❌ Error initializing Groq: {e}")
             sys.exit(1)
     
-    # Create mutator
+    # Create mutator pool
     _LLM_MUTATORS = {"negation_injection", "voice_change", "paraphrase"}
-    is_llm_mutator = args.mutator in _LLM_MUTATORS
+    has_llm_mutator = any(m in _LLM_MUTATORS for m in args.mutators)
 
-    if is_llm_mutator and args.backend not in ("local", "delftblue"):
+    if has_llm_mutator and args.backend not in ("local", "delftblue"):
+        llm_names = [m for m in args.mutators if m in _LLM_MUTATORS]
         print(
-            f"\n❌ Error: LLM mutator '{args.mutator}' requires --backend local or delftblue "
+            f"\n❌ Error: LLM mutator(s) {llm_names} require --backend local or delftblue "
             f"(got: {args.backend}). LLM-based mutators share the code-gen backend."
         )
         sys.exit(1)
 
-    print(f"\n🧬 Initializing mutator: {args.mutator} (seed={args.seed})")
-    backend_for_mutator = backend if is_llm_mutator else None
-    mutator = create_mutator(args.mutator, seed=args.seed, backend=backend_for_mutator)
+    print(f"\n🧬 Initializing mutator pool: {args.mutators} "
+          f"(strategy={args.mutator_strategy}, seed={args.seed})")
+    backend_for_mutator = backend if has_llm_mutator else None
+    pool = create_mutator_pool(
+        args.mutators,
+        strategy=args.mutator_strategy,
+        seed=args.seed,
+        backend=backend_for_mutator,
+        ucb1_exploration=args.ucb1_exploration,
+    )
 
-    if is_llm_mutator:
-        print(f"   LLM mutator: shares backend with code generation (no extra model load)")
+    if has_llm_mutator:
+        print(f"   LLM mutator(s): share backend with code generation")
 
     # Create validator if enabled
     validator = None
     if args.enable_validation:
-        print(f"\n🔬 Setting up MutationQualityValidator")
+        use_ppl = getattr(args, "enable_perplexity", False) and args.backend in ("local", "delftblue")
+        ppl_model_handle = None
+        ppl_tokenizer_handle = None
+        if use_ppl:
+            print(f"\n🔬 Setting up MutationQualityValidator (perplexity gate ON)")
+            print(f"   Force-loading generation model for perplexity scoring …")
+            ppl_model_handle = backend._load_model()
+            ppl_tokenizer_handle = backend._load_tokenizer()
+            print(f"   Generation model loaded: {type(ppl_model_handle).__name__}")
+        else:
+            print(f"\n🔬 Setting up MutationQualityValidator")
         print(f"   SBERT semantic similarity (all-mpnet-base-v2, threshold=0.80)")
         print(f"   Structural criteria: inline code retention + security keyword retention")
+        if use_ppl:
+            print(f"   Perplexity ratio gate (threshold=2.5, model=32B shared)")
         print(f"   Max retries: {args.mutation_max_retries}")
         validator = MutationQualityValidator(
             use_sbert=True,
-            use_perplexity=False,  # opt-in; requires Qwen 7B on GPU
+            use_perplexity=use_ppl,
+            ppl_model_handle=ppl_model_handle,
+            ppl_tokenizer_handle=ppl_tokenizer_handle,
         )
+
+    # Map fitness strategy string to enum
+    _STRATEGY_MAP = {
+        "raw_count": FitnessStrategy.RAW_COUNT,
+        "severity_weighted": FitnessStrategy.SEVERITY_WEIGHTED,
+        "unique_rules": FitnessStrategy.UNIQUE_RULES,
+        "delta_composite": FitnessStrategy.DELTA_COMPOSITE,
+    }
+    fitness_strategy = _STRATEGY_MAP[args.fitness_strategy]
+
+    # Build composite evaluator if requested
+    composite_evaluator = None
+    if fitness_strategy == FitnessStrategy.DELTA_COMPOSITE:
+        print(f"\n📐 Building CompositeFitnessEvaluator")
+        print(f"   Weights: alpha={args.fitness_weights[0]}, beta={args.fitness_weights[1]}, gamma={args.fitness_weights[2]}")
+
+        # Build reference code index from interesting_cases (not available in mapping-only mode)
+        ref_codes: dict[str, str] = {}
+        if not args.use_mapping_only:
+            for ic in load_interesting_cases(args.interesting_cases):
+                ref_codes[str(ic.test_case_id)] = ic.control_code
+            print(f"   Reference codes loaded: {len(ref_codes)}")
+        else:
+            print(f"   Reference codes: unavailable in mapping-only mode (code_divergence=0.0)")
+
+        # Share SBERT model with validator if already loaded, else evaluator lazy-loads its own
+        sbert_source = validator._get_sbert() if validator is not None else None
+        composite_evaluator = CompositeFitnessEvaluator(
+            reference_codes=ref_codes,
+            sbert_model=sbert_source,
+            weights=tuple(args.fitness_weights),
+        )
+        if sbert_source is not None:
+            print(f"   SBERT: shared from validator (no extra load)")
+        else:
+            print(f"   SBERT: will lazy-load on first use")
 
     # Configure hill climber
     hc_config = HillClimbConfig(
         max_iterations=args.iterations,
-        fitness_strategy=FitnessStrategy.SEVERITY_WEIGHTED,
+        fitness_strategy=fitness_strategy,
         early_stop_no_improvement=args.early_stop,
         save_intermediate=True,
         output_dir=args.output_dir,
         verbose=True,
         enable_validation=args.enable_validation,
         mutation_max_retries=args.mutation_max_retries,
+        mutator_strategy=args.mutator_strategy,
+        ucb1_exploration=args.ucb1_exploration,
+        max_mutation_depth=args.max_mutation_depth,
+        skip_seen_pairs=args.skip_seen,
     )
 
     early_stop_label = (
@@ -540,9 +757,13 @@ def main():
     print(f"   Test cases: {len(prompts_with_rules)}")
     print(f"   Max iterations: {hc_config.max_iterations}")
     print(f"   Fitness strategy: {hc_config.fitness_strategy.name}")
+    if fitness_strategy == FitnessStrategy.DELTA_COMPOSITE:
+        print(f"   Fitness weights: α={args.fitness_weights[0]} β={args.fitness_weights[1]} γ={args.fitness_weights[2]}")
     print(f"   Early stop: {early_stop_label}")
-    print(f"   Mutator: {args.mutator}")
+    print(f"   Mutators: {args.mutators} ({args.mutator_strategy})")
+    print(f"   Max mutation depth: {args.max_mutation_depth}")
     print(f"   Validation: {'enabled (SBERT + structural)' if args.enable_validation else 'disabled'}")
+    print(f"   Skip seen pairs: {args.skip_seen}")
     print(f"   Output dir: {args.output_dir}")
     
     # Estimate LLM calls
@@ -566,7 +787,8 @@ def main():
     print(f"\U0001f50d Semgrep inputs/outputs → {semgrep_debug_dir}/semgrep_debug.jsonl", flush=True)
 
     # Create hill climber
-    climber = HillClimber(backend, mutator, hc_config, validator=validator)
+    climber = HillClimber(backend, pool, hc_config, validator=validator,
+                          composite_evaluator=composite_evaluator)
     
     # Run optimization with per-prompt rules
     print("\n" + "=" * 70)
@@ -621,16 +843,22 @@ def main():
                 "num_cases": len(prompts_with_rules),
                 "num_iterations": len(result.iterations),
                 "seed": args.seed,
-                "mutator": args.mutator,
+                "mutators": args.mutators,
+                "mutator_strategy": args.mutator_strategy,
+                "max_mutation_depth": args.max_mutation_depth,
+                "fitness_strategy": args.fitness_strategy,
+                "fitness_weights": args.fitness_weights,
                 "enable_validation": args.enable_validation,
+                "skip_seen_pairs": args.skip_seen,
                 "selection": args.selection,
                 "languages_filter": args.languages,
                 "semgrep_config": str(semgrep_config["rule_config"]),
                 "semgrep_timeout_seconds": semgrep_config["subprocess_timeout_seconds"],
                 "semgrep_jobs": semgrep_config["jobs"],
-                "interesting_cases_file": str(args.interesting_cases),
+                "use_mapping_only": args.use_mapping_only,
+                "interesting_cases_file": str(args.interesting_cases) if not args.use_mapping_only else None,
                 "rules_map_file": str(args.rules_map),
-                "diff_types_filter": args.diff_types,
+                "diff_types_filter": args.diff_types if not args.use_mapping_only else None,
             },
             "summary": {
                 "original_fitness": result.original_fitness.total_fitness,
@@ -717,7 +945,8 @@ def main():
                 "backend":                args.backend,
                 "model":                  args.model,
                 "quantization":           getattr(args, "quantization", None),
-                "interesting_cases":      str(args.interesting_cases),
+                "use_mapping_only":        args.use_mapping_only,
+                "interesting_cases":      str(args.interesting_cases) if not args.use_mapping_only else None,
                 "rules_map":              str(args.rules_map),
                 "n_cases":                args.n_cases,
                 "iterations":             args.iterations,
@@ -725,8 +954,14 @@ def main():
                 "seed":                   args.seed,
                 "selection":              args.selection,
                 "languages":              args.languages,
-                "mutator":                args.mutator,
+                "mutators":               args.mutators,
+                "mutator_strategy":       args.mutator_strategy,
+                "max_mutation_depth":     args.max_mutation_depth,
+                "ucb1_exploration":       args.ucb1_exploration,
+                "fitness_strategy":       args.fitness_strategy,
+                "fitness_weights":        args.fitness_weights,
                 "enable_validation":      args.enable_validation,
+                "skip_seen_pairs":       args.skip_seen,
                 "mutation_max_retries":   args.mutation_max_retries,
                 "semgrep_config":         str(semgrep_config["rule_config"]),
                 "semgrep_timeout_seconds":semgrep_config["subprocess_timeout_seconds"],
@@ -752,6 +987,11 @@ def main():
             f"--quantization {shlex.quote(args.quantization)}"
             if getattr(args, "quantization", None) else ""
         )
+        mapping_only_flag = "--use-mapping-only" if args.use_mapping_only else ""
+        interesting_cases_arg = (
+            "" if args.use_mapping_only
+            else f"--interesting-cases {shlex.quote(str(args.interesting_cases))}"
+        )
         rerun_lines = [
             "#!/bin/bash",
             "# Auto-generated rerun script — reproduces this experiment exactly.",
@@ -769,14 +1009,19 @@ def main():
             f"    --backend {shlex.quote(args.backend)} \\",
             f"    --model {shlex.quote(args.model)} \\",
             *([ f"    {quant_arg} \\" ] if quant_arg else []),
-            f"    --interesting-cases {shlex.quote(str(args.interesting_cases))} \\",
+            *([ f"    {mapping_only_flag} \\" ] if mapping_only_flag else []),
+            *([ f"    {interesting_cases_arg} \\" ] if interesting_cases_arg else []),
             f"    --rules-map {shlex.quote(str(args.rules_map))} \\",
             f"    --n-cases {args.n_cases} \\",
             f"    --iterations {args.iterations} \\",
             f"    --early-stop {args.early_stop} \\",
             f"    --seed {args.seed} \\",
             f"    --selection {shlex.quote(args.selection)} \\",
-            f"    --mutator {shlex.quote(args.mutator)} \\",
+            f"    --mutators {' '.join(shlex.quote(m) for m in args.mutators)} \\",
+            f"    --mutator-strategy {shlex.quote(args.mutator_strategy)} \\",
+            f"    --max-mutation-depth {args.max_mutation_depth} \\",
+            f"    --fitness-strategy {shlex.quote(args.fitness_strategy)} \\",
+            f"    --fitness-weights {args.fitness_weights[0]} {args.fitness_weights[1]} {args.fitness_weights[2]} \\",
             f"    --semgrep-config {shlex.quote(str(semgrep_config['rule_config']))} \\",
             f"    --semgrep-timeout-seconds {semgrep_config['subprocess_timeout_seconds']} \\",
             f"    --semgrep-jobs {semgrep_config['jobs']} \\",

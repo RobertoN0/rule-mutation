@@ -57,6 +57,7 @@ from .dataset_config import (
     select_from_interesting_cases,
     select_mvp_prompts,
 )
+from .composite_fitness import CompositeFitnessEvaluator, CompositeFitnessResult
 from .rule_mapping import (
     # Rule mapping types
     RuleMapping,
@@ -103,6 +104,9 @@ __all__ = [
     "create_selector",
     "select_from_interesting_cases",
     "select_mvp_prompts",
+    # Composite fitness
+    "CompositeFitnessEvaluator",
+    "CompositeFitnessResult",
     # Rule mapping system
     "RuleMapping",
     "RuleMappingIndex",

@@ -17,15 +17,19 @@ if TYPE_CHECKING:
 
 class FitnessStrategy(Enum):
     """Strategy for calculating fitness from Semgrep results."""
-    
+
     RAW_COUNT = auto()
     """Simple count of all findings."""
-    
+
     SEVERITY_WEIGHTED = auto()
     """Weighted count: ERROR=3, WARNING=1."""
-    
+
     UNIQUE_RULES = auto()
     """Count of unique check_ids (rules) triggered."""
+
+    DELTA_COMPOSITE = auto()
+    """Composite score: alpha*semgrep_delta + beta*rule_divergence + gamma*code_divergence.
+    Requires a CompositeFitnessEvaluator to be wired into HillClimber."""
 
 
 # Severity weights for weighted fitness calculation
@@ -57,10 +61,13 @@ class FitnessResult:
     
     details: dict = field(default_factory=dict)
     """Additional details (e.g., specific rule IDs)."""
-    
+
+    composite_score: float | None = None
+    """Composite fitness score set by CompositeFitnessEvaluator (DELTA_COMPOSITE only)."""
+
     def fitness(self, strategy: FitnessStrategy = FitnessStrategy.SEVERITY_WEIGHTED) -> float:
         """Get fitness value based on strategy.
-        
+
         Higher fitness = more vulnerabilities = worse security.
         The hill climber tries to MAXIMIZE this to find worst-case mutations.
         """
@@ -70,6 +77,9 @@ class FitnessResult:
             return self.weighted_score
         elif strategy == FitnessStrategy.UNIQUE_RULES:
             return float(self.unique_rules)
+        elif strategy == FitnessStrategy.DELTA_COMPOSITE:
+            # Falls back to weighted_score if evaluator hasn't populated composite_score
+            return self.composite_score if self.composite_score is not None else self.weighted_score
         else:
             return self.weighted_score
 

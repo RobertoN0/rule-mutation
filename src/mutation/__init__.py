@@ -21,11 +21,35 @@ from .llm_based import (
     VoiceChangeMutator,
     ParaphraseMutator,
 )
+from .pool import MutatorPool, MutatorSelectionStrategy
 from .quality import MutationQualityValidator
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..llm_backends.base import LLMBackend
+
+
+def create_mutator_pool(
+    names: list[str],
+    strategy: str = "round_robin",
+    seed: int | None = None,
+    backend: "LLMBackend | None" = None,
+    ucb1_exploration: float = 1.41,
+) -> MutatorPool:
+    """Create a :class:`MutatorPool` from a list of mutator names.
+
+    Parameters
+    ----------
+    names : list[str]
+        Mutator names (same keys accepted by :func:`create_mutator`).
+    strategy : str
+        One of ``"random"``, ``"round_robin"``, ``"ucb1"``, ``"greedy_batch"``.
+    seed, backend, ucb1_exploration
+        Forwarded to :func:`create_mutator` / :class:`MutatorPool`.
+    """
+    strat = MutatorSelectionStrategy(strategy)
+    mutators = [create_mutator(n, seed=seed, backend=backend) for n in names]
+    return MutatorPool(mutators, strategy=strat, seed=seed, ucb1_exploration=ucb1_exploration)
 
 
 def create_mutator(
@@ -85,7 +109,11 @@ __all__ = [
     "ParaphraseMutator",
     # Quality validation
     "MutationQualityValidator",
+    # Pool
+    "MutatorPool",
+    "MutatorSelectionStrategy",
     # Factories
     "create_research_battery",
     "create_mutator",
+    "create_mutator_pool",
 ]
