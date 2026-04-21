@@ -1,6 +1,6 @@
 # Thesis Relevance per Paper
 *Quick-reference: how each paper connects to the CodeGuard SBST project*
-*Updated 2026-03-30*
+*Updated 2026-04-02 (added Papers 17–25 from Gemini deep-research pass)*
 
 ---
 
@@ -154,6 +154,87 @@ Prompt-level QMR/AMR mutations are explicitly excluded (prompts are not changed)
 
 ---
 
+## Paper 17 — Survival of the Safest (SoS)
+**Relevance: Multi-objective prompt evolution — validates EFM approach**
+
+Demonstrates that interleaved multi-objective evolution (alternating between security and performance optimization with Pareto-optimal selection) outperforms single-objective prompt optimization. The crossover operator (blending a high-fitness prompt with a high-quality prompt) directly addresses the quality–effectiveness tension in the hill climber. The feedback mutation concept (domain-specific agents analyze failures and suggest improvements) is a sophisticated version of the Semgrep-feedback loop.
+
+**Cite in**: Related Work (multi-objective prompt optimization), Methodology (justification for composite EFM fitness).
+
+---
+
+## Paper 18 — Artemis: Automated Optimization of LLM-based Agents
+**Relevance: Hierarchical evaluation strategy**
+
+Validates that LLM-ensemble mutations (using a secondary LLM to perform intelligent perturbations) outperform random mutations — the thesis already does this for 4 of 9 mutators. The actionable contribution is the hierarchical evaluation: cheap filters (SBERT similarity, LLM-as-judge) before expensive validation (Semgrep). This could reduce the number of full generation+Semgrep evaluations needed per hill-climbing step.
+
+**Cite in**: Future Work (hierarchical evaluation to reduce computational cost).
+
+---
+
+## Paper 19 — SPRIG: System Prompt Optimization
+**Relevance: Closest structural analogue — UCB-based selection is actionable**
+
+SPRIG optimizes system prompts (the thesis optimizes security rules, which are system prompts). The structural parallel is strong: seed corpus → mutation operations → fitness-guided selection. The **UCB-based pruning** for component/mutator selection is a directly actionable improvement: track per-mutator success rates and use UCB scores to prioritize effective mutators over underperforming ones. Simple change to `hill_climber.py`, no architectural overhaul.
+
+**Cite in**: Related Work (system prompt optimization), Methodology (if UCB selection is implemented).
+
+---
+
+## Paper 20 — SCAFFOLD-CEGIS
+**Relevance: CRITICAL threat to validity — Semgrep-only fitness is empirically insufficient**
+
+Proves that iterative optimization against SAST tools teaches LLMs to structurally evade detection patterns rather than produce genuinely secure code. SAST gating *increases* latent security degradation (12.5% → 20.8%). The safe-zone contract is a simplified version of semantic anchoring. The thesis MUST cite this paper in Threats to Validity and acknowledge that the Semgrep-only fitness function is a known limitation.
+
+**Cite in**: Threats to Validity (Semgrep-only limitation), Methodology (safe-zone contract as anchoring).
+
+---
+
+## Paper 21 — ATheNA: Hybrid Fitness in SBST
+**Relevance: Formal framework for combining automated + domain-knowledge fitness**
+
+Provides the formal SBST citation for why combining `f_AT` (automated Semgrep fitness) with `f_MAN` (manual SBERT similarity penalty, security keyword retention) is principled. The EFM metric `Semgrep_increase × SBERT_similarity` is exactly a hybrid `f = f_AT × f_MAN` composition. ATheNA validates that domain-knowledge fitness consistently improves SBST effectiveness without significant overhead.
+
+**Cite in**: Methodology (justification for hybrid/composite fitness function).
+
+---
+
+## Paper 22 — CodeScore
+**Relevance: Future dual-objective evaluation (security + functional correctness)**
+
+CodeScore's NL-only modality could evaluate whether mutated rules still produce functionally valid code. Currently not needed — Semgrep implicitly handles this (syntactically broken code produces parsing errors, not security findings). Cite as future work for a dual-objective evaluation combining security compliance with functional correctness.
+
+**Cite in**: Future Work (if dual-objective evaluation is proposed).
+
+---
+
+## Paper 23 — MST-wi: Metamorphic Security Testing for Web Systems
+**Relevance: Low — different domain, conceptual parallel only**
+
+The 76 MRs and 10 structural patterns operate on HTTP requests, not NLP prompts. The relational oracle concept (equality/subset checking) is already implicit in the hill climber. Cite for completeness in the security-domain MT literature.
+
+**Cite in**: Related Work (security-focused MT approaches).
+
+---
+
+## Paper 24 — SAST-MT: Testing SAST Tools via Metamorphic Testing
+**Relevance: Second threat to validity — SAST tools have systematic blind spots**
+
+Demonstrates that CodeQL has 228 false negatives in ~30K programs. Combined with SCAFFOLD-CEGIS (Paper 20), this forms a two-pronged challenge: (1) optimization against SAST teaches evasion, and (2) SAST itself has blind spots. The thesis should acknowledge both. Mitigation: the *relative* Semgrep delta (change between original and mutated rule) is more robust than absolute counts.
+
+**Cite in**: Threats to Validity (SAST reliability), Future Work (cross-tool validation with CodeQL).
+
+---
+
+## Paper 25 — zkCraft: LLM as Zero-Shot Mutation Pattern Oracle
+**Relevance: Low — ZK circuit domain, but Pattern-Oracle concept is interesting**
+
+The Pattern-Oracle architecture (feed failure traces back to LLM to generate targeted follow-up mutations) is a sophisticated version of feedback-guided mutation. For the thesis: when a mutator causes a large Semgrep delta on a specific CWE, feed the report back to generate more targeted mutations. Related to SoS feedback mutation (Paper 17).
+
+**Cite in**: Future Work (feedback-guided adaptive mutation).
+
+---
+
 ---
 
 ## Implementation Summary Table
@@ -176,3 +257,12 @@ Prompt-level QMR/AMR mutations are explicitly excluded (prompts are not changed)
 | 14 — CAIBench | Motivation/framing | — |
 | 15 — Repetition | — | Optional validity control experiment |
 | 16 — DrHall | Instability assumption (conceptual) | — (prompt mutations out of scope) |
+| 17 — SoS | — | Multi-objective fitness interleaving, crossover operator |
+| 18 — Artemis | LLM-based mutation (via existing mutators) | Hierarchical evaluation filtering |
+| 19 — SPRIG | Hill climbing over system prompts, Rephrase/Swap ops | **UCB-based mutator selection** |
+| 20 — SCAFFOLD-CEGIS | Safe-zone contract (rule-level anchoring) | **Threat to validity: Semgrep-only is insufficient** |
+| 21 — ATheNA | Automated fitness (Semgrep) | **Hybrid fitness f_AT + f_MAN (supports EFM)** |
+| 22 — CodeScore | — | Future: functional correctness counterbalance |
+| 23 — MST-wi | Relational oracle (implicit in hill climber) | — (web-security domain, not applicable) |
+| 24 — SAST-MT | Semgrep as fitness oracle | **Threat to validity: SAST FP/FN blind spots** |
+| 25 — zkCraft | Quality validation of LLM mutations | Future: failure-trace-guided re-mutation |

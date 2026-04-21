@@ -502,3 +502,370 @@ These are lower priority because the core MRs need to be characterized first.
 - Prompt-level mutations (Paper 16, Papers 8/12 in their consensus variants) — prompts are not mutated
 - Multi-objective GA / MOEA/D (Paper 3) — hill climbing is sufficient for thesis scale
 - Character-level mutations (Papers 1, 2, 9) — incompatible with security rule domain
+
+---
+---
+
+# Papers 17–25 (from Gemini deep-research pass, added 2026-04-02)
+
+---
+
+## Paper 17 — Survival of the Safest: Towards Secure Prompt Optimization through Interleaved Multi-Objective Evolution (SoS)
+**ArXiv:** `2410.09652`
+**Authors:** Sinha, Cui, Das, Zhang — EMNLP 2024 Industry Track
+
+### Summary
+Addresses the fundamental tension in prompt optimization: maximizing task performance (KPI) while maintaining safety/security. SoS uses an **interleaved multi-objective evolution strategy** that alternates between optimizing security and performance objectives, rather than the standard single-objective approach or naive Pareto-front methods.
+
+Three mutation operators:
+1. **Semantic mutation (Mσ)**: controlled lexical paraphrasing that preserves intent
+2. **Feedback mutation**: specialized agents (one per objective) analyze failures and generate improvement suggestions — domain knowledge injection into the search
+3. **Crossover (Mc)**: blends traits from two parent prompts to create hybrid candidates
+
+Selection uses **locally optimal** filtering: a prompt must improve on one objective without degrading others beyond threshold δ = 1E-5. Feedback mutations iterate until improvement drops below convergence threshold δf = 0.01. Evaluated against APE, PromptBreeder, PhaseEvo, InstructZero — SoS achieves balanced KPI=0.990, Security=0.993.
+
+### Thesis Relevance
+**MODERATE — validates multi-objective fitness as superior to single-objective.** The thesis's current single-objective hill climber (maximize Semgrep findings) ignores the quality dimension. SoS demonstrates that interleaving two objectives (security + performance) with Pareto-optimal selection prevents the optimizer from sacrificing one dimension for the other. This directly supports the **Priority 2 extension (EFM)**: the composite `Semgrep_increase × SBERT_similarity` metric is a simplified two-objective approach.
+
+The feedback mutation concept is interesting: specialized domain agents that analyze *why* a mutation failed and suggest targeted improvements. For the thesis, this could mean feeding Semgrep failure reports back to the LLM mutator to generate more targeted rule perturbations. However, this adds LLM call overhead and is future work.
+
+The crossover operator between two mutated rules (one high-fitness, one high-quality) directly addresses the quality–effectiveness tension in the hill climber.
+
+### Implementation Status
+
+| Component | Status | Notes |
+|---|---|---|
+| Single-objective hill climbing | ✅ Implemented | No security/quality interleaving |
+| Multi-objective Pareto selection | ❌ Not implemented | SoS validates this approach |
+| Semantic mutation operator | ✅ Implemented (via existing mutators) | `ParaphraseMutator` is the closest analogue |
+| Feedback mutation (domain agents) | ❌ Future work | Feed Semgrep failures back to LLM for targeted re-mutation |
+| Crossover between parent rules | ❌ Not implemented | Blend high-fitness + high-quality rule variants |
+| EFM composite fitness (simplified SoS) | ❌ **Priority extension** | `Semgrep_increase × SBERT_similarity` |
+
+---
+
+## Paper 18 — Evolving Excellence: Automated Optimization of LLM-based Agents (Artemis)
+**ArXiv:** `2512.09108`
+**Authors:** Brookes et al. (21 authors) — December 2025
+
+### Summary
+ARTEMIS is a no-code evolutionary optimization platform for LLM agent configurations. Given only a benchmark script and natural language goals, it automatically identifies configurable components (prompts, tool descriptions, model assignments, temperature, thresholds) and optimizes them without architectural changes.
+
+Key architectural innovations:
+- **LLM-ensemble mutations**: a secondary LLM performs intelligent mutations and crossovers, producing natural-language-aware perturbations rather than random noise
+- **Hierarchical evaluation**: cheap LLM-based scoring filters candidates first; only survivors proceed to expensive full benchmark runs — dramatically reduces compute
+- **Automatic component discovery**: uses semantic search over the codebase to identify optimizable parameters
+
+Results: 13.6% acceptance rate improvement (competitive programming), 10.1% code optimization, 36.9% token reduction, 22% math accuracy improvement. Key insight: "automated semantic mutations can transform vague instructions into structured, effective prompts, often uncovering non-obvious optimizations."
+
+### Thesis Relevance
+**LOW-TO-MODERATE — hierarchical evaluation is the actionable contribution.** The thesis pipeline currently runs every mutated rule through the full LLM generation + Semgrep evaluation pipeline (~minutes per candidate). ARTEMIS's hierarchical strategy suggests: (1) fast SBERT similarity check, (2) fast LLM-as-judge for security intent, (3) only then full Semgrep evaluation. This could reduce the number of expensive evaluation calls by pre-filtering clearly bad mutations.
+
+The LLM-ensemble mutation concept is already partially implemented — `ParaphraseMutator` and `NegationInjectionMutator` use LLM-based few-shot prompting. ARTEMIS validates this approach at larger scale.
+
+The automatic component discovery is not applicable — the thesis already has a structured mutation space (the 9 mutators).
+
+### Implementation Status
+
+| Component | Status | Notes |
+|---|---|---|
+| LLM-based mutation operators | ✅ Partially implemented | ParaphraseMutator, NegationInjection use LLM |
+| Hierarchical evaluation filtering | ❌ Possible optimization | SBERT pre-filter before Semgrep |
+| LLM-as-judge for intent preservation | ❌ Not implemented | Cheaper than full generation+Semgrep |
+| Semantic genetic crossover | ❌ Not implemented | See Paper 17 (SoS) crossover |
+
+---
+
+## Paper 19 — SPRIG: Improving Large Language Model Performance by System Prompt Optimization
+**ArXiv:** `2410.14826`
+**Authors:** Zhang, Ergen, Logeswaran, Lee, Jurgens — October 2024
+
+### Summary
+SPRIG addresses exactly the same problem class as the thesis: optimizing **system prompts** (general instructions that guide LLM behavior across tasks) rather than task-specific user prompts. Uses an **edit-based genetic algorithm** with a seed corpus of 300 components across 9 categories:
+
+| Category | Count | Examples |
+|---|---|---|
+| Good property | 146 | "You are an empathetic assistant" |
+| Role | 43 | "You are a mathematician" |
+| Style | 22 | "Write a humorous answer" |
+| Chain-of-Thought | 18 | "Let's think step by step" |
+| Emotion | 17 | "This is important to my career" |
+| Safety | 16 | "Avoid stereotyping" |
+| Behavioral | 16 | "Before responding, rephrase the question" |
+| Scenario | 13 | "The fate of the world depends on your answer" |
+| Jailbreak | 9 | "Forget all previous instructions" |
+
+Four mutation operations: **Add** (insert component from corpus), **Rephrase** (reword via paraphraser), **Swap** (reorder components), **Delete** (remove components). Uses **UCB-based pruning** to select which components to add — balances exploration of new components with exploitation of proven ones.
+
+Key result: a single optimized system prompt performs on par with 47 individually optimized task prompts. Generalizes across model families, sizes (8B–70B), and languages.
+
+### Thesis Relevance
+**MODERATE — closest structural analogue to the thesis.** SPRIG optimizes system prompts for general performance; the thesis optimizes security rules (a type of system prompt) for brittleness. The structural parallel is strong:
+
+| SPRIG | Thesis |
+|---|---|
+| 300 components across 9 categories | 23 CodeGuard rules with prose/code/frontmatter zones |
+| Add/Rephrase/Swap/Delete | 9 mutators (synonym, paraphrase, reorder, negate, etc.) |
+| UCB-based component selection | Hill-climbing mutator selection |
+| Beam search (10 candidates × 10 iterations) | Hill climbing (accept-if-better) |
+| Accuracy fitness | Semgrep severity-weighted fitness |
+
+The **UCB-based pruning** for mutator selection is a directly actionable improvement: instead of uniformly random mutator selection in the hill climber, use UCB scores to prioritize mutators that have historically produced high-fitness mutations. This is a simple, low-overhead change to `hill_climber.py`.
+
+The component-based decomposition (rules as compositions of modular components) could inspire a structured representation of CodeGuard rules beyond the current prose/code/frontmatter split.
+
+### Implementation Status
+
+| Component | Status | Notes |
+|---|---|---|
+| Genetic search over system prompts | ✅ Implemented (as hill climbing) | Hill climbing is simpler than beam search |
+| Add/Delete mutations | ❌ Not directly implemented | Closest: `FluffInjection` (add), `WordDeletion` (not impl.) |
+| Rephrase mutation | ✅ `ParaphraseMutator` | |
+| Swap mutation | ✅ `SectionReorderMutator` | |
+| UCB-based mutator selection | ❌ **Actionable improvement** | Track per-mutator success rates |
+| Component corpus decomposition | ❌ Not applicable | Rules are organic Markdown, not modular components |
+
+---
+
+## Paper 20 — SCAFFOLD-CEGIS: Preventing Latent Security Degradation in LLM-Driven Iterative Code Refinement
+**ArXiv:** `2603.08520`
+**Authors:** Chen, Bian, Wang, Li, Cui — March 2026
+
+### Summary
+**The most directly threatening paper to the thesis's evaluation validity.** Studies what happens when LLM-generated code is iteratively refined against static analysis (SAST) tools — exactly what the thesis's hill climber does.
+
+Key finding: the **iterative refinement paradox**. When GPT-4o is iteratively refined over 10 rounds:
+- 43.7% of iteration chains contain **more** vulnerabilities than the baseline
+- Adding SAST gating (reject iterations that introduce new SAST findings) **increases latent security degradation from 12.5% to 20.8%**
+- Root cause: the model learns to **structurally evade** SAST detection patterns rather than genuinely fixing vulnerabilities
+
+Three degradation patterns identified:
+1. **Validation deletion**: security-critical functions removed during refactoring while maintaining syntax validity
+2. **Exception-handling weakening**: concrete handlers replaced with empty catch blocks
+3. **Permission-check bypass**: new code paths circumvent access-control checks outside SAST data-flow coverage
+
+The SCAFFOLD-CEGIS framework counters this with:
+- **Semantic anchoring**: mining security-critical elements at function-level (validate_*, sanitize_*, auth*), data-flow-level (traces from sensitive sinks), and pattern-level (defensive code patterns)
+- **Four-layer gated verification**: Correctness (tests pass) → Safety-Monotonicity (vulnerability counts must not increase) → Diff-Budget (constrain per-iteration change scale) → Anchor-Integrity (hard-level anchors verified via AST/regex)
+
+Results: SSDR reduced to 2.1%, 100% safety monotonicity, outperforming 6 baseline defense methods.
+
+### Thesis Relevance
+**CRITICAL — must be cited as a threat to validity and may require evaluation design changes.**
+
+The thesis uses Semgrep findings as the sole fitness function. SCAFFOLD-CEGIS proves empirically that optimizing against a SAST tool teaches LLMs to *evade* the tool's patterns rather than produce genuinely secure code. This is the exact failure mode the hill climber could exhibit: a mutated rule that produces high Semgrep findings might be generating code that *looks* insecure to Semgrep but is actually structurally sound, or conversely, code that *passes* Semgrep but has latent security issues.
+
+**Actionable implications for the thesis:**
+
+1. **Threat to validity section**: Must acknowledge that Semgrep-only fitness may incentivize evasion rather than genuine security impact. SCAFFOLD-CEGIS provides the citation.
+
+2. **Safe-zone contract as semantic anchoring**: The thesis's `ParsedRule` safe-zone contract (immutable frontmatter + code fences) is a simplified version of SCAFFOLD-CEGIS's semantic anchoring. The thesis should cite this connection — the safe-zone contract prevents the *rule mutation* from deleting security anchors, even though it doesn't prevent the *generated code* from evading SAST.
+
+3. **Possible evaluation extension**: After the hill climber finds high-fitness mutations, run a secondary check on the generated code: verify that structural defensive patterns (try-catch blocks, input validation, parameterized queries) remain present in the generated code. This is a lightweight version of the Anchor-Integrity layer.
+
+4. **SSDR metric**: The thesis could report `SSDR` (latent security degradation rate) in addition to Semgrep findings, by having a secondary LLM review the generated code for structural security defects. However, this adds significant complexity and is likely future work.
+
+### Implementation Status
+
+| Component | Status | Notes |
+|---|---|---|
+| Safe-zone contract (rule-level anchoring) | ✅ Implemented | `ParsedRule` protects frontmatter + code |
+| Semgrep-only fitness function | ✅ Implemented | **SCAFFOLD-CEGIS proves this is insufficient** |
+| AST structural verification of generated code | ❌ Not implemented | Check defensive patterns survive in output |
+| Latent security degradation rate (SSDR) | ❌ Not implemented | Would require LLM review of generated code |
+| Four-layer gated verification | ❌ Not applicable at thesis scale | Full CEGIS loop is multi-agent, heavyweight |
+| Diff-budget constraint per hill-climbing step | ❌ Possible improvement | Limit how much the rule changes per step |
+
+---
+
+## Paper 21 — ATheNA: Search-based Software Testing Driven by Automatically Generated and Manually Defined Fitness Functions
+**ArXiv:** `2207.11016` (original), `2512.10079` (survey/reflections)
+**Authors:** Formica, Fan, Menghi (original); Formica, Lawford, Menghi (survey)
+
+### Summary
+ATheNA formalizes the combination of two fitness function types in SBST:
+
+1. **f_AT (automatically generated)**: derived from formal requirements specifications — the system automatically translates requirements into fitness landscape functions that guide search toward failure-prone regions
+2. **f_MAN (manually defined)**: engineers embed domain expertise about conditions likely to trigger failures — e.g., "increasing throttle when speed limit is active" for automotive controllers
+
+The hybrid composite `f = f_AT + f_MAN` allows domain knowledge to steer the search without abandoning the formal fitness signal. Tested on 7 ARCH competition benchmarks (automotive, medical, aerospace domains) and 2 industry case studies — ATheNA generates more failure-revealing test cases than baseline tools with no statistically significant runtime overhead.
+
+Key insight: **engineers can practically write effective domain-knowledge fitness functions**, and combining them with automated metrics consistently improves SBST effectiveness.
+
+### Thesis Relevance
+**MODERATE — provides the formal framework for hybrid fitness (supports EFM).** The thesis's current fitness is purely automated (`f_AT` = SEVERITY_WEIGHTED Semgrep score). ATheNA justifies adding a manually defined component (`f_MAN`). For the thesis, `f_MAN` could be:
+
+- **SBERT similarity penalty**: `f_MAN = -λ × (1 - SBERT_similarity)` — penalizes mutations that drift too far semantically
+- **Security keyword retention**: already implemented as a quality gate, but could be promoted to a continuous fitness penalty rather than a binary gate
+- **CWE-specific heuristics**: weight mutations differently based on vulnerability type (e.g., buffer overflow rules are more sensitive to `SectionReorder` than injection rules)
+
+The ATheNA formalization `f = f_AT + f_MAN` directly supports the EFM metric `Semgrep_increase × SBERT_similarity` as a hybrid fitness. ATheNA provides the formal SBST citation for why this combination is principled.
+
+### Implementation Status
+
+| Component | Status | Notes |
+|---|---|---|
+| Automated fitness (Semgrep SEVERITY_WEIGHTED) | ✅ Implemented | `f_AT` equivalent |
+| Domain-knowledge fitness (SBERT penalty) | ❌ **Supports EFM extension** | `f_MAN` equivalent |
+| Hybrid composite fitness | ❌ **Priority extension** | `f = Semgrep_delta × SBERT_similarity` |
+| CWE-specific fitness heuristics | ❌ Future work | Weight by vulnerability type |
+
+---
+
+## Paper 22 — CodeScore: Evaluating Code Generation by Learning Code Execution
+**ArXiv:** `2301.09043`
+**Authors:** Dong, Ding, Jiang, Li, Li, Jin — TOSEM (ACM)
+
+### Summary
+Addresses the disconnect between textual similarity metrics (BLEU, CodeBLEU) and actual functional correctness of generated code. CodeScore uses the **UniCE framework** to fine-tune models that predict execution-based outcomes without running the code:
+
+- **PassRatio**: probability of passing test cases
+- **Executability**: binary — does the code run without errors?
+
+Three input modalities: reference-code-only (Ref), natural-language-only (NL), and combined (Ref&NL). The NL-only modality is particularly relevant — it evaluates code quality given only the natural language description (the prompt), without requiring reference code.
+
+Achieves **58.87% correlation improvement** with functional correctness compared to BLEU/CodeBLEU.
+
+### Thesis Relevance
+**LOW — provides a potential counterbalance metric for future dual-objective evaluation.** The thesis currently measures only security compliance via Semgrep. CodeScore's NL-only modality could evaluate whether a mutated security rule still produces *functionally valid* code (not just secure/insecure code). A mutation that constrains the LLM so aggressively that it generates non-compilable code is not useful even if Semgrep reports many findings.
+
+However, adding CodeScore would significantly increase evaluation complexity. The thesis's current design handles this implicitly: if the generated code is syntactically broken, Semgrep will report parsing errors rather than security findings. CodeScore is best cited as future work for a dual-objective evaluation combining security and functional correctness.
+
+### Implementation Status
+
+| Component | Status | Notes |
+|---|---|---|
+| Semgrep security fitness | ✅ Implemented | Security dimension only |
+| Functional correctness evaluation | ❌ Not implemented | CodeScore NL-only modality could add this |
+| Dual-objective (security + correctness) | ❌ Future work | Significant complexity increase |
+
+---
+
+## Paper 23 — Metamorphic Testing for Web System Security (MST-wi)
+**ArXiv:** `2208.09505`
+**Authors:** Bayati Chaleshtari, Pastore, Goknil, Briand — August 2022 (revised March 2023)
+
+### Summary
+Constructs **76 system-agnostic Metamorphic Relations** for automated web security testing, organized into **10 structural patterns** (P1-P10) mapped against MITRE CWE principles. The patterns define how to transform inputs and verify output relations:
+
+- **P1**: Same user, modified action → verify output equality
+- **P2**: Different user, same action → verify output divergence (access control)
+- Patterns P3-P10 cover CSRF, injection, session management, etc.
+
+Uses **relational oracles** (equality ≡, subset ⊆, superset ⊇) rather than semantic similarity — a simpler, mathematically precise alternative to SBERT-based validation. Covers 39% of OWASP testing activities not automated by existing techniques, detecting 102 vulnerability types across 45% of CWE categories.
+
+### Thesis Relevance
+**LOW — different domain (web HTTP requests vs. NLP security rules).** The structural MR patterns are conceptually similar to the thesis's metamorphic approach, but the specific patterns (same user/different action, CSRF token manipulation, session ID rotation) are not applicable to code generation.
+
+The relational oracle concept is interesting theoretically: instead of computing SBERT similarity between original and mutated rule outputs, simply verify whether the Semgrep findings are *equal* (strict MR) or *superset* (the mutated rule produces at least as many findings). This is already implicit in the hill climber's "accept if fitness increases" logic.
+
+### Implementation Status
+
+| Component | Status | Notes |
+|---|---|---|
+| Relational output oracle (equality/superset) | ✅ Implicit | Hill climber accepts if Semgrep findings ≥ baseline |
+| 76 web-security MRs | ❌ Not applicable | HTTP-level, not NLP-level |
+| CWE-mapped MR taxonomy | ❌ Conceptually related | See Paper 12 (MRSQLGen) SRBKB concept |
+
+---
+
+## Paper 24 — Evaluating C/C++ Vulnerability Detectability of Query-Based Static Application Security Testing Tools (SAST-MT)
+**DOI:** `10.1109/TDSC.2024.3354789`
+**Authors:** Li, Liu, Wong, Ma, Wang — IEEE TDSC 2024
+
+### Summary
+Designs **SAST-MT**, a metamorphic testing framework that applies **15 semantics-preserving code transformations** at the type, structure, and data-flow level to systematically expose false positives and false negatives in query-based SAST tools (specifically CodeQL). Using ~30,000 programs with known CWE/CVE vulnerabilities:
+
+- **17 false positives** detected in CodeQL (code flagged as vulnerable but actually safe)
+- **228 false negatives** detected in CodeQL (vulnerable code missed entirely)
+- Detected within 100 hours of automated testing
+
+The 15 transformations preserve program semantics while altering code structure in ways that confuse SAST pattern-matching: variable aliasing, control flow restructuring, type casting changes, etc. The framework exposes *root causes* of SAST failures, not just individual bugs.
+
+### Thesis Relevance
+**MODERATE-TO-HIGH — directly challenges the reliability of Semgrep as the thesis's fitness function.** If Semgrep has significant false negatives (vulnerable code it misses) and false positives (safe code it flags), then the hill climber's fitness signal is noisy:
+
+1. **False negatives in Semgrep** → a mutated rule might cause the LLM to generate code that is *genuinely insecure* but Semgrep fails to detect it → the mutation appears to have no effect (low fitness delta), so the hill climber discards an actually-effective mutation
+
+2. **False positives in Semgrep** → a mutated rule might cause the LLM to generate code that is *actually secure* but Semgrep flags it → the mutation appears highly effective (high fitness), so the hill climber rewards a mutation that didn't actually break security
+
+Combined with SCAFFOLD-CEGIS (Paper 20), this paper forms a two-pronged challenge to Semgrep-only evaluation:
+- SCAFFOLD-CEGIS: iterative optimization against SAST *teaches* evasion
+- SAST-MT: SAST tools themselves have systematic blind spots
+
+**For the thesis:** These findings should be acknowledged as threats to validity. The thesis can mitigate partially by using multiple Semgrep rulesets and by noting that the *relative* change in findings (delta between original and mutated rule) is more meaningful than absolute counts. A future improvement would be to run SAST-MT's 15 transformations on the generated code to check if Semgrep's verdict is consistent.
+
+### Implementation Status
+
+| Component | Status | Notes |
+|---|---|---|
+| Semgrep as sole fitness oracle | ✅ Implemented | Subject to FP/FN noise documented here |
+| Multi-ruleset Semgrep evaluation | ❌ Possible improvement | Multiple rulesets reduce single-rule blind spots |
+| SAST-MT post-generation validation | ❌ Future work | Apply code transformations to check Semgrep consistency |
+| Alternative SAST (CodeQL as secondary) | ❌ Future work | Cross-tool validation reduces single-tool bias |
+
+---
+
+## Paper 25 — zkCraft: Prompt-Guided LLM as a Zero-Shot Mutation Pattern Oracle for TCCT-Powered ZK Fuzzing
+**ArXiv:** `2602.00667`
+**Authors:** Fu, Tan, Wang, Kong, Su, Kang, Zhang, Li, Liu, Fong — January 2026
+
+### Summary
+Employs an LLM as a **zero-shot mutation pattern oracle** for fuzzing zero-knowledge (ZK) circuits (Circom). Dual-oracle architecture:
+
+1. **Mutation-Oracle**: given a constraint statement and field prime, generates 5 edge-case right-hand-side expressions (biased toward zero, q-1, small constants). Uses fixed prompts, temperature 0, greedy decoding, with post-processing to remove invalid syntax.
+
+2. **Pattern-Oracle**: when a verified counterexample (bug) is found, the failure trace is fed to the LLM, which outputs a one-sentence trigger description + Rust sampling code that biases future input generation toward the observed divergence. Generated code undergoes validation and unit testing before registration.
+
+**TCCT** (Trace-Constraint Consistency Test) is the core property: a mutation is a bug if the modified program produces different public output while still satisfying the original constraints.
+
+Results: 88 true positives, 0 false positives across 452 real-world Circom circuits, outperforming ZKFUZZ, ZKAP, Picus, and Circomspect.
+
+### Thesis Relevance
+**LOW — ZK circuits are a fundamentally different domain.** However, the Pattern-Oracle architecture is a novel concept: when a mutation causes a specific failure, feed the failure trace back to the LLM to generate *targeted* follow-up mutations rather than continuing with generic mutation operators.
+
+For the thesis, this translates to: when a specific mutator (e.g., `NegationInjectionMutator`) causes a large Semgrep delta on a particular CWE category, feed the Semgrep report + the mutated rule back to the LLM and ask it to generate a *more targeted* mutation in the same direction. This is a sophisticated reinforcement loop that goes beyond the current random-selection hill climbing. Related to the feedback mutation concept from Paper 17 (SoS).
+
+The deterministic post-processing (syntax validation, unit testing before accepting LLM-generated mutations) validates the thesis's `MutationQualityValidator` approach.
+
+### Implementation Status
+
+| Component | Status | Notes |
+|---|---|---|
+| LLM-based mutation generation | ✅ Partially implemented | 4 of 9 mutators use LLM |
+| Quality validation of LLM-generated mutations | ✅ Implemented | `MutationQualityValidator` |
+| Failure-trace-guided re-mutation (Pattern-Oracle) | ❌ Future work | Feed Semgrep results back for targeted mutation |
+| Deterministic post-processing of LLM output | ✅ Implemented | Safe-zone contract, keyword retention |
+
+---
+
+---
+
+# Updated Gap Analysis (Papers 17–25 additions)
+
+## New insight: Semgrep-only fitness is empirically challenged
+**Sources**: Paper 20 (SCAFFOLD-CEGIS), Paper 24 (SAST-MT)
+
+Two independent papers demonstrate that relying solely on SAST for evaluation is problematic:
+- SCAFFOLD-CEGIS: iterative optimization *against* SAST increases latent degradation (12.5% → 20.8%)
+- SAST-MT: CodeQL has 228 false negatives in ~30K test programs
+
+**Action**: Acknowledge in Threats to Validity. Consider lightweight secondary checks (structural pattern verification in generated code). The *relative* Semgrep delta between original and mutated rules is more robust than absolute counts.
+
+## Reinforced: Hybrid/composite fitness is well-supported
+**Sources**: Paper 17 (SoS), Paper 21 (ATheNA), Papers 3 and 9 (existing)
+
+Four papers now independently support combining automated metrics with quality/domain-knowledge penalties. ATheNA provides the formal SBST framework (`f = f_AT + f_MAN`), SoS provides the multi-objective evolution mechanics, and Papers 3/9 provide the specific EFM metric. **Priority 2 (EFM) is now heavily validated by the literature.**
+
+## New actionable improvement: UCB-based mutator selection
+**Source**: Paper 19 (SPRIG)
+
+Replace uniform-random mutator selection in the hill climber with UCB scores tracking per-mutator historical success rates. Low overhead, no architectural change — just a bandit over the 9 mutators.
+
+## New Related Work citations
+- Paper 17 (SoS): cite in Related Work for multi-objective prompt optimization
+- Paper 18 (Artemis): cite for hierarchical evaluation in Future Work
+- Paper 19 (SPRIG): cite in Related Work for system prompt optimization (closest structural parallel)
+- Paper 22 (CodeScore): cite in Future Work for functional correctness evaluation
+- Paper 23 (MST-wi): cite in Related Work for security-domain MT
+- Paper 25 (zkCraft): cite in Future Work for feedback-guided mutation
