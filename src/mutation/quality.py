@@ -14,9 +14,9 @@ Five criteria
 1. Instruction adherence  — did the mutation actually perform its intended
    transformation?  (difflib, stdlib only)
 2. Semantic similarity    — is the meaning preserved?  (sentence-transformers
-   ``all-mpnet-base-v2``, cosine similarity ≥ 0.80)
+   ``all-mpnet-base-v2``, cosine similarity ≥ 0.75)
 3. Realism (perplexity ratio) — is the mutated text linguistically natural?
-   (Qwen2.5-7B-Instruct perplexity ratio ≤ 2.5)
+   (perplexity ratio ≤ 2.0, computed with the caller-supplied LM handle)
 4. Security-domain preservation — are all inline code tokens and core security
    vocabulary still present?  (ParsedRule + curated word list)
 5. Readability delta      — Flesch-Kincaid grade level change (informational
@@ -25,7 +25,12 @@ Five criteria
 Usage
 -----
 >>> from src.mutation.quality import MutationQualityValidator
->>> validator = MutationQualityValidator()          # SBERT on, perplexity off
+>>> validator = MutationQualityValidator()                       # SBERT on, perplexity off
+>>> validator = MutationQualityValidator(                        # perplexity on, shared model
+...     use_perplexity=True,
+...     ppl_model_handle=backend_model,
+...     ppl_tokenizer_handle=backend_tokenizer,
+... )
 >>> result = mutator.mutate(rule_text)
 >>> result = validator.validate(result)
 >>> result.metadata["quality"]["passes_all"]        # bool
@@ -37,7 +42,7 @@ from __future__ import annotations
 import difflib
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -201,18 +206,24 @@ class MutationQualityValidator:
         similarity.  Requires the model to be pre-downloaded to HF cache.
         Skipped gracefully if ``sentence-transformers`` is not installed.
     use_perplexity:
-        Load Qwen2.5-7B-Instruct (4-bit) to compute perplexity ratio.
-        Requires a GPU.  Disabled by default so the validator runs on any node.
+        Enable the perplexity ratio gate.  Requires ``ppl_model_handle`` and
+        ``ppl_tokenizer_handle`` to be set; if they are ``None`` a warning is
+        logged and the gate is skipped.  Disabled by default.
     sbert_model:
         HuggingFace model name for the sentence encoder.
-    perplexity_model:
-        HuggingFace model name for the language model used in perplexity scoring.
+    ppl_model_handle:
+        A pre-loaded ``transformers`` causal-LM model used to compute
+        perplexity.  Pass the generation model (e.g. the 32B instance from
+        ``DelftBlueLocalBackend``) so no second model is loaded.
+    ppl_tokenizer_handle:
+        The tokenizer paired with ``ppl_model_handle``.
     sbert_threshold:
-        Minimum cosine similarity to pass the semantic similarity gate (0.80,
-        from Papers 1+2 calibrated on PARAPHRASE-MiniLM; re-calibrate on a
-        manually-annotated sample before final reporting).
+        Minimum cosine similarity to pass the semantic similarity gate (0.75,
+        AUGMENT default; Paper 6 LAP shows perplexity ratio ≤ 2.0 ↔
+        SBERT ≥ 0.80 in >90% of cases — 0.75 is the AUGMENT-calibrated
+        operating point).
     perplexity_threshold:
-        Maximum perplexity ratio to pass the realism gate (2.5, from AUGMENT).
+        Maximum perplexity ratio to pass the realism gate (2.0, from AUGMENT).
     keyword_threshold:
         Minimum security-keyword retention fraction (0.70).
     """
@@ -220,21 +231,21 @@ class MutationQualityValidator:
     use_sbert: bool = True
     use_perplexity: bool = False
     sbert_model: str = "sentence-transformers/all-mpnet-base-v2"
-    perplexity_model: str = "Qwen/Qwen2.5-7B-Instruct"
-    sbert_threshold: float = 0.80
-    perplexity_threshold: float = 2.5
+    ppl_model_handle: Any = field(default=None, repr=False, compare=False)
+    ppl_tokenizer_handle: Any = field(default=None, repr=False, compare=False)
+    sbert_threshold: float = 0.75
+    perplexity_threshold: float = 2.0
     keyword_threshold: float = 0.70
 
-    # Lazy-loaded model handles
+    # Lazy-loaded SBERT handle; ppl handles are seeded from constructor args
     _sbert: Any = None
     _ppl_model: Any = None
     _ppl_tokenizer: Any = None
 
     def __post_init__(self) -> None:
-        # Not a field — prevent dataclass from treating it as one
         object.__setattr__(self, "_sbert", None)
-        object.__setattr__(self, "_ppl_model", None)
-        object.__setattr__(self, "_ppl_tokenizer", None)
+        object.__setattr__(self, "_ppl_model", self.ppl_model_handle)
+        object.__setattr__(self, "_ppl_tokenizer", self.ppl_tokenizer_handle)
 
     # ------------------------------------------------------------------
     # Lazy model loaders
@@ -260,37 +271,20 @@ class MutationQualityValidator:
             return None
 
     def _get_ppl_model(self):
-        if self._ppl_model is not None:
-            return self._ppl_model, self._ppl_tokenizer
-        try:
-            import torch  # type: ignore
-            from transformers import AutoModelForCausalLM, AutoTokenizer  # type: ignore
+        """Return (model, tokenizer) for perplexity scoring, or (None, None).
 
-            log.info("Loading perplexity model %s (4-bit) …", self.perplexity_model)
-            from transformers import BitsAndBytesConfig  # type: ignore
-
-            bnb_cfg = BitsAndBytesConfig(
-                load_in_4bit=True,
-                bnb_4bit_quant_type="nf4",
-                bnb_4bit_use_double_quant=True,
-                bnb_4bit_compute_dtype=torch.float16,
+        No model loading is performed here.  The handles must be supplied at
+        construction via ``ppl_model_handle`` / ``ppl_tokenizer_handle``
+        (typically the generation model shared from the hill-climber backend).
+        If ``use_perplexity=True`` but no handle was provided, a warning is
+        emitted and perplexity scoring is skipped for this run.
+        """
+        if self._ppl_model is None:
+            log.warning(
+                "use_perplexity=True but no ppl_model_handle was supplied; "
+                "perplexity gate disabled for this run."
             )
-            tokenizer = AutoTokenizer.from_pretrained(
-                self.perplexity_model, local_files_only=True
-            )
-            model = AutoModelForCausalLM.from_pretrained(
-                self.perplexity_model,
-                quantization_config=bnb_cfg,
-                device_map="auto",
-                local_files_only=True,
-            )
-            model.eval()
-            object.__setattr__(self, "_ppl_model", model)
-            object.__setattr__(self, "_ppl_tokenizer", tokenizer)
-            return model, tokenizer
-        except Exception as exc:
-            log.warning("Could not load perplexity model: %s", exc)
-            return None, None
+        return self._ppl_model, self._ppl_tokenizer
 
     # ------------------------------------------------------------------
     # Metric helpers
