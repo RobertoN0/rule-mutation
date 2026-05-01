@@ -64,7 +64,7 @@ class Mutator(ABC):
     They should preserve the semantic intent while varying the surface form.
     
     Example:
-        mutator = FluffMutator(seed=42)
+        mutator = SynonymReplacementMutator(seed=42)
         result = mutator.mutate(rule_text)
         print(result.mutated)
     """

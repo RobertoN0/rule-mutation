@@ -1,7 +1,7 @@
 """Topic E — Fitness strategy unit tests (C-E1, C-E2, C-E8).
 
-Validates calculate_fitness, FitnessResult.fitness(strategy), and
-aggregate_fitness for all four strategies.
+Validates calculate_fitness, FitnessResult.fitness(strategy),
+aggregate_fitness, and the _dominates lexicographic criterion.
 """
 
 from dataclasses import dataclass
@@ -15,6 +15,7 @@ from src.evaluation.fitness import (
     aggregate_fitness,
     calculate_fitness,
 )
+from src.optimizer.hill_climber import _dominates
 
 
 # ---------------------------------------------------------------------------
@@ -105,6 +106,7 @@ class TestFitnessStrategy:
             error_count=2,
             warning_count=3,
             composite_score=7.5,
+            code_divergence=0.3,
         )
 
     def test_raw_count(self, result: FitnessResult):
@@ -113,20 +115,9 @@ class TestFitnessStrategy:
     def test_severity_weighted(self, result: FitnessResult):
         assert result.fitness(FitnessStrategy.SEVERITY_WEIGHTED) == 11.0
 
-    def test_unique_rules(self, result: FitnessResult):
-        assert result.fitness(FitnessStrategy.UNIQUE_RULES) == 3.0
-
-    def test_delta_composite(self, result: FitnessResult):
-        assert result.fitness(FitnessStrategy.DELTA_COMPOSITE) == 7.5
-
-    def test_delta_composite_fallback(self):
-        """C-E2: DELTA_COMPOSITE falls back to weighted_score when composite_score is None."""
-        result = FitnessResult(
-            raw_count=5, weighted_score=11.0, unique_rules=3,
-            error_count=2, warning_count=3,
-            composite_score=None,
-        )
-        assert result.fitness(FitnessStrategy.DELTA_COMPOSITE) == 11.0
+    def test_default_strategy_is_severity_weighted(self, result: FitnessResult):
+        """C-E2: calling fitness() without argument returns weighted_score."""
+        assert result.fitness() == 11.0
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -168,13 +159,77 @@ class TestAggregateFitness:
         agg = aggregate_fitness(results, strategy=FitnessStrategy.RAW_COUNT)
         assert agg.total_fitness == pytest.approx(10.0)  # raw_count, not weighted
 
-    def test_aggregation_with_composite(self):
-        """C-E8: aggregate_fitness uses composite_score for DELTA_COMPOSITE."""
+    def test_aggregate_total_semgrep_delta(self):
+        """C-E8: total_semgrep_delta sums composite_score across results."""
         results = [
             FitnessResult(raw_count=3, weighted_score=7.0, unique_rules=2,
                           error_count=1, warning_count=4, composite_score=2.5),
             FitnessResult(raw_count=1, weighted_score=3.0, unique_rules=1,
                           error_count=1, warning_count=0, composite_score=1.0),
         ]
-        agg = aggregate_fitness(results, strategy=FitnessStrategy.DELTA_COMPOSITE)
-        assert agg.total_fitness == pytest.approx(3.5)  # 2.5 + 1.0
+        agg = aggregate_fitness(results)
+        assert agg.total_semgrep_delta == pytest.approx(3.5)  # 2.5 + 1.0
+
+    def test_aggregate_total_code_divergence(self):
+        """C-E8: total_code_divergence sums code_divergence across results."""
+        results = [
+            FitnessResult(raw_count=1, weighted_score=3.0, unique_rules=1,
+                          error_count=1, warning_count=0, code_divergence=0.4),
+            FitnessResult(raw_count=2, weighted_score=6.0, unique_rules=2,
+                          error_count=2, warning_count=0, code_divergence=0.2),
+        ]
+        agg = aggregate_fitness(results)
+        assert agg.total_code_divergence == pytest.approx(0.6)
+
+    def test_aggregate_zero_when_no_composite(self):
+        """total_semgrep_delta is 0.0 when no composite_score is set."""
+        results = [
+            FitnessResult(raw_count=1, weighted_score=3.0, unique_rules=1,
+                          error_count=1, warning_count=0),
+        ]
+        agg = aggregate_fitness(results)
+        assert agg.total_semgrep_delta == pytest.approx(0.0)
+        assert agg.total_code_divergence == pytest.approx(0.0)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# C-E9  _dominates — lexicographic acceptance criterion
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestDominates:
+
+    def test_higher_delta_dominates(self):
+        """Primary axis: candidate with higher semgrep_delta dominates."""
+        assert _dominates(1.0, 0.0, 0.0, 0.0) is True
+
+    def test_lower_delta_does_not_dominate(self):
+        assert _dominates(0.0, 1.0, 1.0, 0.0) is False
+
+    def test_tied_delta_higher_div_dominates(self):
+        """Secondary axis: tied delta, higher code_divergence dominates."""
+        assert _dominates(0.0, 0.5, 0.0, 0.3) is True
+
+    def test_tied_delta_lower_div_does_not_dominate(self):
+        assert _dominates(0.0, 0.3, 0.0, 0.5) is False
+
+    def test_exact_tie_does_not_dominate(self):
+        assert _dominates(1.0, 0.5, 1.0, 0.5) is False
+
+    def test_negative_delta_does_not_dominate_zero(self):
+        assert _dominates(-1.0, 1.0, 0.0, 0.0) is False
+
+    def test_within_tolerance_treated_as_tied(self):
+        """Difference within tol is treated as tied → falls through to div check."""
+        assert _dominates(0.0, 0.9, 1e-10, 0.0) is True
+
+    def test_origin_reset_enables_improvement_detection(self):
+        """Baseline total_semgrep_delta must be reset to 0 before comparisons.
+
+        Without the fix: best.total_semgrep_delta = Σ weighted_score_baseline (e.g. 5.0),
+        so a mutation adding 1 new vuln (delta=1.0) is never detected as improvement.
+        With the fix: best starts at 0.0, so any positive delta dominates.
+        """
+        # After fix: origin is 0 → any positive delta is an improvement
+        assert _dominates(1.0, 0.0, 0.0, 0.0) is True
+        # Bug scenario (without fix): comparing against absolute baseline fitness
+        assert _dominates(1.0, 0.0, 5.0, 0.0) is False

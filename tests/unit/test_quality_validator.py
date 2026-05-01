@@ -221,10 +221,11 @@ class TestSecurityPreservation:
     def test_keyword_retention_low(self):
         """C-C5: dropping security keywords below threshold → fails."""
         v = _validator()
-        # Strip most security keywords from the mutated text
+        # Strip 8 words; 'side' is no longer in the hardcoded lexicon so only 7
+        # of the 8 affect the score: 7/18 present → retention ≈ 0.61 < 0.70.
         stripped = SAMPLE_RULE_TEXT
-        for kw in ["validate", "sanitize", "injection", "escape", "prevent",
-                    "xss", "sql", "session", "attack", "secure", "security"]:
+        for kw in ["injection", "prevent", "privilege", "safe",
+                   "server", "input", "avoid", "side"]:
             stripped = stripped.replace(kw, "removed")
             stripped = stripped.replace(kw.title(), "Removed")
 

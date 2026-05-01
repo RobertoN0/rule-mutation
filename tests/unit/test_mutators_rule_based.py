@@ -1,8 +1,7 @@
 """Topic B — Rule-based mutator unit tests (C-B1 to C-B6).
 
-Validates the 6 rule-based mutators: fluff, verb_weakening,
-synonym_replacement, add_random_word, section_reorder_shuffle,
-section_reorder_degrade.
+Validates the 5 rule-based mutators: verb_weakening, synonym_replacement,
+add_random_word, section_reorder_shuffle, section_reorder_degrade.
 
 Each mutator is tested against the shared SAMPLE_RULE_TEXT fixture
 (~400 words with frontmatter, ## sections, bullets, inline `code`, and
@@ -14,7 +13,6 @@ import re
 import pytest
 
 from src.mutation import (
-    FluffMutator,
     VerbWeakeningMutator,
     SynonymReplacementMutator,
     AddRandomWordMutator,
@@ -43,48 +41,6 @@ def _inline_code_spans(text: str) -> set[str]:
 
 
 SEED = 42
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Fluff Mutator
-# ═══════════════════════════════════════════════════════════════════════════════
-
-class TestFluffMutator:
-
-    @pytest.fixture
-    def result(self) -> MutationResult:
-        return FluffMutator(seed=SEED).mutate(SAMPLE_RULE_TEXT)
-
-    def test_c_b1_changed(self, result: MutationResult):
-        """C-B1: mutate returns changed=True and change_ratio > 0."""
-        assert result.changed
-        assert result.change_ratio > 0
-
-    def test_c_b2_changes_nonempty(self, result: MutationResult):
-        """C-B2: changes list is non-empty with descriptions."""
-        assert len(result.changes) > 0
-        assert any("prefix" in c.lower() or "suffix" in c.lower() for c in result.changes)
-
-    def test_c_b3_shape_prefix_suffix_verbs(self, result: MutationResult):
-        """C-B3: fluff adds prefix, suffix, and weakens verbs."""
-        # Prefix: one of the fluff headers is present before the main content
-        assert "Guidelines" in result.mutated or "Standards" in result.mutated or "Practices" in result.mutated
-        # Suffix: one of the fluff footers
-        assert "Jira" in result.mutated or "timesheet" in result.mutated or \
-               "security@company" in result.mutated or "under review" in result.mutated
-        # Verb weakening happened (MUST → should ideally)
-        assert "should ideally" in result.mutated
-        assert "MUST" not in result.mutated.split("---")[-1]  # body only
-
-    def test_c_b4_frontmatter_preserved(self, result: MutationResult):
-        """C-B4: frontmatter is identical."""
-        assert _frontmatter(result.mutated) == _frontmatter(SAMPLE_RULE_TEXT)
-
-    def test_c_b5_inline_code_preserved(self, result: MutationResult):
-        """C-B5: inline code spans are preserved."""
-        original_spans = _inline_code_spans(SAMPLE_RULE_TEXT)
-        mutated_spans = _inline_code_spans(result.mutated)
-        assert original_spans.issubset(mutated_spans)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -165,6 +121,17 @@ class TestSynonymReplacementMutator:
         original_spans = _inline_code_spans(SAMPLE_RULE_TEXT)
         mutated_spans = _inline_code_spans(result.mutated)
         assert original_spans.issubset(mutated_spans)
+
+    def test_line_structure_preserved(self, result: MutationResult):
+        """Regression: nlpaug flattens multi-line input; per-line augmentation
+        must preserve the original line count (markdown bullets, headers, paragraphs)."""
+        original_line_count = SAMPLE_RULE_TEXT.count("\n")
+        mutated_line_count = result.mutated.count("\n")
+        # Line count must not collapse; small drift is acceptable if blank
+        # handling produces off-by-one, but a full collapse to ~1 line is the bug.
+        assert mutated_line_count >= original_line_count - 2, (
+            f"Line structure collapsed: {original_line_count} → {mutated_line_count}"
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -294,7 +261,6 @@ class TestSectionReorderDegrade:
 class TestFactory:
 
     @pytest.mark.parametrize("name,expected_class_name", [
-        ("fluff", "FluffMutator"),
         ("verb_weakening", "VerbWeakeningMutator"),
         ("synonym_replacement", "SynonymReplacementMutator"),
         ("add_random_word", "AddRandomWordMutator"),

@@ -7,10 +7,7 @@ Provides various ways to perturb CodeGuard rules while preserving semantic inten
 from .base import Mutator, MutationResult
 from .rule_parser import ParsedRule, Section, Block, mask_inline_code, unmask_inline_code
 from .rule_based import (
-    FluffMutator,
     VerbWeakeningMutator,
-    StructuralMutator,
-    CompositeMutator,
     SynonymReplacementMutator,
     AddRandomWordMutator,
     SectionReorderMutator,
@@ -23,6 +20,7 @@ from .llm_based import (
 )
 from .pool import MutatorPool, MutatorSelectionStrategy
 from .quality import MutationQualityValidator
+from .security_lexicon import get_security_lexicon, build_security_lexicon
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -34,7 +32,7 @@ def create_mutator_pool(
     strategy: str = "round_robin",
     seed: int | None = None,
     backend: "LLMBackend | None" = None,
-    ucb1_exploration: float = 1.41,
+    gamma: float = 0.9,
 ) -> MutatorPool:
     """Create a :class:`MutatorPool` from a list of mutator names.
 
@@ -43,13 +41,13 @@ def create_mutator_pool(
     names : list[str]
         Mutator names (same keys accepted by :func:`create_mutator`).
     strategy : str
-        One of ``"random"``, ``"round_robin"``, ``"ucb1"``, ``"greedy_batch"``.
-    seed, backend, ucb1_exploration
+        One of ``"random"``, ``"round_robin"``, ``"ducb"``, ``"greedy_batch"``.
+    seed, backend, gamma
         Forwarded to :func:`create_mutator` / :class:`MutatorPool`.
     """
     strat = MutatorSelectionStrategy(strategy)
     mutators = [create_mutator(n, seed=seed, backend=backend) for n in names]
-    return MutatorPool(mutators, strategy=strat, seed=seed, ucb1_exploration=ucb1_exploration)
+    return MutatorPool(mutators, strategy=strat, seed=seed, gamma=gamma)
 
 
 def create_mutator(
@@ -67,7 +65,6 @@ def create_mutator(
         raise ValueError(f"'{name}' requires a backend argument")
 
     factories = {
-        "fluff":                    lambda: FluffMutator(seed=seed),
         "verb_weakening":           lambda: VerbWeakeningMutator(seed=seed),
         "synonym_replacement":      lambda: SynonymReplacementMutator(seed=seed),
         "add_random_word":          lambda: AddRandomWordMutator(seed=seed),
@@ -94,12 +91,8 @@ __all__ = [
     "Block",
     "mask_inline_code",
     "unmask_inline_code",
-    # Function-based mutators (original)
-    "FluffMutator",
+    # Rule-based mutators
     "VerbWeakeningMutator",
-    "StructuralMutator",
-    "CompositeMutator",
-    # Function-based mutators (research-grounded)
     "SynonymReplacementMutator",
     "AddRandomWordMutator",
     "SectionReorderMutator",
@@ -112,6 +105,9 @@ __all__ = [
     # Pool
     "MutatorPool",
     "MutatorSelectionStrategy",
+    # Security lexicon
+    "get_security_lexicon",
+    "build_security_lexicon",
     # Factories
     "create_research_battery",
     "create_mutator",

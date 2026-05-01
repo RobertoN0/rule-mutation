@@ -54,21 +54,7 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Security vocabulary (project-specific, for keyword-retention check)
-# ---------------------------------------------------------------------------
-
-_SECURITY_KEYWORDS: frozenset[str] = frozenset([
-    "validate", "validation", "sanitize", "sanitization",
-    "escape", "encode", "encoding",
-    "injection", "xss", "csrf", "sql", "ldap", "soql",
-    "authentication", "authorization", "privilege",
-    "secret", "token", "session", "cookie",
-    "untrusted", "malicious", "vulnerability", "exploit",
-    "attack", "secure", "security", "access", "control",
-    "prevent", "block", "reject", "enforce",
-    "encrypt", "hash", "signature", "certificate",
-])
+from .security_lexicon import get_security_lexicon
 
 # ---------------------------------------------------------------------------
 # Instruction-adherence check specs (per mutator name)
@@ -184,10 +170,7 @@ _ADHERENCE_FUNCS: dict[str, Any] = {
     "negation_injection":  _adherence_negation,
     "voice_change":        _adherence_voice,
     "paraphrase":          _adherence_paraphrase,
-    # Legacy mutators (kept for compatibility)
-    "fluff":               lambda o, m: m != o,
     "verb_weakening":      lambda o, m: m != o,
-    "structural":          lambda o, m: m != o,
 }
 
 
@@ -307,7 +290,7 @@ class MutationQualityValidator:
         """Fraction of security keywords from original still present in mutated."""
         orig_lower = original.lower()
         mut_lower = mutated.lower()
-        present_in_orig = [kw for kw in _SECURITY_KEYWORDS if kw in orig_lower]
+        present_in_orig = [kw for kw in get_security_lexicon() if kw in orig_lower]
         if not present_in_orig:
             return 1.0  # no keywords → trivially retained
         still_present = [kw for kw in present_in_orig if kw in mut_lower]
