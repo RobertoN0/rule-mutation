@@ -1,8 +1,8 @@
 # Implementation ↔ Literature Mapping
 
-*Generated 2026-04-15. Purpose: for every design decision in the rule-mutation pipeline, record what literature validates it and — more importantly — flag choices that currently have **no** reviewed citation.*
+*Generated 2026-04-15. Last updated 2026-04-24 (Perplexity deep-research pass: Papers 26–40 added; §1.6, §4.5, §4.11, §5.6, §5.7, §5.9, §6.4–6.7, §8.3, §8.5 resolved or eliminated).*
 
-The 25 papers referenced below are the ones analysed in `LITERATURE_REVIEW_ANALYSIS.md` / `THESIS_RELEVANCE.md`. Paper numbers match those files.
+The 40 papers referenced below are the ones analysed in `LITERATURE_REVIEW_ANALYSIS.md` / `THESIS_RELEVANCE.md`. Paper numbers match those files.
 
 This document is a **mapping**, not a new literature search. Anything marked **GAP** is an action item: something we rely on but currently justify only by engineering judgment.
 
@@ -22,21 +22,21 @@ Inside each tier, choices are grouped by subsystem (search, mutation, validation
 
 ## Summary dashboard
 
-*(Revised 2026-04-17 after supervisor-prep pass: SBERT/perplexity thresholds aligned to AUGMENT defaults, γ-term **kept** but its reference-code source switched from external JSON to iteration-0 caching, early-stop reclassified as gap, Fluff/VerbWeakening flagged for removal.)*
+*(Revised 2026-04-17 after supervisor-prep pass; revised again 2026-04-24 after Perplexity deep-research pass: lexicographic acceptance replaces weighted sum; CodeBLEU replaces NL-SBERT for code_div; DYTS/D-UCB added; mutator-only bandit factorization; CWE reporting stratification eliminated; CyberSecEval v2 citation corrected.)*
 
 | Subsystem | ✅ Validated | 🟡 Partial | ❌ GAP |
 |---|---|---|---|
-| Search algorithm | 3 | 1 | 2 |
+| Search algorithm | 4 | 1 | 1 |
 | Mutation operators | 6 | 2 | 4 |
 | Safe-zone / parsing | 1 | 1 | 1 |
-| Quality validator | 6 | 3 | 2 |
-| Fitness function | 3 | 2 | 4 |
-| Pool / bandit | 3 | 1 | 3 |
+| Quality validator | 8 | 2 | 1 |
+| Fitness function | 4 | 2 | 1 |
+| Pool / bandit | 6 | 1 | 0 |
 | Generation setup | 2 | 1 | 3 |
-| Evaluation protocol | 2 | 2 | 3 |
-| **Totals** | **26** | **13** | **22** |
+| Evaluation protocol | 3 | 1 | 2 |
+| **Totals** | **34** | **11** | **13** |
 
-Gaps down from 23 to **22** after revision. Biggest remaining concentration: (a) composite-weight choice (α, β, γ), (b) dataset / benchmark selection (CyberSecEval, CWE stratification), (c) hardcoded word lists inside mutators and the validator, (d) deeper search-strategy alternatives beyond UCB1, (e) NL-SBERT-on-code for γ (known weak fit; upgrade path CodeBERT).
+Gaps down from 22 to **13** after Perplexity deep-research pass. Remaining concentrations: (a) mutator hyperparameters (aug_p fractions, filler-word lists — §2.11, §2.12), (b) generation sampling parameters (top_p, max_new_tokens — §7.4, §7.5, §7.6), (c) N_CASES and N_ITERATIONS power analysis (§8.6, §8.7), (d) readability-delta criterion (§4.12), (e) two-phase retrieval pipeline (§9). These are engineering details expected to remain uncited; see §12 for the deliberate out-of-scope list.
 
 ---
 
@@ -70,10 +70,11 @@ Gaps down from 23 to **22** after revision. Biggest remaining concentration: (a)
 - *Status:* **Not actively used in current experiments** (user-confirmed 2026-04-17). Likely dead parameter; candidate for removal.
 - *Gap:* No paper in our set validates the specific threshold (5). Since it's not used, low-priority gap.
 
-**1.6 Single-objective scalar optimisation (vs Pareto multi-objective)**
-- *Choice:* Maximise the scalar composite `α · semgrep_delta + β · rule_divergence`. No Pareto front maintained.
-- *Gap:* Paper 11 (STELLAR) and Paper 17 (SoS) both argue for multi-objective formulations on closely related problems.
-- *Status:* **Planned to evolve.** Not a missing-rationale gap so much as an explicit future-work axis (user-confirmed 2026-04-17). Decision should be made before running full-scale experiments.
+**1.6 Lexicographic acceptance (primary: semgrep_delta; secondary: code_divergence)** ✅ RESOLVED 2026-04-24
+- *Choice:* Accept if `delta_s > 0`; accept secondary if `delta_s == 0 AND delta_c > 0`; else reject. No weighted composite, no Pareto front.
+- *Citation:* **Paper 26 (Chen & Li, TOSEM 2022)** — empirically shows weighted sums miss Pareto-optimal solutions in 77% of SE benchmarks; provides the empirical case for abandoning α/β/γ weights. **Paper 28 (Miettinen 1999)** — textbook chapter 3.7 formalizes lexicographic ordering as the theoretically correct scalarization when objectives have strict asymmetric priority. **Paper 21 (ATheNA)** — `f_AT` (Semgrep) primary / `f_MAN` (code_div) secondary is the formal hybrid-fitness analogue. **Paper 19 (SPRIG)** — confirms fitness-guided selection over a system-prompt search space.
+- *Rule_div status:* demoted to quality gate constraint (SBERT ≥ 0.75); no longer a fitness term — see §4.8.
+- *Code_div status:* secondary fitness signal, computed via CodeBLEU — see §5.3, §5.9.
 
 ---
 
@@ -166,9 +167,10 @@ Gaps down from 23 to **22** after revision. Biggest remaining concentration: (a)
 
 ### 🟡 Partial
 
-**4.5 SBERT model = `sentence-transformers/all-mpnet-base-v2`** — *elevated priority for next literature pass*
-- *Support:* Common default in the sentence-transformers community. Paper 1 and Paper 4 use SBERT but not this exact checkpoint. Safe default, but the *choice of this specific model* has no citation in our review.
-- *Status (2026-04-17):* User flagged this as a priority item to validate. Candidates to investigate in the next literature pass: domain-tuned sentence encoders, Instructor-XL, E5-large-v2, GTE-large. Also: should the embedding model differ between *rule* SBERT (natural-language, domain-flavoured) and any future code-embedding use?
+**4.5 SBERT model = `sentence-transformers/all-mpnet-base-v2`** ✅ RESOLVED 2026-04-24
+- *Citation:* **Paper 31 (MTEB, Muennighoff et al. EACL 2023)** — `all-mpnet-base-v2` ranks top-tier on the STS (Symmetric Text Similarity) subset, which is the exact task type of rule-pair similarity comparison. **Paper 32 (Sentence-BERT, Reimers & Gurevych EMNLP 2019)** — foundational architecture reference for all SBERT usage.
+- *Key findings from literature pass:* AUGMENT (Paper 4) actually uses `stsb-distilroberta-base-v2`, a weaker model than `all-mpnet-base-v2` on MTEB STS — the thesis's model choice is already stronger than the cited prior art. Perplexity's recommendation `multi-qa-mpnet-base-dot-v1` uses **dot-product similarity** (asymmetric retrieval task), not cosine, making it architecturally wrong for symmetric rule-pair STS.
+- *Pilot ablation planned:* **Paper 33 (SecureBERT 2.0, Aghaei et al. 2025)** — domain-specific alternative to test on 30–50 (original rule, paraphrased rule) pairs from existing artifacts. If Spearman correlation with `all-mpnet-base-v2` is ≥ 0.90, the current model is confirmed. Otherwise, SecureBERT 2.0 may be preferred for final experiments.
 
 **4.6 Security-keyword-retention criterion**
 - *Support:* This is a thesis extension to AUGMENT's framework, explicitly framed as "adding a 4th criterion." Paper 4 does not include this criterion. The *idea* of preserving domain-sensitive vocabulary is partially supported by Paper 20 (SCAFFOLD-CEGIS anchoring) and Paper 23 (MST-wi structural invariants).
@@ -191,9 +193,11 @@ Gaps down from 23 to **22** after revision. Biggest remaining concentration: (a)
 **4.10 Keyword-retention threshold ≥ 0.70**
 - *Gap:* Thesis choice. No paper motivates 0.70 vs 0.60 or 0.80.
 
-**4.11 The `_SECURITY_KEYWORDS` frozenset (~30 terms)** — *elevated priority*
-- *Gap:* Hand-curated vocabulary (sanitize, validate, escape, encode, injection, xss, csrf, ...). No paper provides this list.
-- *Status (2026-04-17):* User flagged as priority. Next-step options: (a) derive programmatically from CWE definitions, (b) adopt a published security-vocabulary corpus, (c) extract terms from the CodeGuard rule set itself (each rule's inline-code spans and frontmatter tags). Option (c) is attractive because it removes the hardcoding entirely.
+**4.11 Security keyword vocabulary (corpus-derived lexicon)** ✅ RESOLVED 2026-04-24
+- *Choice:* Replace `_SECURITY_KEYWORDS` frozenset with a corpus-derived lexicon built once at pipeline startup from: (1) inline-code spans in each rule (`ParsedRule.get_inline_code_tokens()`), (2) frontmatter tag values, (3) CWE IDs from frontmatter. These are author-validated identifiers — rule authors marked them as technical anchors. No hand-curation or external download required.
+- *Citation:* **Paper 20 (SCAFFOLD-CEGIS)** — semantic anchoring principle; inline-code spans are exactly the "security-critical elements" that must not drift. **Paper 23 (MST-wi)** — structural invariants principle; preserving vocabulary that is structurally marked (via backtick formatting) is a structural-invariant constraint. **MITRE CWE** (standards reference, not a paper) — CWE IDs in frontmatter are the authoritative vulnerability taxonomy source.
+- *Optional supplement:* Download MITRE CWE XML once, map CWE ID → CWE name (e.g., "CWE-79" → "cross-site scripting"). Pure data lookup, no classifier, adds ~50 short phrases to the lexicon.
+- *Threshold note:* The 0.70 retention threshold (§4.10) may need recalibration as the derived lexicon grows from ~35 to ~100+ terms. Flag in Threats to Validity.
 
 **4.12 Readability-delta criterion**
 - *Gap:* Fifth criterion in the code (`quality.py` has *five* criteria, not three — 2026-04-15 audit). The readability delta is not in AUGMENT. Choice of readability metric and threshold is undocumented in the reviewed literature.
@@ -202,12 +206,16 @@ Gaps down from 23 to **22** after revision. Biggest remaining concentration: (a)
 
 ## 5. Fitness function
 
-*Revised 2026-04-17: γ-term (code_divergence) **kept**, but its reference code source changed. Old design: load `InterestingCase.control_code` from the `interesting_cases` JSON (Sonnet-era batch output, model-mismatched with current Qwen pipeline). New design: populate `composite_evaluator.reference_codes` at iteration 0 from the fresh Qwen baseline generations that are already being computed for the α-term. Net effect: model-consistent γ, self-contained per-run pipeline, and the `control_code` JSON field becomes optional (retained for debugging/thesis figures).*
+*Revised 2026-04-17: γ-term (code_divergence) **kept**, reference code source switched to iteration-0 Qwen baseline.*
+*Revised 2026-04-24 (Perplexity pass): **weighted-sum dropped entirely**. New design: lexicographic acceptance. `rule_divergence` demoted to quality gate. `code_divergence` is secondary fitness signal via CodeBLEU.*
 
-**Current formula:** `composite = α · semgrep_delta + β · rule_divergence + γ · code_divergence`
-- `rule_divergence = 1 − SBERT(R_orig, R_mut)` (NL SBERT, suitable model)
-- `code_divergence = 1 − SBERT(generated_code, iteration-0_reference_code)` (NL SBERT applied to code — known weak fit, see §5.9)
-- Default weights (α, β, γ) = (1.0, 0.3, 0.2)
+**Current (post-Perplexity-pass) design:**
+- Primary signal: `semgrep_delta = new.semgrep_score − current.semgrep_score`
+- Secondary signal: `code_div = 1.0 − codebleu([baseline_code], [mutated_code])` (via `k4black/codebleu`)
+- Acceptance rule: `delta_s > 0` → accept (reward 1.0); `delta_s == 0 AND delta_c > 0` → accept (reward 0.5); else → reject (reward 0.0)
+- `rule_divergence` (SBERT ≥ 0.75) is a **quality gate** only — not a fitness term (see §4.8)
+
+**Old formula (retired):** `composite = 1.0·semgrep_delta + 0.3·rule_div + 0.2·code_div` — see §5.6 for why this was dropped.
 
 ### ✅ Validated
 
@@ -217,9 +225,10 @@ Gaps down from 23 to **22** after revision. Biggest remaining concentration: (a)
 **5.2 Composite fitness that mixes Semgrep with auxiliary signals**
 - *Citation:* Paper 3 (Hyun et al. 2025) — `Context_ASR × PerturbationQuality` is the structural analogue. Paper 9 (METAL) — EFM metric. Paper 21 (ATheNA) — formalises `f_AT × f_MAN`.
 
-**5.3 Code-divergence component (SBERT between generated code and iteration-0 reference)**
-- *Citation:* Paper 9 (METAL) — output-space divergence. Paper 17 (SoS) — multi-objective fitness interleaving.
-- *Architecture (2026-04-17):* reference code is **not** loaded from an external file. It is captured at iteration 0 from the same Qwen baseline run that produces the per-case Semgrep baseline. This ensures the reference is in-distribution with the candidate generations. See §8.2 for the wiring.
+**5.3 Code-divergence component (CodeBLEU between generated code and iteration-0 reference)**
+- *Citation:* **Paper 29 (CodeBLEU, Ren et al. 2020)** — the metric definition, default weights, and language-specific AST/data-flow matching. Paper 9 (METAL) — output-space divergence as a fitness signal. Paper 17 (SoS) — multi-objective fitness with secondary quality objective.
+- *Architecture (2026-04-17):* reference code is captured at iteration 0 from the same Qwen baseline run; see §8.2.
+- *Architecture (2026-04-24):* `code_div = 1.0 − calc_codebleu([baseline], [mutated], lang=lang, weights=(0.25,0.25,0.25,0.25))`. Language tag from CyberSecEval v2 test-case metadata (confirmed available). Replaces NL-SBERT-on-code which was the §5.9 gap.
 
 ### 🟡 Partial
 
@@ -231,13 +240,13 @@ Gaps down from 23 to **22** after revision. Biggest remaining concentration: (a)
 
 ### ❌ GAP
 
-**5.6 Composite weights α = 1.0, β = 0.3, γ = 0.2**
-- *Gap:* Values chosen by engineering judgment: α dominates because Semgrep is the ground truth; β and γ are smoothers. No sensitivity analysis; no paper prescribes these magnitudes. Paper 9 (METAL) uses a *product* `ASR × Quality`, not a weighted sum — we diverged in both form and numerics.
-- *Action item:* run a small 2-D sensitivity sweep over (β, γ) holding α fixed; check whether the optimiser trajectory is robust to these choices.
+**5.6 Composite weights α = 1.0, β = 0.3, γ = 0.2** ✅ ELIMINATED 2026-04-24
+- *Resolution:* Weighted-sum composite dropped entirely per Thread 1 decision. **Paper 26 (Chen & Li, TOSEM 2022)** provides the empirical citation: weighted sums miss Pareto-optimal solutions in 77% of SE benchmarks; small weight perturbations change which solution is selected. **Paper 28 (Miettinen 1999)** provides the theoretical alternative: lexicographic ordering is the correct scalarization when objectives have strict asymmetric priority. No sensitivity sweep needed — weights no longer exist.
+- *Status:* Dead code in `composite_fitness.py`. The α/β/γ constants should be removed in the next code cleanup pass.
 
-**5.7 `1 − sbert_rule_similarity` as the rule-divergence signal (β component)**
-- *Gap:* Hardcoded in [composite_fitness.py:154](thesis/rule-mutation/src/evaluation/composite_fitness.py#L154) as `raw_rule_divergence = 1.0 - sbert_rule_similarity`. Note: this diverges from the original `project_multi_mutator_plan.md`, which proposed `β · (1 − validation_score)` combining SBERT + keyword + inline-code; the implementation uses *just* SBERT drift.
-- *Implication:* one less hardcoded weighting decision than the plan suggested — simpler and directly grounded in SBERT. But still no paper validates rule SBERT drift as a fitness smoother specifically.
+**5.7 `1 − sbert_rule_similarity` as the rule-divergence signal (β component)** ✅ ELIMINATED 2026-04-24
+- *Resolution:* `rule_divergence` has been demoted from a fitness term to a quality gate constraint (SBERT ≥ 0.75 in `MutationQualityValidator`). The β-weighted fitness term no longer exists. The SBERT computation itself is preserved in the validator — it just no longer feeds into a composite weighted sum.
+- *Implication:* `raw_rule_divergence` in `composite_fitness.py` becomes dead code in the fitness path (retained for logging/debugging). The architectural reason for this demotion: every mutator changes rule text by construction, so rule_div would be monotonically increasing under compounding — a trivially satisfiable tie-breaker that adds no information.
 
 **5.8 Reference-code source change — track the cleanup**
 - *Status (2026-04-17):* the external-reference path from `InterestingCase.control_code` into `CompositeFitnessEvaluator(reference_codes=...)` becomes dead code in the fitness pipeline. The `control_code` JSON field is retained for non-fitness uses (debugging, thesis figures).
@@ -246,9 +255,10 @@ Gaps down from 23 to **22** after revision. Biggest remaining concentration: (a)
   - Caller (e.g. `scripts/experiments/run_with_rules_map.py`) — construct `CompositeFitnessEvaluator(reference_codes={}, ...)`; stop pre-loading from interesting_cases.
   - No changes to [composite_fitness.py](thesis/rule-mutation/src/evaluation/composite_fitness.py) internals — the dict contract is unchanged.
 
-**5.9 `all-mpnet-base-v2` for code embedding inside γ**
-- *Gap:* Natural-language SBERT applied to code produces noisy embeddings. Paper 9 (METAL) uses output SBERT for NL outputs, not code. Known upgrade path: CodeBERT / UniXcoder / CodeT5+ embedders. Currently we reuse the validator's SBERT to avoid a second model load on DelftBlue.
-- *Action item (medium priority):* benchmark all-mpnet vs CodeBERT on a held-out (original_rule → generated_code, mutated_rule → generated_code) pair set; quantify how much γ's ranking changes with the upgrade. If minimal, defend the NL-SBERT choice; otherwise switch.
+**5.9 CodeBLEU for code_divergence** ✅ RESOLVED 2026-04-24
+- *Citation:* **Paper 29 (CodeBLEU, Ren et al. 2020)** — the metric is specifically designed for code comparison and includes AST and data-flow components that NL-SBERT lacks. `k4black/codebleu` PyPI package provides a drop-in implementation with first-class Python and Java support.
+- *Old gap (NL-SBERT-on-code):* closed. Natural-language SBERT (`all-mpnet-base-v2`) applied to code is architecturally mismatched — CodeBLEU's AST and data-flow matching are purpose-built for the task.
+- *Implementation note:* `calc_codebleu([baseline_code], [mutated_code], lang="python"|"java", weights=(0.25,0.25,0.25,0.25))`. Language tag sourced from CyberSecEval v2 metadata. Default weights per Ren et al. 2020; fine-tuning is future work.
 
 ---
 
@@ -265,21 +275,39 @@ Gaps down from 23 to **22** after revision. Biggest remaining concentration: (a)
 **6.3 Combinatorial chaining (compound multiple mutators on one rule)**
 - *Citation:* Paper 3 (Hyun et al. 2025) — Priority-1 extension in our plan.
 
+### ✅ Validated (resolved 2026-04-24)
+
+**6.4 UCB1 arms defined as mutator-only (9 arms)** ✅ RESOLVED 2026-04-24
+- *Choice (updated):* Arms factorized over mutators only (`mutator_name`), not over the joint `(rule_id, mutator_name)` space. With 30–50 SLURM iterations, ~90 joint arms give < 1 pull/arm — the bandit cannot learn. 9 mutator-only arms give 3–4 pulls/arm — a viable learning signal.
+- *Citation:* **Paper 19 (SPRIG)** — UCB-based pruning for component/mutator selection operates at the mutator/component level, not joint (target × mutator). The mutator-only factorization is directly analogous. **Paper 26 (Chen & Li)** — the joint factorization would have introduced the same budget fragility as weighted sums; consolidating to mutator-only is the same "reduce complexity to what the budget supports" principle.
+- *Rule selection:* becomes a separate deterministic policy (round-robin default). Not a bandit concern.
+
+**6.5 UCB1 exploration constant `c = √2`** ✅ RESOLVED 2026-04-24
+- *Citation:* **Paper 34 (Auer, Cesa-Bianchi, Fischer 2002)** — canonical source of the `c = √2` exploration constant with the formal O(log T) regret proof. This was previously implicitly cited via SPRIG; now has a direct citation.
+- *Note:* Under the Thread 4 design, UCB1 is the **comparison baseline** rather than the primary strategy. D-UCB and DYTS replace it for main experiments. The exploration constant is thus secondary — it matters for the baseline comparison, not for production runs.
+
+**6.6 Reward scheme: {0.0, 0.5, 1.0} — no clipping needed** ✅ RESOLVED 2026-04-24
+- *Choice (updated):* 3-level scalar reward tied to the lexicographic acceptance rule: primary accept → 1.0; secondary accept → 0.5; reject → 0.0. No negative rewards, so clipping is moot.
+- *Citation:* **Paper 34 (Auer et al. 2002)** — UCB1 reward is bounded in [0, B]; our reward scheme is bounded in [0, 1.0] by construction. **Paper 36 (DYTS, Sun & Li 2020)** — Beta posterior updates with r ∈ [0, 1] assume this bounded range.
+- *Old gap (max(0, ·) clipping):* closed. The clipping was a workaround for negative composite rewards; those no longer exist under the lexicographic design.
+
 ### 🟡 Partial
 
-**6.4 UCB1 arms defined as joint `(rule_id, mutator_name)` pairs**
-- *Support:* Paper 19 (SPRIG) selects mutators via UCB, but not over a joint (target × mutator) space. Our choice to jointly index is a thesis-specific refinement without a direct citation.
-
-### ❌ GAP
-
-**6.5 UCB1 exploration constant `c = 1.41` (≈ √2)**
-- *Gap:* Textbook default (Auer et al. 2002). No paper in our 25-paper set justifies it for this specific application. Would benefit from a sensitivity sweep.
-
-**6.6 UCB1 reward = `max(0.0, marginal_composite_delta)`**
-- *Gap:* Clipping negative rewards is an engineering choice to prevent exploration starvation. No paper prescribes this clipping convention.
-
 **6.7 GREEDY_BATCH strategy (mutate all rules per iteration, accept-all on improvement)**
-- *Gap:* Custom strategy. None of the 25 papers defines this variant. Closest analogue is Paper 17 (SoS) crossover, but that is genuinely different (population-based).
+- *Support:* Custom strategy. **Paper 17 (SoS)** — crossover operator blending two parent prompts (one high-fitness, one high-quality) is the closest analogue: it evaluates multiple candidates per iteration and selects based on improvement. GREEDY_BATCH is simpler (evaluate all rules in parallel, accept individually) but shares the "multiple candidates per step" structure.
+- *Status (2026-04-24):* Remains 🟡. The closest analogue (SoS crossover) is a population-based operator rather than a rule-parallel batch — the analogy is partial. No paper defines this exact variant.
+
+### New: Non-stationary bandit strategies (planned)
+
+**6.8 D-UCB (Discounted UCB) strategy**
+- *Citation:* **Paper 35 (Garivier & Moulines, ALT 2011)** — direct source. Handles gradual drift in reward distributions via γ-discount on all historical observations.
+- *Hyperparameters:* γ ∈ (0.9, 0.99), ξ = 0.5 (Garivier & Moulines default), B = 1.0 (reward upper bound).
+- *Status:* ❌ Planned; implement as `ducb` strategy in `BanditStrategy` abstraction.
+
+**6.9 DYTS (Dynamic Thompson Sampling) strategy — default**
+- *Citation:* **Paper 36 (Sun & Li 2020)** — direct source. Fewer hyperparameters (γ only); outperforms UCB family in sparse-reward regimes. **Paper 39 (Chapelle & Li, NeurIPS 2011)** *(optional)* — empirical basis for Thompson sampling in sparse-reward settings.
+- *Hyperparameters:* γ ∈ (0.9, 0.99). Prior (α₀, β₀) = (1, 1).
+- *Status:* ❌ Planned; implement as `dyts` strategy in `BanditStrategy` abstraction. Default for main experiments.
 
 ---
 
@@ -315,8 +343,10 @@ Gaps down from 23 to **22** after revision. Biggest remaining concentration: (a)
 
 ### ✅ Validated
 
-**8.1 Per-CWE reporting (not only aggregate)**
-- *Citation:* Paper 10 (Tone) — aggregation hides per-domain effects. Paper 14 (CAIBench) — multi-domain cybersecurity evaluation.
+**8.1 Per-language reporting (Python + Java) as primary stratification axis**
+- *Choice (updated 2026-04-24):* Language (Python / Java) replaces CWE as the primary reporting axis. Two clean groups, natural statistical comparison (vs. 20+ CWE groups). Per-CWE reporting is retired from the design.
+- *Citation:* Paper 10 (Tone) — aggregation hides per-domain effects; per-language is the domain split. Paper 14 (CAIBench) — multi-domain cybersecurity evaluation. **Paper 37 (CyberSecEval v2)** — Python + Java are the two programmatic languages in the benchmark.
+- *CWE note:* CWE is retained as a **retrieval join key** between test cases and rules (kept unchanged in the pipeline). CWE is only retired as a *reporting* stratification axis. See §8.5 and §9.1 for this distinction.
 
 **8.2 Baseline control (original rule) computed fresh at iteration 0** — *clarified 2026-04-17*
 - *How it works:* the baseline is **not** loaded from an external file. [hill_climber.py:777-797](thesis/rule-mutation/src/optimizer/hill_climber.py#L777-L797) runs `_evaluate_with_per_prompt_rules` with `target_rule_id=None, mutator_fn=None, phase="baseline"` before the iteration loop starts. Per-case Semgrep fitness is cached into `self._baseline_fitness_per_case`, and **per-case generated code will additionally be cached into `self.composite_evaluator.reference_codes` in the same loop** (see §5.8). Both caches are looked up by each subsequent iteration: α uses the fitness cache, γ uses the code cache.
@@ -325,16 +355,19 @@ Gaps down from 23 to **22** after revision. Biggest remaining concentration: (a)
 
 ### 🟡 Partial
 
-**8.3 CyberSecEval as the evaluation dataset**
-- *Support:* CyberSecEval is a well-known Meta AI benchmark; Paper 14 (CAIBench) discusses cybersecurity benchmarks broadly. Our specific choice is not prescribed by any paper in the 25-set; it is an industry-standard default, and `project_rule_mutation.md` explicitly flags it as "still evolving, CWE subdivision is temporary."
+**8.3 CyberSecEval v2 as the primary evaluation dataset** ✅ RESOLVED 2026-04-24
+- *Citation:* **Paper 37 (Bhatt et al. 2024, arXiv:2404.13161)** — CyberSecEval **v2** is the correct citation for `walledai/CyberSecEval`. Version-corrected from Perplexity's implicit v1 (arXiv:2312.04724, Bhatt et al. 2023) attribution. The HuggingFace dataset `walledai/CyberSecEval` with `instruct` config is explicitly v2.
+- *Multi-dataset strategy:* **Paper 38 (LLMSecEval, Tony et al. MSR 2023)** — cross-check dataset for secondary robustness experiment. Linear wall-time (separate SLURM submission), not multiplicative. Paper 40 (SecurityEval, Siddiq & Santos 2022) *(optional)* — third cross-check if needed.
 
 **8.4 Separation of "interesting cases" (filtered) vs full prompt set**
 - *Support:* Paper 3 (Hyun et al. 2025) and Paper 11 (STELLAR) both do test-case selection/prioritisation, but our specific filtering criteria are a pipeline artefact, not a cited method.
 
 ### ❌ GAP
 
-**8.5 CWE-based stratification of the test-case universe**
-- *Gap:* Explicitly flagged in `project_rule_mutation.md`: "CWE-based subdivision is temporary." No paper in our review prescribes CWE as the primary stratification axis.
+**8.5 CWE-based stratification of the test-case universe** ✅ ELIMINATED 2026-04-24
+- *Resolution:* CWE-based **reporting** stratification removed from the design (Thread 6 decision). The gap stops existing because the design choice is simply retired. CWE subdivision was a leftover from cloning Cisco's CodeGuard validation pipeline structure; it was never validated as the right stratification axis for the thesis's phrasing-brittleness claim.
+- *What remains:* CWE is kept as a **retrieval join key** (`rule_retrieval_mapping_local.py`'s `CWE → rules_map`) — a free metadata join that requires no design justification. `LIMIT_PER_CWE` becomes `LIMIT_PER_LANGUAGE` or total `LIMIT_CASES` cap (code change pending).
+- *Reporting axis:* Python + Java language split (§8.1). Two groups, clean statistical comparison.
 
 **8.6 Number of test prompts per experiment run (N_CASES)**
 - *Gap:* The specific values used in SLURM scripts (5–96–222–1916) are driven by wall-time budget, not by a statistical power argument in the literature.
@@ -378,32 +411,51 @@ The following details are inside individual mutators and, while not load-bearing
 
 ## 11. Priority ranking of gaps to close
 
-*Revised 2026-04-17 after supervisor-prep pass. Items marked ✓ RESOLVED are fixed by the 2026-04-17 decisions; items marked ★ ELEVATED were promoted by user feedback.*
+*Revised 2026-04-17 after supervisor-prep pass.*
+*Revised 2026-04-24 after Perplexity deep-research pass. Items marked ✓ RESOLVED below were all closed in this pass.*
 
-**✓ RESOLVED (no further literature search needed)**
-- ~~SBERT 0.80 threshold (§4.8)~~ → reverted to AUGMENT 0.75.
-- ~~Perplexity 2.5 threshold (§4.9)~~ → reverted to AUGMENT 2.0.
-- ~~Model-mismatched γ reference (old concern)~~ → reference_codes now populated at iteration 0 from fresh Qwen baseline; external interesting_cases.control_code retired from fitness path.
-- ~~`validation_score` sub-weights (old §5.7)~~ → never implemented in the running code; plan superseded by single SBERT-drift term.
+**✓ RESOLVED — Perplexity pass (2026-04-24)**
+- ~~§1.6 Single-objective vs Pareto~~ → Lexicographic acceptance (Chen & Li P26, Miettinen P28, ATheNA P21).
+- ~~§4.5 SBERT model choice~~ → `all-mpnet-base-v2` justified by MTEB (P31) + Sentence-BERT (P32).
+- ~~§4.11 `_SECURITY_KEYWORDS` frozenset~~ → corpus-derived lexicon (Papers 20, 23, MITRE CWE).
+- ~~§5.6 Composite weights α/β/γ~~ → Weights eliminated; lexicographic replaces weighted sum.
+- ~~§5.7 rule_div as fitness β term~~ → rule_div demoted to quality gate; β term retired.
+- ~~§5.9 NL-SBERT-on-code for γ~~ → CodeBLEU (P29) replaces NL-SBERT for code_divergence.
+- ~~§6.5 UCB1 c = 1.41~~ → Auer et al. 2002 (P34) canonical citation.
+- ~~§6.6 Clipping negative rewards~~ → Auto-resolved by 3-level reward {0, 0.5, 1.0}.
+- ~~§8.3 CyberSecEval citation~~ → Version-corrected to v2 (Bhatt et al. 2024, P37).
+- ~~§8.5 CWE stratification~~ → Eliminated; language replaces CWE for reporting.
 
-**★ TOP PRIORITY for next literature pass**
-1. **Search-strategy alternatives to UCB1 (§6.5–6.7).** User wants to research Thompson sampling, ε-greedy-with-decay, EXP3 (non-stationary bandits), NSGA-II, simulated annealing. UCB1's stationarity assumption is violated by compounding; the `max(0, ·)` clipping destroys signal; per-prompt attribution is lost in aggregation. These are the three concrete weak spots to address.
-2. **Composite-fitness weights α = 1.0, β = 0.3, γ = 0.2 (§5.6).** Paper 9 (METAL) uses a product form; we use a weighted sum. Defend, switch, or run a sensitivity sweep over (β, γ) holding α fixed.
-3. **NL-SBERT for γ code-divergence (§5.9).** `all-mpnet-base-v2` on code is a known weak fit. Benchmark CodeBERT / UniXcoder / CodeT5+ as replacement; quantify how much γ rankings change. Cheap ablation, high defensive-value.
-4. **SBERT model choice for rule-level similarity (§4.5).** User-flagged. Benchmark domain-specialised encoders (Instructor-XL, E5, GTE) against `all-mpnet-base-v2` for security-rule text.
-5. **Security-keyword list (§4.11).** User-flagged: remove hardcoding. Best path is probably deriving from the rule corpus itself (inline-code spans + frontmatter tags) or CWE definitions.
-6. **Single-objective vs Pareto (§1.6).** Explicit supervisor decision needed — Paper 11 (STELLAR) and Paper 17 (SoS) favour multi-objective; Paper 3 (Hyun) single-objective.
+**✓ RESOLVED — Supervisor-prep pass (2026-04-17)**
+- ~~§4.8 SBERT 0.80 threshold~~ → reverted to AUGMENT 0.75.
+- ~~§4.9 Perplexity 2.5 threshold~~ → reverted to AUGMENT 2.0.
+- ~~Model-mismatched γ reference~~ → reference_codes from iteration-0 Qwen baseline.
 
-**MEDIUM PRIORITY**
-7. **FluffMutator + VerbWeakeningMutator (§2.9, §2.10).** Scheduled for removal. No literature hunt needed if they are dropped; if reshaped, find prior art in the register-shift / politeness literature.
-8. **CyberSecEval + CWE stratification (§8.3, §8.5).** User-confirmed "still evolving." A dataset justification paper — or a principled alternative (CAIBench, BigCodeBench-Security) — is the next research step.
-9. **Readability-delta criterion (§4.12).** Fifth validator criterion with no AUGMENT-style citation. Low user-priority but a defensive-review item.
+**REMAINING GAPS — implementation pending (code changes not yet made)**
 
-**RESEARCH DELIVERABLES this implies**
-- A **search-strategy comparison paper** (item 1) → likely the biggest upcoming literature deliverable.
-- A **composite-weight sensitivity memo** (item 2) → can be pure internal ablation, 1–2 day cost.
-- A **code-embedding benchmark note** (item 3) → pairwise compare all-mpnet vs CodeBERT on held-out (rule, generated-code) pairs.
-- An **SBERT-model benchmark note** (item 4) → small ablation on a held-out rule corpus.
+The following are code implementation tasks, not literature tasks — papers exist; code doesn't yet:
+
+1. **Lexicographic acceptance rule** (§1.6) — papers done; `hill_climber.py` acceptance logic needs rewrite.
+2. **CodeBLEU for code_div** (§5.9) — papers done; `composite_fitness.py` needs CodeBLEU integration.
+3. **D-UCB + DYTS strategies** (§6.8, §6.9) — papers done; `BanditStrategy` abstraction + implementations needed.
+4. **Mutator-only arm factorization** (§6.4) — papers done; bandit arm indexing in `hill_climber.py` needs update.
+5. **corpus-derived lexicon** (§4.11) — papers done; `build_security_lexicon()` helper needed in `quality.py`.
+6. **CWE → language stratification** (§8.5) — papers done; `LIMIT_PER_CWE` → `LIMIT_PER_LANGUAGE` change needed.
+7. **SecureBERT 2.0 ablation** (§4.5) — papers done; 30–50 rule pairs ablation run needed (~1 day).
+8. **LLMSecEval ingestion adapter** (§8.3) — papers done; adapter script needed (~3–4 hours).
+
+**MEDIUM PRIORITY — remaining uncited items (expected to stay uncited)**
+
+9. **FluffMutator + VerbWeakeningMutator (§2.9, §2.10).** Scheduled for removal. Once removed, the gap disappears.
+10. **Readability-delta criterion (§4.12).** Fifth validator criterion with no AUGMENT-style citation. Low user-priority defensive-review item.
+11. **Mutator hyperparameters (§2.11).** `aug_p = 0.3/0.1`, negation-stopword list (~16 entries), filler-word list (~20 words). Engineering choices; no paper prescribes these values. Acceptable to leave uncited.
+12. **Generation sampling parameters (§7.4, §7.5, §7.6).** top_p, max_new_tokens, quantization, prompt template. Engineering defaults; not expected to have literature citations.
+13. **N_CASES and N_ITERATIONS (§8.6, §8.7).** Power analysis for these values would be a novel contribution. Defensible as engineering choices with documented rationale.
+
+**RESEARCH DELIVERABLES remaining**
+- **SecureBERT 2.0 ablation note** → Spearman correlation + threshold calibration plot on 30–50 rule pairs. ~1 day.
+- **LLMSecEval cross-check SLURM run** → After main experiments are complete. 1 submission, ~1–2h wall time.
+- **(Optional) SecurityEval third cross-check** → If LLMSecEval cross-check raises questions about generalization.
 
 ---
 
