@@ -24,13 +24,11 @@ class FitnessStrategy(Enum):
     SEVERITY_WEIGHTED = auto()
     """Weighted count: ERROR=3, WARNING=1."""
 
-    UNIQUE_RULES = auto()
-    """Count of unique check_ids (rules) triggered."""
 
-    DELTA_COMPOSITE = auto()
-    """Composite score: alpha*semgrep_delta + beta*rule_divergence + gamma*code_divergence.
-    Requires a CompositeFitnessEvaluator to be wired into HillClimber."""
 
+# Minimum code_divergence to count a prompt as "truly different" from baseline.
+# Below this threshold the difference is numerical noise, not a semantic code change.
+DIV_THRESHOLD: float = 0.01
 
 # Severity weights for weighted fitness calculation
 SEVERITY_WEIGHTS: dict[str, int] = {
@@ -63,7 +61,10 @@ class FitnessResult:
     """Additional details (e.g., specific rule IDs)."""
 
     composite_score: float | None = None
-    """Composite fitness score set by CompositeFitnessEvaluator (DELTA_COMPOSITE only)."""
+    """semgrep_delta (score − baseline) set by CompositeFitnessEvaluator each iteration."""
+
+    code_divergence: float = 0.0
+    """1 − CodeBLEU(generated, reference); 0.0 when reference absent."""
 
     def fitness(self, strategy: FitnessStrategy = FitnessStrategy.SEVERITY_WEIGHTED) -> float:
         """Get fitness value based on strategy.
@@ -73,13 +74,6 @@ class FitnessResult:
         """
         if strategy == FitnessStrategy.RAW_COUNT:
             return float(self.raw_count)
-        elif strategy == FitnessStrategy.SEVERITY_WEIGHTED:
-            return self.weighted_score
-        elif strategy == FitnessStrategy.UNIQUE_RULES:
-            return float(self.unique_rules)
-        elif strategy == FitnessStrategy.DELTA_COMPOSITE:
-            # Falls back to weighted_score if evaluator hasn't populated composite_score
-            return self.composite_score if self.composite_score is not None else self.weighted_score
         else:
             return self.weighted_score
 
@@ -105,6 +99,20 @@ class AggregatedFitness:
     
     individual_results: list[FitnessResult] = field(default_factory=list)
     """Per-prompt fitness results."""
+
+    total_semgrep_delta: float = 0.0
+    """Sum of composite_score (semgrep_delta) across prompts; 0.0 when evaluator absent."""
+
+    total_code_divergence: float = 0.0
+    """Raw sum of code_divergence across prompts (preserved for JSON output)."""
+
+    n_divergent_prompts: int = 0
+    """Number of prompts where code_divergence > DIV_THRESHOLD (breadth of code change)."""
+
+    mean_code_divergence: float = 0.0
+    """Mean code_divergence over ALL prompts (total_div / n_prompts).
+    Scale-invariant tiebreaker: naturally penalises narrow mutations that affect few prompts.
+    Used as the secondary axis in _dominates / _acceptance_reward."""
 
 
 def calculate_fitness(
@@ -169,14 +177,23 @@ def aggregate_fitness(
             num_vulnerable=0,
             individual_results=[],
         )
-    
+
+    n = len(results)
     fitness_values = [r.fitness(strategy) for r in results]
-    
+    total_semgrep_delta = sum(r.composite_score for r in results if r.composite_score is not None)
+    total_code_divergence = sum(r.code_divergence for r in results)
+    n_divergent = sum(1 for r in results if r.code_divergence > DIV_THRESHOLD)
+    mean_div = total_code_divergence / n  # mean over all prompts (including zero-divergence ones)
+
     return AggregatedFitness(
         total_fitness=sum(fitness_values),
-        mean_fitness=sum(fitness_values) / len(fitness_values),
+        mean_fitness=sum(fitness_values) / n,
         max_fitness=max(fitness_values),
-        num_prompts=len(results),
+        num_prompts=n,
         num_vulnerable=sum(1 for v in fitness_values if v > 0),
         individual_results=results,
+        total_semgrep_delta=total_semgrep_delta,
+        total_code_divergence=total_code_divergence,
+        n_divergent_prompts=n_divergent,
+        mean_code_divergence=mean_div,
     )

@@ -29,19 +29,19 @@
 #            --error="/home/rnegro/thesis/rule-mutation/logs/paraphrase_%j.err" \
 #            scripts/slurm/slurm_rules_map_qwen32b.sh
 #
-#   # Multi-mutator pool with UCB1 selection (50 iterations, 2h30 wall-time)
-#   N_ITERATIONS=50 MUTATORS="fluff verb_weakening synonym_replacement" \
-#   MUTATOR_STRATEGY=ucb1 MAX_MUTATION_DEPTH=4 \
-#     sbatch --time=2:30:00 --job-name="pool_ucb1" \
-#            --output="/home/rnegro/thesis/rule-mutation/logs/pool_ucb1_%j.out" \
-#            --error="/home/rnegro/thesis/rule-mutation/logs/pool_ucb1_%j.err" \
+#   # Multi-mutator pool with round-robin selection (50 iterations, 2h30 wall-time)
+#   N_ITERATIONS=50 MUTATORS="verb_weakening synonym_replacement add_random_word" \
+#   MUTATOR_STRATEGY=round_robin MAX_MUTATION_DEPTH=4 \
+#     sbatch --time=2:30:00 --job-name="pool_rr" \
+#            --output="/home/rnegro/thesis/rule-mutation/logs/pool_rr_%j.out" \
+#            --error="/home/rnegro/thesis/rule-mutation/logs/pool_rr_%j.err" \
 #            scripts/slurm/slurm_rules_map_qwen32b.sh
 #
 #   # Scale-up run (all languages, 2h wall-time override)
-#   N_CASES=16 N_ITERATIONS=10 MUTATORS=fluff ENABLE_VALIDATION=1 \
-#     sbatch --time=2:00:00 --job-name="fluff_map" \
-#            --output="/home/rnegro/thesis/rule-mutation/logs/fluff_%j.out" \
-#            --error="/home/rnegro/thesis/rule-mutation/logs/fluff_%j.err" \
+#   N_CASES=16 N_ITERATIONS=10 MUTATORS=synonym_replacement ENABLE_VALIDATION=1 \
+#     sbatch --time=2:00:00 --job-name="synrep_map" \
+#            --output="/home/rnegro/thesis/rule-mutation/logs/synrep_%j.out" \
+#            --error="/home/rnegro/thesis/rule-mutation/logs/synrep_%j.err" \
 #            scripts/slurm/slurm_rules_map_qwen32b.sh
 #
 #   # With 4-bit quantization (18GB VRAM, use gpu-a100-small partition)
@@ -53,7 +53,6 @@ set -e  # Exit on error
 # Configuration (override via environment variables before sbatch)
 N_CASES=${N_CASES:-16}
 N_ITERATIONS=${N_ITERATIONS:-10}
-EARLY_STOP=${EARLY_STOP:-0}        # 0 = disabled; run all iterations
 QUANTIZATION=${QUANTIZATION:-fp16}
 SEED=${SEED:-42}
 SELECTION=${SELECTION:-first}
@@ -61,22 +60,19 @@ LANGUAGES=${LANGUAGES:-}  # space-separated, e.g. "c python"; empty = all
 SEMGREP_RULESET=${SEMGREP_RULESET:-/scratch/$USER/semgrep-rules/security-audit}
 SEMGREP_TIMEOUT_SECONDS=${SEMGREP_TIMEOUT_SECONDS:-180}
 SEMGREP_JOBS=${SEMGREP_JOBS:-4}
-MUTATORS=${MUTATORS:-"fluff"}       # space-separated mutator names; LLM mutators require --backend local
-MUTATOR_STRATEGY=${MUTATOR_STRATEGY:-round_robin}  # random, round_robin, ucb1, greedy_batch
+MUTATORS=${MUTATORS:-"synonym_replacement"}  # space-separated mutator names; LLM mutators require --backend local
+MUTATOR_STRATEGY=${MUTATOR_STRATEGY:-round_robin}  # random, round_robin, ducb, greedy_batch
+DUCB_GAMMA=${DUCB_GAMMA:-0.9}              # discount factor γ ∈ (0,1] for ducb strategy (ignored otherwise)
 MAX_MUTATION_DEPTH=${MAX_MUTATION_DEPTH:-4}         # max compounding depth per rule
 ENABLE_VALIDATION=${ENABLE_VALIDATION:-0}   # 1 = run SBERT quality gate after each mutation
 ENABLE_PERPLEXITY=${ENABLE_PERPLEXITY:-0}  # 1 = add perplexity-ratio gate (reuses 32B model, requires ENABLE_VALIDATION=1)
 MUTATION_MAX_RETRIES=${MUTATION_MAX_RETRIES:-2}
-FITNESS_STRATEGY=${FITNESS_STRATEGY:-severity_weighted}  # raw_count, severity_weighted, unique_rules, delta_composite
-FITNESS_WEIGHTS=${FITNESS_WEIGHTS:-"1.0 0.3 0.2"}        # alpha beta gamma (only used with delta_composite)
-USE_MAPPING_ONLY=${USE_MAPPING_ONLY:-0}  # 1 = bypass interesting_cases; use all 96 entries in retrieval map
-SKIP_SEEN=${SKIP_SEEN:-0}               # 1 = skip already-tried (rule, mutator, input_text) triples
+ENABLE_EVAL_CACHE=${ENABLE_EVAL_CACHE:-1}  # 0 = disable per-prompt (code, Semgrep) cache; 1 = enabled (default)
 
 MODEL_ID="Qwen/Qwen2.5-Coder-32B-Instruct"
 
-# Input files (from previous batch experiments) — override via env vars
-INTERESTING_CASES=${INTERESTING_CASES:-"pipeline_breakdown/generation_results/interesting_cases_96_sonnet_4_6.json"}
-RULES_MAP=${RULES_MAP:-"/home/rnegro/thesis/rule_retrieval_validation/retrieval_map_qwen32b_96.json"}
+# Input file — override via env var
+RULES_MAP=${RULES_MAP:-"/home/rnegro/thesis/rule-mutation/pipeline_breakdown/rule_retrieval_output/map_qwen32b_python_java.json"}
 
 echo "=========================================================================="
 echo "SBST: Per-Prompt Rules Hill Climbing with Qwen 32B"
@@ -91,28 +87,19 @@ echo "  Model: $MODEL_ID"
 echo "  Quantization: $QUANTIZATION"
 echo "  Test cases: $N_CASES"
 echo "  Iterations: $N_ITERATIONS"
-echo "  Early stop: ${EARLY_STOP} (0=disabled)"
 echo "  Seed: $SEED"
 echo "  Selection: $SELECTION"
 echo "  Languages: ${LANGUAGES:-all}"
 echo "  Semgrep rules: $SEMGREP_RULESET"
 echo "  Semgrep timeout: ${SEMGREP_TIMEOUT_SECONDS}s"
 echo "  Semgrep jobs: $SEMGREP_JOBS"
-echo "  Mutators: $MUTATORS ($MUTATOR_STRATEGY)"
+echo "  Mutators: $MUTATORS ($MUTATOR_STRATEGY, γ=$DUCB_GAMMA)"
 echo "  Max mutation depth: $MAX_MUTATION_DEPTH"
 echo "  Validation: ${ENABLE_VALIDATION} (1=enabled)"
 echo "  Perplexity gate: ${ENABLE_PERPLEXITY} (1=enabled; requires ENABLE_VALIDATION=1)"
-echo "  Fitness strategy: $FITNESS_STRATEGY"
-echo "  Fitness weights: $FITNESS_WEIGHTS (alpha beta gamma)"
-echo "  Mapping-only mode: ${USE_MAPPING_ONLY} (1=bypass interesting_cases, use all 96 mapping entries)"
-echo "  Skip seen pairs: ${SKIP_SEEN} (1=skip already-tried (rule, mutator, text) triples)"
+echo "  Eval cache: ${ENABLE_EVAL_CACHE} (0=disabled, re-evaluates every time)"
 echo ""
 echo "Input files:"
-if [ "$USE_MAPPING_ONLY" = "1" ]; then
-    echo "  Interesting cases: (bypassed — mapping-only mode)"
-else
-    echo "  Interesting cases: $INTERESTING_CASES"
-fi
 echo "  Rules map: $RULES_MAP"
 echo ""
 
@@ -200,36 +187,19 @@ if [ "$ENABLE_VALIDATION" = "1" ]; then
     fi
 fi
 
-# Build optional fitness-weights flag (only meaningful with delta_composite)
-FITNESS_WEIGHTS_ARG=""
-if [ "$FITNESS_STRATEGY" = "delta_composite" ]; then
-    FITNESS_WEIGHTS_ARG="--fitness-weights $FITNESS_WEIGHTS"
-fi
-
-# Build optional mapping-only flag and interesting-cases arg
-MAPPING_ONLY_FLAG=""
-INTERESTING_CASES_ARG="--interesting-cases $INTERESTING_CASES"
-if [ "$USE_MAPPING_ONLY" = "1" ]; then
-    MAPPING_ONLY_FLAG="--use-mapping-only"
-    INTERESTING_CASES_ARG=""
-fi
-
-# Build optional skip-seen flag
-SKIP_SEEN_FLAG=""
-if [ "$SKIP_SEEN" = "1" ]; then
-    SKIP_SEEN_FLAG="--skip-seen"
+# Build optional no-eval-cache flag (cache is ON by default; set ENABLE_EVAL_CACHE=0 to disable)
+NO_EVAL_CACHE_FLAG=""
+if [ "$ENABLE_EVAL_CACHE" = "0" ]; then
+    NO_EVAL_CACHE_FLAG="--no-eval-cache"
 fi
 
 python scripts/experiments/run_with_rules_map.py \
     --backend local \
     --model "$MODEL_ID" \
     --quantization "$QUANTIZATION" \
-    $MAPPING_ONLY_FLAG \
-    $INTERESTING_CASES_ARG \
     --rules-map "$RULES_MAP" \
     --n-cases "$N_CASES" \
     --iterations "$N_ITERATIONS" \
-    --early-stop "$EARLY_STOP" \
     --seed "$SEED" \
     --selection "$SELECTION" \
     --semgrep-config "$SEMGREP_RULESET" \
@@ -237,11 +207,10 @@ python scripts/experiments/run_with_rules_map.py \
     --semgrep-jobs "$SEMGREP_JOBS" \
     --mutators $MUTATORS \
     --mutator-strategy "$MUTATOR_STRATEGY" \
+    --ducb-gamma "$DUCB_GAMMA" \
     --max-mutation-depth "$MAX_MUTATION_DEPTH" \
-    --fitness-strategy "$FITNESS_STRATEGY" \
-    $FITNESS_WEIGHTS_ARG \
     $VALIDATION_FLAG \
-    $SKIP_SEEN_FLAG \
+    $NO_EVAL_CACHE_FLAG \
     $LANG_ARG \
     --output-dir "$OUTPUT_DIR"
 
