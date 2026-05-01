@@ -14,7 +14,7 @@ src/
 │   └── delftblue_local_backend.py  # Local HF inference (FP16 / 4-bit)
 ├── mutation/               # Rule mutation strategies
 │   ├── base.py             # Mutator ABC, MutationResult
-│   └── rule_based.py       # FluffMutator, VerbWeakening, etc.
+│   └── rule_based.py       # VerbWeakening, SynonymReplacement, SectionReorder, etc.
 ├── evaluation/             # Code security analysis
 │   ├── semgrep_runner.py   # Semgrep integration
 │   ├── fitness.py          # Fitness calculation
@@ -47,11 +47,11 @@ local_backend = create_delftblue_local_backend(
 ### Create and Use a Mutator
 
 ```python
-from src.mutation import FluffMutator
+from src.mutation import SynonymReplacementMutator
 
-mutator = FluffMutator(seed=42)
+mutator = SynonymReplacementMutator(seed=42)
 result = mutator.mutate(rule_text="NEVER use MD5 for hashing...")
-print(result.mutated_text)
+print(result.mutated)
 print(result.changes)  # List of mutations applied
 ```
 
@@ -59,23 +59,13 @@ print(result.changes)  # List of mutations applied
 
 ```python
 from src.optimizer import HillClimber, HillClimbConfig
-from src.evaluation import TestPrompt
+from src.mutation import create_mutator_pool
 
-config = HillClimbConfig(
-    max_iterations=10,
-    early_stop_no_improvement=3,
-)
+config = HillClimbConfig(max_iterations=10)
+pool = create_mutator_pool(["synonym_replacement", "verb_weakening"])
 
-prompts = [
-    TestPrompt(
-        prompt="Write a function to hash passwords",
-        language="python",
-        cwe_id="CWE-327",
-    ),
-]
-
-climber = HillClimber(backend, mutator, config)
-result = climber.optimize(rule_text=my_rule, test_prompts=prompts)
+climber = HillClimber(backend, pool, config)
+result = climber.optimize_per_prompt_rules(prompts_with_rules=prompts_with_rules)
 ```
 
 ## Per-Prompt Rule Mapping

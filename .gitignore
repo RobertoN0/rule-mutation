@@ -18,3 +18,10 @@ logs/
 .beads/dolt-server.*
 .beads/*.pid
 .beads/*.pid.lock
+
+
+validation/
+LaTex_thesis_scripts/
+
+CLAUDE.md
+experiments/analysis/

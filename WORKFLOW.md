@@ -18,32 +18,18 @@ Experiments require test prompts from the CyberSecEval dataset. You can either:
 --interesting-cases path/to/interesting_cases.json
 ```
 
-**Option B: Select from dataset directly**
-```python
-from src.evaluation import TestCaseSelector, SelectionCriteria
-
-selector = TestCaseSelector()
-prompts = selector.select(SelectionCriteria(
-    languages=["python", "c"],
-    cwes=["CWE-89", "CWE-120"],
-    limit=10,
-    shuffle=True,
-    seed=42,
-))
-```
-
 ### 2. Create Rule Mapping
 
-Rules are mapped to prompts using an AI agent that selects relevant guidelines using [rule_retrieval_mapping.py](pipeline_breakdown/rule_retrieval_mapping.py):
+Rules are mapped to prompts using the local retrieval script:
 
 ```bash
-# Generate mapping (uses LLM to select rules per prompt)
-python pipeline_breakdown/rule_retrieval_mapping.py \
+# Generate mapping (uses local Qwen model to select rules per prompt)
+python pipeline_breakdown/rule_retrieval_mapping_local.py \
     --input interesting_cases.json \
-    --output rule_mapping.json \
+    --output rule_mapping.json
 ```
 
-This script breaks down the agentic workflow, by performing an agent like rule retrieval and saving a map between specific test prompts and the CodeGuard rules that the agent believs being necessary. This mapping can then be used to perform only the code generation part of the workflow.
+This script performs agent-like rule retrieval and saves a map between specific test prompts and the CodeGuard rules selected as relevant. Pre-computed maps are in `pipeline_breakdown/rule_retrieval_output/`.
 
 ### 3. Run Experiment
 

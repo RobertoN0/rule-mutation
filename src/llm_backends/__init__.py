@@ -1,22 +1,13 @@
 """
 LLM Backend abstraction for the SBST framework.
 
-Provides a unified interface for different LLM providers (Groq, OpenRouter, Together AI).
+Provides a unified interface for LLM inference on DelftBlue (local Qwen model).
 """
 
 from .base import LLMBackend, LLMResponse, LLMConfig, LLMError, RateLimitError
-from .groq_backend import GroqBackend, create_groq_backend
-from .openrouter_backend import OpenRouterBackend, create_openrouter_backend
 from .delftblue_local_backend import (
     DelftBlueLocalBackend,
     create_delftblue_local_backend,
-)
-from .quota import (
-    QuotaTracker,
-    QuotaUsage,
-    RateLimitInfo,
-    get_quota_tracker,
-    GROQ_FREE_TIER_LIMITS,
 )
 
 __all__ = [
@@ -27,16 +18,6 @@ __all__ = [
     "LLMError",
     "RateLimitError",
     # Backends
-    "GroqBackend",
-    "create_groq_backend",
-    "OpenRouterBackend",
-    "create_openrouter_backend",
     "DelftBlueLocalBackend",
     "create_delftblue_local_backend",
-    # Quota tracking
-    "QuotaTracker",
-    "QuotaUsage",
-    "RateLimitInfo",
-    "get_quota_tracker",
-    "GROQ_FREE_TIER_LIMITS",
 ]
