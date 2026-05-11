@@ -72,25 +72,6 @@ def _acceptance_reward(
     return 0.0
 
 
-def _is_pairs_exhausted(
-    active_rule_ids: list[str],
-    mutators: list[Any],
-    tracker: "CurrentBestTracker",
-    seen_pairs: set[tuple[str, str, str]],
-) -> bool:
-    """Return True iff every (rule, mutator, current_text_hash) triple is in seen_pairs.
-
-    Safe after accepted mutations: tracker.get_current() reflects the live compounded
-    text, so a rule whose text just changed produces a new hash not yet in seen_pairs,
-    preventing a false-positive early exit.
-    """
-    for rule_id in active_rule_ids:
-        h = hashlib.sha256(tracker.get_current(rule_id).encode()).hexdigest()[:16]
-        for m in mutators:
-            if (rule_id, m.name, h) not in seen_pairs:
-                return False
-    return True
-
 
 @dataclass
 class CurrentBestTracker:
@@ -330,6 +311,9 @@ class HillClimbResult:
     per_rule_best_delta: dict[str, float] = field(default_factory=dict)
     """Maximum fitness delta observed per rule_id across all iterations."""
 
+    per_rule_best_code_divergence: dict[str, float] = field(default_factory=dict)
+    """Maximum mean_code_divergence observed per rule_id across all iterations."""
+
     pool_arm_stats: dict | None = None
     """Bandit arm statistics from MutatorPool (if multi-mutator)."""
 
@@ -374,7 +358,7 @@ class HillClimber:
     # System prompt template for code generation
     SYSTEM_TEMPLATE = (
         "You are a software engineer. Before writing code, carefully review "
-        "and follow ALL of the coding guidelines provided below. "
+        "and follow all of the coding guidelines provided below. "
         "Generate only the code requested; do not include explanations.\n\n"
         "=== CODING GUIDELINES ===\n\n"
         "{rules}"
@@ -479,47 +463,6 @@ class HillClimber:
         
         return response.content, response.latency_ms
     
-    def _evaluate_on_prompts(
-        self,
-        rule_text: str,
-        prompts: list[TestPrompt],
-    ) -> tuple[AggregatedFitness, list[EvaluationResult]]:
-        """Evaluate a rule variant on all test prompts.
-        
-        Returns:
-            Tuple of (aggregated_fitness, individual_results).
-        """
-        results: list[EvaluationResult] = []
-        fitness_results: list[FitnessResult] = []
-        
-        for prompt in prompts:
-            # Generate code
-            code, gen_latency = self._generate_code(rule_text, prompt)
-            
-            # Run Semgrep analysis
-            analysis_start = time.perf_counter()
-            semgrep_result = run_semgrep(
-                code,
-                language=prompt.language,
-                strip_fences=True,
-            )
-            analysis_latency = (time.perf_counter() - analysis_start) * 1000
-            
-            # Calculate fitness
-            fitness = calculate_fitness(semgrep_result, self.config.fitness_strategy)
-            fitness_results.append(fitness)
-            
-            results.append(EvaluationResult(
-                prompt=prompt,
-                generated_code=code,
-                fitness=fitness,
-                generation_latency_ms=gen_latency,
-                analysis_latency_ms=analysis_latency,
-            ))
-        
-        aggregated = aggregate_fitness(fitness_results, self.config.fitness_strategy)
-        return aggregated, results
-    
     def _apply_targeted_mutation(
         self,
         pwr: "PromptWithRules",  # type: ignore
@@ -605,8 +548,7 @@ class HillClimber:
         """Evaluate prompts where each has its own rules.
 
         All LLM code-generation calls are completed first, then a single
-        Semgrep subprocess is run on the full batch — eliminating per-sample
-        process startup overhead.
+        Semgrep subprocess is run on the full batch.
 
         Args:
             prompts_with_rules: List of PromptWithRules with pre-combined rules.
@@ -624,7 +566,7 @@ class HillClimber:
         # ------------------------------------------------------------------
         # Pre-compute a single mutation for the entire iteration.
         # All prompts that have target_rule_id will receive the identical
-        # mutated text, making per-rule attribution unambiguous.
+        # mutated text.
         # ------------------------------------------------------------------
         pre_mutated_text: str | None = None
         pre_mutation_changes: list[str] = []
@@ -781,7 +723,7 @@ class HillClimber:
                 analysis_latency_per_sample[i] = per_sample_ms
                 # Populate cache for this (tc_id, rule_hash) → reused next iteration
                 if cache_enabled and cache_keys[i] is not None:
-                    self._eval_cache[cache_keys[i]] = {
+                    self._eval_cache[cache_keys[i]] = { # type: ignore
                         "code": generated[i][0],
                         "gen_latency_ms": generated[i][1],
                         "semgrep_result": sres,
@@ -835,9 +777,10 @@ class HillClimber:
             )
             if fitness.composite_score is not None:
                 self._log(
-                    f"       → TC#{tc_id}: Score={fitness.weighted_score:.3f}, "
+                    f"       → TC#{tc_id}: Vulns={fitness.raw_count} "
+                    f"Score={fitness.weighted_score:.3f}, "
                     f"Δ={fitness.composite_score:+.3f}, "
-                    f"Div={fitness.code_divergence:.3f}, Vulns={fitness.raw_count}"
+                    f"Div={fitness.code_divergence:.3f}, "
                 )
             else:
                 self._log(f"       → TC#{tc_id}: Score={fitness.weighted_score:.3f}, Vulns={fitness.raw_count}")
@@ -847,22 +790,114 @@ class HillClimber:
         # Mutation changes were pre-computed once for the whole iteration
         sample_changes = pre_mutation_changes
 
-        return aggregated, results, sample_changes, pre_validation_metadata, pre_mutated_text
+        return aggregated, results, sample_changes, pre_validation_metadata, pre_mutated_text # type: ignore
+
+    def _run_greedy_batch_iteration(
+        self,
+        i: int,
+        active_rule_ids: list[str],
+        selected_mutator: Any,
+        prompts_with_rules: list[Any],
+        tracker: CurrentBestTracker,
+        original_fitness: AggregatedFitness,
+        best_fitness: AggregatedFitness,
+        best_results: list[Any],
+        iterations: list[IterationResult],
+    ) -> tuple[bool, AggregatedFitness, list[Any]]:
+        """Execute one GREEDY_BATCH iteration.
+
+        Mutates every active rule independently, evaluates the full prompt set,
+        and updates best_fitness/best_results/tracker on improvement.
+
+        Returns (rate_limit_hit, best_fitness, best_results).
+        iterations is mutated in place (appended to).
+        """
+        self._log(
+            f"\n\U0001f504 Iteration {i+1}/{self.config.max_iterations} "
+            f"\u2014 BATCH: mutating {len(active_rule_ids)} active rules "
+            f"with {selected_mutator.name}"
+        )
+
+        # Mutate every active rule independently, starting from tracker's current best
+        batch_mutations: dict[str, str] = {}
+        all_changes: list[str] = []
+        for rid in active_rule_ids:
+            m_result = selected_mutator.mutate(tracker.get_current(rid))
+            batch_mutations[rid] = m_result.mutated
+            all_changes.extend(m_result.changes[:2])
+
+        try:
+            candidate_fitness, candidate_results, _, val_metadata, _ = (  # type: ignore
+                self._evaluate_with_per_prompt_rules(
+                    prompts_with_rules,
+                    target_rule_id=None,
+                    mutator_fn=None,
+                    iteration=i + 1,
+                    phase=f"mutation_iter{i+1}_batch",
+                    tracker=tracker,
+                    selected_mutator=selected_mutator,
+                    batch_mutations=batch_mutations,
+                )
+            )
+        except Exception as e:
+            if "rate_limit" in str(e).lower() or "429" in str(e) or "413" in str(e):
+                self._log(f"\n\u26a0\ufe0f  Rate limit hit at iteration {i+1}")
+                return True, best_fitness, best_results
+            raise
+
+        fitness_delta = candidate_fitness.total_fitness - original_fitness.total_fitness
+        is_improvement = candidate_fitness.total_fitness > best_fitness.total_fitness
+        mutation_changes = (
+            [f"BATCH({selected_mutator.name}): {len(active_rule_ids)} rules"] + all_changes[:3]
+        )
+
+        # No UCB1 credit assignment for batch — incompatible with per-arm attribution
+        iteration_result = IterationResult(
+            iteration=i,
+            rule_text=f"[batch: {len(active_rule_ids)} rules]",
+            aggregated_fitness=candidate_fitness,
+            individual_results=candidate_results,
+            is_improvement=is_improvement,
+            mutation_changes=mutation_changes,
+            validation_metadata=val_metadata,
+        )
+        iterations.append(iteration_result)
+
+        _n_div_b = candidate_fitness.n_divergent_prompts
+        _mean_div_b = candidate_fitness.mean_code_divergence
+        if is_improvement:
+            self._log(
+                f"   \u2705 Batch improvement! Semgrep {best_fitness.total_fitness:.1f} \u2192 "
+                f"{candidate_fitness.total_fitness:.1f} (\u0394={fitness_delta:+.1f}), "
+                f"Div={_mean_div_b:.3f} [{_n_div_b}/{len(prompts_with_rules)} prompts changed]"
+            )
+            best_fitness = candidate_fitness
+            best_results = candidate_results
+            # Accept-all: update tracker for every active rule
+            for rid, mutated_text in batch_mutations.items():
+                if not tracker.is_saturated(rid):
+                    tracker.accept_mutation(rid, mutated_text)
+        else:
+            self._log(
+                f"   \u274c No improvement: Semgrep={candidate_fitness.total_fitness:.1f} "
+                f"(\u0394={fitness_delta:+.1f}), "
+                f"Div={_mean_div_b:.3f} [{_n_div_b}/{len(prompts_with_rules)} prompts changed]"
+            )
+
+        return False, best_fitness, best_results
+
 
     def optimize_per_prompt_rules(
         self,
         prompts_with_rules: list["PromptWithRules"], # type: ignore
-        callback: Callable[[IterationResult], None] | None = None,
     ) -> HillClimbResult:
         """Run hill climbing where each prompt has its own rules.
         
-        This variant is for when rules are mapped per-prompt via a rule
-        retrieval mapping. Each prompt will use its own set of rules,
+        Each prompt will use its own set of rules,
         and mutations are applied to each prompt's rules independently.
         
         Args:
             prompts_with_rules: Prompts with their associated rules.
-            callback: Optional callback called after each iteration.
             
         Returns:
             HillClimbResult with optimization results.
@@ -872,8 +907,6 @@ class HillClimber:
         
         self._log(f"Starting per-prompt-rules optimization: {self.config.max_iterations} iterations, "
                   f"{len(prompts_with_rules)} prompts")
-        self._log(f"LLM: {self.llm.provider_name} / {self.llm.model_name}")
-        self._log(f"Mutator pool: {self.pool.mutator_names} ({self.pool.strategy.value})")
 
         # Log per-prompt rule assignments
         self._log(f"\nTest case → Rules mapping:")
@@ -904,10 +937,12 @@ class HillClimber:
             max_depth=self.config.max_mutation_depth,
         )
 
-        # Evaluate original rules (baseline)
+        ######################################
+        # Evaluate original rules (baseline) #
+        ######################################
         self._log("\n📊 Evaluating with original rules...")
         try:
-            original_fitness, original_results, _, _, _ = self._evaluate_with_per_prompt_rules(
+            original_fitness, original_results, _, _, _ = self._evaluate_with_per_prompt_rules( # type: ignore
                 prompts_with_rules, target_rule_id=None, mutator_fn=None,
                 iteration=None, phase="baseline"
             )
@@ -945,16 +980,9 @@ class HillClimber:
         per_rule_best_delta: dict[str, float] = {rid: 0.0 for rid in all_rule_ids}
         per_rule_best_code_divergence: dict[str, float] = {rid: 0.0 for rid in all_rule_ids}
 
-        # ── Seen-pairs deduplication ─────────────────────────────────────────
-        # Tracks (rule_id, mutator_name, input_text_hash) triples evaluated so far.
-        # For non-bandit strategies: already-seen triples are skipped (continue).
-        # For bandit strategies: the eval cache makes re-evaluation free, so we
-        # allow the bandit to re-select arms — _seen_pairs is used only for the
-        # exhaustion check, never as a skip gate.
-        _seen_pairs: set[tuple[str, str, str]] = set()
-        _consecutive_skips: int = 0  # consecutive non-bandit skips in a row
-
-        # ── Hill climbing loop ───────────────────────────────────────────────
+        ##################################
+        #       Hill climbing loop       #
+        ##################################
         rate_limit_hit = False
         for i in range(self.config.max_iterations):
             # Filter out saturated rules
@@ -966,119 +994,22 @@ class HillClimber:
             # Select (rule, mutator) via pool strategy
             target_rule_id, selected_mutator = self.pool.select(active_rule_ids)
 
-            # ── Deduplication / exhaustion ───────────────────────────────────
-            if not self.pool.is_batch:
-                input_hash = hashlib.sha256(
-                    tracker.get_current(target_rule_id).encode()
-                ).hexdigest()[:16]
-                pair_key = (target_rule_id, selected_mutator.name, input_hash)
-
-                already_seen = pair_key in _seen_pairs
-                _seen_pairs.add(pair_key)
-
-                if already_seen and not self.pool.is_bandit:
-                    # Non-bandit: skip deterministic re-evaluation; check exhaustion
-                    _consecutive_skips += 1
-                    short = target_rule_id.replace("codeguard-", "cg-")
-                    self._log(
-                        f"   ⏭  Iter {i+1}/{self.config.max_iterations}: "
-                        f"({short}, {selected_mutator.name}) already evaluated — "
-                        f"skip #{_consecutive_skips}"
-                    )
-                    n_possible = len(active_rule_ids) * len(self.pool.mutators)
-                    if _consecutive_skips >= n_possible and _is_pairs_exhausted(
-                        active_rule_ids, self.pool.mutators, tracker, _seen_pairs
-                    ):
-                        self._log(
-                            f"\n⏹  All (rule, mutator, text) combinations exhausted "
-                            f"after {len(iterations)} productive iterations — stopping"
-                        )
-                        break
-                    continue
-
-                _consecutive_skips = 0  # reset on any productive iteration
-
             # ── GREEDY_BATCH path ────────────────────────────────────────────
             if self.pool.is_batch:
-                self._log(f"\n🔄 Iteration {i+1}/{self.config.max_iterations} "
-                          f"— BATCH: mutating {len(active_rule_ids)} active rules "
-                          f"with {selected_mutator.name}")
-
-                # Mutate every active rule independently, starting from tracker's current best
-                batch_mutations: dict[str, str] = {}
-                all_changes: list[str] = []
-                for rid in active_rule_ids:
-                    m_result = selected_mutator.mutate(tracker.get_current(rid))
-                    batch_mutations[rid] = m_result.mutated
-                    all_changes.extend(m_result.changes[:2])
-
-                try:
-                    candidate_fitness, candidate_results, _, val_metadata, _ = (
-                        self._evaluate_with_per_prompt_rules(
-                            prompts_with_rules,
-                            target_rule_id=None,
-                            mutator_fn=None,
-                            iteration=i + 1,
-                            phase=f"mutation_iter{i+1}_batch",
-                            tracker=tracker,
-                            selected_mutator=selected_mutator,
-                            batch_mutations=batch_mutations,
-                        )
-                    )
-                except Exception as e:
-                    if "rate_limit" in str(e).lower() or "429" in str(e) or "413" in str(e):
-                        self._log(f"\n⚠️  Rate limit hit at iteration {i+1}")
-                        rate_limit_hit = True
-                        break
-                    raise
-
-                fitness_delta = candidate_fitness.total_fitness - original_fitness.total_fitness
-                is_improvement = candidate_fitness.total_fitness > best_fitness.total_fitness
-                mutation_changes = [f"BATCH({selected_mutator.name}): {len(active_rule_ids)} rules"] + all_changes[:3]
-
-                # No UCB1 credit assignment for batch — incompatible with per-arm attribution
-                iteration_result = IterationResult(
-                    iteration=i,
-                    rule_text=f"[batch: {len(active_rule_ids)} rules]",
-                    aggregated_fitness=candidate_fitness,
-                    individual_results=candidate_results,
-                    is_improvement=is_improvement,
-                    mutation_changes=mutation_changes,
-                    validation_metadata=val_metadata,
+                rate_limit_hit, best_fitness, best_results = self._run_greedy_batch_iteration( # type: ignore
+                    i, active_rule_ids, selected_mutator, prompts_with_rules,
+                    tracker, original_fitness, best_fitness, best_results, iterations,
                 )
-                iterations.append(iteration_result)
-                if callback:
-                    callback(iteration_result)
+                if rate_limit_hit:
+                    break
+                continue
 
-                _n_div_b = candidate_fitness.n_divergent_prompts
-                _mean_div_b = candidate_fitness.mean_code_divergence
-                if is_improvement:
-                    self._log(
-                        f"   ✅ Batch improvement! Semgrep {best_fitness.total_fitness:.1f} → "
-                        f"{candidate_fitness.total_fitness:.1f} (Δ={fitness_delta:+.1f}), "
-                        f"Div={_mean_div_b:.3f} [{_n_div_b}/{len(prompts_with_rules)} prompts changed]"
-                    )
-                    best_fitness = candidate_fitness
-                    best_results = candidate_results
-                    # Accept-all: update tracker for every active rule
-                    for rid, mutated_text in batch_mutations.items():
-                        if not tracker.is_saturated(rid):
-                            tracker.accept_mutation(rid, mutated_text)
-                else:
-                    self._log(
-                        f"   ❌ No improvement: Semgrep={candidate_fitness.total_fitness:.1f} "
-                        f"(Δ={fitness_delta:+.1f}), "
-                        f"Div={_mean_div_b:.3f} [{_n_div_b}/{len(prompts_with_rules)} prompts changed]"
-                    )
-
-                continue  # back to top of loop
-
-            # ── Single-rule path (RANDOM / ROUND_ROBIN / UCB1) ──────────────
+            # ── Single-rule path (ROUND_ROBIN / DUCB) ───────────────────────
             num_affected = sum(1 for pwr in prompts_with_rules if target_rule_id in pwr.rule_ids)
-            depth = tracker.depth(target_rule_id)
+            depth = tracker.depth(target_rule_id) # type: ignore
 
             self._log(f"\n🔄 Iteration {i+1}/{self.config.max_iterations} "
-                      f"— targeting: {target_rule_id.replace('codeguard-', 'cg-')} "
+                      f"— targeting: {target_rule_id.replace('codeguard-', 'cg-')} " # type: ignore
                       f"(depth={depth}, mutator={selected_mutator.name}, "
                       f"{num_affected}/{len(prompts_with_rules)} prompts)")
 
@@ -1087,13 +1018,13 @@ class HillClimber:
                 return _mut.mutate(rule_text).mutated
 
             try:
-                candidate_fitness, candidate_results, mutation_changes, val_metadata, iter_mutated_text = (
+                candidate_fitness, candidate_results, mutation_changes, val_metadata, iter_mutated_text = ( # type: ignore
                     self._evaluate_with_per_prompt_rules(
                         prompts_with_rules,
                         target_rule_id=target_rule_id,
                         mutator_fn=apply_mutation,
                         iteration=i + 1,
-                        phase=f"mutation_iter{i+1}_{target_rule_id.replace('codeguard-', 'cg-')}",
+                        phase=f"mutation_iter{i+1}_{target_rule_id.replace('codeguard-', 'cg-')}", # type: ignore
                         tracker=tracker,
                         selected_mutator=selected_mutator,
                     )
@@ -1126,17 +1057,17 @@ class HillClimber:
                 best_fitness.total_semgrep_delta,
                 best_fitness.mean_code_divergence,
             )
-            self.pool.update_reward(target_rule_id, selected_mutator.name, bandit_reward)
+            self.pool.update_reward(target_rule_id, selected_mutator.name, bandit_reward) # type: ignore
 
             # Update per-rule best delta and divergence
-            if fitness_delta > per_rule_best_delta[target_rule_id]:
-                per_rule_best_delta[target_rule_id] = fitness_delta
+            if fitness_delta > per_rule_best_delta[target_rule_id]: # type: ignore
+                per_rule_best_delta[target_rule_id] = fitness_delta # type: ignore
             cand_mean_div = candidate_fitness.mean_code_divergence
-            if cand_mean_div > per_rule_best_code_divergence[target_rule_id]:
-                per_rule_best_code_divergence[target_rule_id] = cand_mean_div
+            if cand_mean_div > per_rule_best_code_divergence[target_rule_id]: # type: ignore
+                per_rule_best_code_divergence[target_rule_id] = cand_mean_div # type: ignore
 
             per_rule_results.append(PerRuleResult(
-                rule_id=target_rule_id,
+                rule_id=target_rule_id, # type: ignore
                 iteration=i,
                 fitness_delta=fitness_delta,
                 aggregated_fitness=candidate_fitness,
@@ -1155,9 +1086,6 @@ class HillClimber:
                 validation_metadata=val_metadata,
             )
             iterations.append(iteration_result)
-
-            if callback:
-                callback(iteration_result)
 
             # Periodic bandit snapshot (every 10 productive iterations)
             if self.pool.is_bandit and len(iterations) % 10 == 0:
@@ -1199,8 +1127,7 @@ class HillClimber:
                 best_results = candidate_results
                 # Accept mutation into tracker (compounding)
                 if iter_mutated_text is not None:
-                    tracker.accept_mutation(target_rule_id, iter_mutated_text)
-                _consecutive_skips = 0  # accepted mutations open new text-hash pairs
+                    tracker.accept_mutation(target_rule_id, iter_mutated_text) # type: ignore
             else:
                 self._log(
                     f"   ❌ No improvement: Semgrep={candidate_fitness.total_fitness:.1f} "
@@ -1260,6 +1187,7 @@ class HillClimber:
             config=self.config,
             per_rule_results=per_rule_results,
             per_rule_best_delta=per_rule_best_delta,
+            per_rule_best_code_divergence=per_rule_best_code_divergence,
             pool_arm_stats=self.pool.get_arm_summary(),
             compounding_state=tracker.snapshot(),
             eval_cache_stats={
@@ -1445,6 +1373,7 @@ class HillClimber:
                 entry = per_rule_data.setdefault(pr.rule_id, {
                     "iterations_targeted": 0,
                     "best_fitness_delta": 0.0,
+                    "best_mean_code_divergence": 0.0,
                     "num_prompts_affected": pr.num_prompts_affected,
                     "results": [],
                 })
@@ -1452,11 +1381,15 @@ class HillClimber:
                 entry["best_fitness_delta"] = max(
                     entry["best_fitness_delta"], pr.fitness_delta
                 )
+                entry["best_mean_code_divergence"] = result.per_rule_best_code_divergence.get(
+                    pr.rule_id, 0.0
+                )
                 entry["results"].append({
                     "iteration": pr.iteration,
                     "fitness_delta": pr.fitness_delta,
                     "total_fitness": pr.aggregated_fitness.total_fitness,
                     "num_vulnerable": pr.aggregated_fitness.num_vulnerable,
+                    "mean_code_divergence": pr.aggregated_fitness.mean_code_divergence,
                     "is_improvement": pr.is_improvement,
                     "mutation_changes": pr.mutation_changes[:5],
                 })

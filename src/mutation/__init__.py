@@ -33,6 +33,7 @@ def create_mutator_pool(
     seed: int | None = None,
     backend: "LLMBackend | None" = None,
     gamma: float = 0.9,
+    exploration: float = 1.41,
 ) -> MutatorPool:
     """Create a :class:`MutatorPool` from a list of mutator names.
 
@@ -41,13 +42,15 @@ def create_mutator_pool(
     names : list[str]
         Mutator names (same keys accepted by :func:`create_mutator`).
     strategy : str
-        One of ``"random"``, ``"round_robin"``, ``"ducb"``, ``"greedy_batch"``.
-    seed, backend, gamma
+        One of ``"round_robin"``, ``"ducb"``, ``"greedy_batch"``.
+    seed, backend, gamma, exploration
         Forwarded to :func:`create_mutator` / :class:`MutatorPool`.
     """
     strat = MutatorSelectionStrategy(strategy)
     mutators = [create_mutator(n, seed=seed, backend=backend) for n in names]
-    return MutatorPool(mutators, strategy=strat, seed=seed, gamma=gamma)
+    return MutatorPool(
+        mutators, strategy=strat, seed=seed, gamma=gamma, exploration=exploration
+    )
 
 
 def create_mutator(

@@ -1,8 +1,7 @@
-"""Unit tests for MutatorPool after Change 4 (D-UCB, mutator-only arms).
+"""Unit tests for MutatorPool (D-UCB, mutator-only arms).
 
 Covers:
   C-D1  ROUND_ROBIN cycles deterministically through (rule, mutator) pairs
-  C-D2  RANDOM_UNIFORM returns uniformly-distributed picks
   C-D3  DUCB_BANDIT: explore then exploit; mutator-only arms; discount decay
   C-D4  GREEDY_BATCH returns (None, mutator) with rotating mutator
   C-D9  update_reward + ArmStats
@@ -15,7 +14,7 @@ from collections import Counter
 import pytest
 
 from src.mutation.base import Mutator, MutationResult
-from src.mutation.pool import ArmStats, DecayingArmStats, MutatorPool, MutatorSelectionStrategy
+from src.mutation.pool import ArmStats, MutatorPool, MutatorSelectionStrategy
 
 
 # ---------------------------------------------------------------------------
@@ -89,35 +88,6 @@ class TestRoundRobin:
         assert rid1 == "rule-A"
         rid2, mut2 = pool.select(["rule-B"])
         assert rid2 == "rule-B"
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# C-D2  RANDOM_UNIFORM returns uniformly-distributed picks
-# ═══════════════════════════════════════════════════════════════════════════════
-
-class TestRandomUniform:
-
-    def test_deterministic_with_seed(self):
-        """C-D2: same seed → same sequence."""
-        pool_a, rids = _make_pool(n_mutators=3, strategy="random", seed=123)
-        pool_b, _ = _make_pool(n_mutators=3, strategy="random", seed=123)
-
-        seq_a = [pool_a.select(rids) for _ in range(20)]
-        seq_b = [pool_b.select(rids) for _ in range(20)]
-
-        assert [(r, m.name) for r, m in seq_a] == [(r, m.name) for r, m in seq_b]
-
-    def test_roughly_uniform(self):
-        """C-D2: over many calls, distribution is approximately uniform."""
-        pool, rids = _make_pool(n_mutators=2, strategy="random", seed=0)
-        N = 2000
-        counts: Counter[tuple[str, str]] = Counter()
-        for _ in range(N):
-            rid, mut = pool.select(rids)
-            counts[(rid, mut.name)] += 1
-
-        for key, count in counts.items():
-            assert 350 < count < 650, f"{key} got {count}, expected ~500"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -333,97 +303,14 @@ class TestPoolEdgeCases:
         assert pool2.is_batch is True
         assert pool2.is_bandit is False
 
-
 # ═══════════════════════════════════════════════════════════════════════════════
-# DECAYING_UCB — per-arm decay strategy
+# DUCB negative reward (edge case, kept with main DUCB tests)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class TestDecayingUCB:
-
-    def test_explore_all_mutators_first(self):
-        """Every mutator pulled once before any is pulled twice."""
-        pool, rids = _make_pool(n_mutators=3, strategy="decaying_ucb", gamma=0.9)
-        seen: set[str] = set()
-        for _ in range(3):
-            rid, mut = pool.select(rids)
-            assert mut.name not in seen, f"{mut.name} pulled twice during exploration"
-            seen.add(mut.name)
-            pool.update_reward(rid, mut.name, reward=0.5)
-        assert len(seen) == 3
-
-    def test_rule_selected_round_robin(self):
-        """Rule selection cycles in round-robin order (decoupled from bandit)."""
-        pool, rids = _make_pool(n_mutators=1, strategy="decaying_ucb", seed=0)
-        # With 2 rules round-robin: A, B, A, B, ...
-        selections = [pool.select(rids)[0] for _ in range(4)]
-        assert selections == ["rule-A", "rule-B", "rule-A", "rule-B"]
-
-    def test_per_arm_decay_only_affects_updated_arm(self):
-        """Per-arm decay: unupdated arm stats are NOT changed on other arm's update."""
-        pool, rids = _make_pool(n_mutators=2, strategy="decaying_ucb", gamma=0.5)
-
-        # Pull m0 once
-        pool.update_reward("rule-A", "m0", reward=1.0)
-        pulls_m0_before = pool._decay_stats["m0"].pulls   # should be 1.0
-
-        # Pull m1 — m0 should NOT be decayed by this
-        pool.update_reward("rule-A", "m1", reward=1.0)
-
-        assert pool._decay_stats["m0"].pulls == pytest.approx(pulls_m0_before), \
-            "m0 should not decay when m1 is updated (per-arm decay)"
-
-    def test_per_arm_decay_formula(self):
-        """DecayingArmStats.update(): pulls = γ*pulls+1, total_reward = γ*reward+reward."""
-        stats = DecayingArmStats(gamma=0.5)
-        stats.update(1.0)
-        # First pull: pulls = 0.5*0 + 1 = 1.0; reward = 0.5*0 + 1.0 = 1.0
-        assert stats.pulls == pytest.approx(1.0)
-        assert stats.total_reward == pytest.approx(1.0)
-
-        stats.update(0.0)
-        # Second pull: pulls = 0.5*1 + 1 = 1.5; reward = 0.5*1.0 + 0.0 = 0.5
-        assert stats.pulls == pytest.approx(1.5)
-        assert stats.total_reward == pytest.approx(0.5)
-
-    def test_exploit_picks_highest_reward_after_exploration(self):
-        """After exploration, selects the mutator with highest UCB score."""
-        pool, rids = _make_pool(n_mutators=2, strategy="decaying_ucb", gamma=0.9)
-
-        # Exploration: pull each mutator once
-        for _ in range(2):
-            rid, mut = pool.select(rids)
-            pool.update_reward(rid, mut.name, reward=0.0)
-
-        # Give m0 a very high reward
-        pool.update_reward("rule-A", "m0", reward=100.0)
-
-        rid, mut = pool.select(rids)
-        assert mut.name == "m0"
-
-    def test_is_bandit_true_for_decaying_ucb(self):
-        """is_bandit returns True for DECAYING_UCB strategy."""
-        pool, _ = _make_pool(n_mutators=2, strategy="decaying_ucb")
-        assert pool.is_bandit is True
-
-    def test_arm_summary_uses_decay_stats(self):
-        """get_arm_summary reflects _decay_stats for DECAYING_UCB."""
-        pool, _ = _make_pool(n_mutators=2, strategy="decaying_ucb", gamma=0.9)
-        pool.update_reward("rule-A", "m0", reward=1.0)
-        summary = pool.get_arm_summary()
-        assert summary["strategy"] == "decaying_ucb"
-        assert "m0" in summary["arms"]
-        assert summary["arms"]["m0"]["pulls"] == pytest.approx(1.0)
-
-    def test_negative_reward_not_clipped(self):
-        """Negative rewards are stored as-is — no max(0, ...) clipping."""
-        pool, rids = _make_pool(n_mutators=2, strategy="decaying_ucb", gamma=0.9)
-        pool.update_reward("rule-A", "m0", reward=-0.5)
-        assert pool._decay_stats["m0"].total_reward < 0.0, \
-            "Negative reward must be stored (signed); clipping to 0 is incorrect"
+class TestDUCBNegativeReward:
 
     def test_negative_reward_ducb_not_clipped(self):
-        """DUCB_BANDIT also stores negative rewards without clipping."""
+        """DUCB_BANDIT stores negative rewards without clipping."""
         pool, rids = _make_pool(n_mutators=2, strategy="ducb", gamma=1.0)
         pool.update_reward("rule-A", "m0", reward=-1.0)
-        assert pool._arm_stats["m0"].total_reward < 0.0, \
-            "Negative reward must be stored for DUCB_BANDIT too"
+        assert pool._arm_stats["m0"].total_reward < 0.0

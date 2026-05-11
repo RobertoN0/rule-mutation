@@ -7,14 +7,13 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --gpus-per-task=1
 #SBATCH --mem-per-cpu=8000M
-#SBATCH --output=/home/rnegro/thesis/rule-mutation/logs/%x_%j.out
-#SBATCH --error=/home/rnegro/thesis/rule-mutation/logs/%x_%j.err
+#SBATCH --output=/home/rnegro/thesis/rule-mutation/logs/%j_%x.out
+#SBATCH --error=/home/rnegro/thesis/rule-mutation/logs/%j_%x.err
 
 #############################################################################
 # SBST Experiment: Per-Prompt Rules Hill Climbing with Qwen 32B
 # 
 # Uses:
-# - Interesting cases from batch experiments (pre-selected test prompts)
 # - Rule retrieval mapping (per-prompt CodeGuard rules via AI selection)
 # - Local Qwen2.5-Coder-32B-Instruct on A100 80GB GPU
 # 
@@ -63,6 +62,7 @@ SEMGREP_JOBS=${SEMGREP_JOBS:-4}
 MUTATORS=${MUTATORS:-"synonym_replacement"}  # space-separated mutator names; LLM mutators require --backend local
 MUTATOR_STRATEGY=${MUTATOR_STRATEGY:-round_robin}  # random, round_robin, ducb, greedy_batch
 DUCB_GAMMA=${DUCB_GAMMA:-0.9}              # discount factor γ ∈ (0,1] for ducb strategy (ignored otherwise)
+EXPLORATION=${EXPLORATION:-1.41}           # UCB bonus constant c (default √2 ≈ 1.41); only used by ducb
 MAX_MUTATION_DEPTH=${MAX_MUTATION_DEPTH:-4}         # max compounding depth per rule
 ENABLE_VALIDATION=${ENABLE_VALIDATION:-0}   # 1 = run SBERT quality gate after each mutation
 ENABLE_PERPLEXITY=${ENABLE_PERPLEXITY:-0}  # 1 = add perplexity-ratio gate (reuses 32B model, requires ENABLE_VALIDATION=1)
@@ -93,7 +93,7 @@ echo "  Languages: ${LANGUAGES:-all}"
 echo "  Semgrep rules: $SEMGREP_RULESET"
 echo "  Semgrep timeout: ${SEMGREP_TIMEOUT_SECONDS}s"
 echo "  Semgrep jobs: $SEMGREP_JOBS"
-echo "  Mutators: $MUTATORS ($MUTATOR_STRATEGY, γ=$DUCB_GAMMA)"
+echo "  Mutators: ($MUTATOR_STRATEGY, γ=$DUCB_GAMMA, c=$EXPLORATION) $MUTATORS"
 echo "  Max mutation depth: $MAX_MUTATION_DEPTH"
 echo "  Validation: ${ENABLE_VALIDATION} (1=enabled)"
 echo "  Perplexity gate: ${ENABLE_PERPLEXITY} (1=enabled; requires ENABLE_VALIDATION=1)"
@@ -131,9 +131,7 @@ echo ""
 # (full timestamp is already captured inside run_config.json and results filenames)
 DATE=$(date +%m%d)
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-# Use first mutator name for directory naming (keep it short)
-_FIRST_MUTATOR=$(echo $MUTATORS | awk '{print $1}')
-OUTPUT_DIR="experiments/results/job${SLURM_JOB_ID}_${_FIRST_MUTATOR}_${MUTATOR_STRATEGY}_${DATE}"
+OUTPUT_DIR="experiments/results/job${SLURM_JOB_ID}_${MUTATOR_STRATEGY}_${N_CASES}_${DATE}"
 mkdir -p "$OUTPUT_DIR"
 mkdir -p logs
 
@@ -194,24 +192,25 @@ if [ "$ENABLE_EVAL_CACHE" = "0" ]; then
 fi
 
 python scripts/experiments/run_with_rules_map.py \
-    --backend local \
-    --model "$MODEL_ID" \
-    --quantization "$QUANTIZATION" \
     --rules-map "$RULES_MAP" \
     --n-cases "$N_CASES" \
-    --iterations "$N_ITERATIONS" \
-    --seed "$SEED" \
+    $LANG_ARG \
     --selection "$SELECTION" \
-    --semgrep-config "$SEMGREP_RULESET" \
-    --semgrep-timeout-seconds "$SEMGREP_TIMEOUT_SECONDS" \
-    --semgrep-jobs "$SEMGREP_JOBS" \
+    --iterations "$N_ITERATIONS" \
+    --model "$MODEL_ID" \
+    --backend local \
+    --quantization "$QUANTIZATION" \
+    --seed "$SEED" \
     --mutators $MUTATORS \
     --mutator-strategy "$MUTATOR_STRATEGY" \
     --ducb-gamma "$DUCB_GAMMA" \
+    --exploration "$EXPLORATION" \
     --max-mutation-depth "$MAX_MUTATION_DEPTH" \
     $VALIDATION_FLAG \
     $NO_EVAL_CACHE_FLAG \
-    $LANG_ARG \
+    --semgrep-config "$SEMGREP_RULESET" \
+    --semgrep-timeout-seconds "$SEMGREP_TIMEOUT_SECONDS" \
+    --semgrep-jobs "$SEMGREP_JOBS" \
     --output-dir "$OUTPUT_DIR"
 
 echo ""
@@ -226,7 +225,3 @@ echo ""
 echo "=== Output Files ==="
 ls -lh "$OUTPUT_DIR"
 echo ""
-
-# Show final GPU state
-echo "=== Final GPU State ==="
-nvidia-smi --query-gpu=name,memory.used,utilization.gpu --format=csv

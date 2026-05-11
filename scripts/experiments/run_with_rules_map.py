@@ -254,12 +254,6 @@ def main():
         help="Test pipeline without API calls"
     )
     parser.add_argument(
-        "--output-dir", "-o",
-        type=Path,
-        default=PROJECT_ROOT / "experiments" / "results",
-        help="Directory to save results"
-    )
-    parser.add_argument(
         "--seed",
         type=int,
         default=42,
@@ -278,7 +272,7 @@ def main():
     parser.add_argument(
         "--mutator-strategy",
         default="round_robin",
-        choices=["random", "round_robin", "ducb", "greedy_batch", "decaying_ucb"],
+        choices=["round_robin", "ducb", "greedy_batch"],
         help="Mutator/rule selection strategy (default: round_robin).",
     )
     parser.add_argument(
@@ -286,9 +280,19 @@ def main():
         type=float,
         default=0.9,
         help=(
-            "Discount factor γ ∈ (0, 1] for the D-UCB / DECAYING_UCB bandit strategies. "
+            "Discount factor γ ∈ (0, 1] for the D-UCB bandit strategy. "
             "Smaller values adapt faster to non-stationary rewards (default: 0.9). "
-            "Only used when --mutator-strategy ducb or decaying_ucb."
+            "Only used when --mutator-strategy ducb."
+        ),
+    )
+    parser.add_argument(
+        "--exploration",
+        type=float,
+        default=1.41,
+        help=(
+            "Exploration constant c for the D-UCB UCB bonus "
+            "c·√(ln N / n_i) (default: 1.41 ≈ √2, Garivier-Moulines 2011 ξ=0.5 convention). "
+            "Only used when --mutator-strategy ducb."
         ),
     )
     parser.add_argument(
@@ -324,15 +328,6 @@ def main():
         ),
     )
     parser.add_argument(
-        "--semgrep-config",
-        default=os.getenv("SEMGREP_RULESET"),
-        help=(
-            "Semgrep rule config to use. Can be a registry shorthand like "
-            "'p/security-audit' or a local rule file/directory. Defaults to "
-            "SEMGREP_RULESET if set."
-        ),
-    )
-    parser.add_argument(
         "--no-eval-cache",
         action="store_true",
         default=not bool(int(os.getenv("ENABLE_EVAL_CACHE", "1"))),
@@ -346,6 +341,15 @@ def main():
         ),
     )
     parser.add_argument(
+        "--semgrep-config",
+        default=os.getenv("SEMGREP_RULESET"),
+        help=(
+            "Semgrep rule config to use. Can be a registry shorthand like "
+            "'p/security-audit' or a local rule file/directory. Defaults to "
+            "SEMGREP_RULESET if set."
+        ),
+    )
+    parser.add_argument(
         "--semgrep-timeout-seconds",
         type=int,
         default=int(os.getenv("SEMGREP_TIMEOUT_SECONDS", "180")),
@@ -356,6 +360,12 @@ def main():
         type=int,
         default=int(os.getenv("SEMGREP_JOBS", "1")),
         help="Semgrep parallel jobs per scan (default: 1)",
+    )
+    parser.add_argument(
+        "--output-dir", "-o",
+        type=Path,
+        default=PROJECT_ROOT / "experiments" / "results",
+        help="Directory to save results"
     )
     
     args = parser.parse_args()
@@ -433,17 +443,15 @@ def main():
 
     print(f"\n🧬 Initializing mutator pool: {args.mutators} "
           f"(strategy={args.mutator_strategy}, seed={args.seed})")
-    backend_for_mutator = backend if has_llm_mutator else None
+    backend_for_mutator = backend if has_llm_mutator else None # type: ignore
     pool = create_mutator_pool(
         args.mutators,
         strategy=args.mutator_strategy,
         seed=args.seed,
         backend=backend_for_mutator,
         gamma=args.ducb_gamma,
+        exploration=args.exploration,
     )
-
-    if has_llm_mutator:
-        print(f"   LLM mutator(s): share backend with code generation")
 
     # Create validator if enabled
     validator = None
@@ -454,15 +462,15 @@ def main():
         if use_ppl:
             print(f"\n🔬 Setting up MutationQualityValidator (perplexity gate ON)")
             print(f"   Force-loading generation model for perplexity scoring …")
-            ppl_model_handle = backend._load_model()
-            ppl_tokenizer_handle = backend._load_tokenizer()
+            ppl_model_handle = backend._load_model() # type: ignore
+            ppl_tokenizer_handle = backend._load_tokenizer() # type: ignore
             print(f"   Generation model loaded: {type(ppl_model_handle).__name__}")
         else:
             print(f"\n🔬 Setting up MutationQualityValidator")
         print(f"   SBERT semantic similarity (all-mpnet-base-v2, threshold=0.80)")
         print(f"   Structural criteria: inline code retention + security keyword retention")
         if use_ppl:
-            print(f"   Perplexity ratio gate (threshold=2.5, model=32B shared)")
+            print(f"   Perplexity ratio gate (threshold=2.0, model=32B shared)")
         print(f"   Max retries: {args.mutation_max_retries}")
         validator = MutationQualityValidator(
             use_sbert=True,
@@ -493,16 +501,13 @@ def main():
     print(f"   Test cases: {len(prompts_with_rules)}")
     print(f"   Max iterations: {hc_config.max_iterations}")
     print(f"   Mutators: {args.mutators} ({args.mutator_strategy})"
-          + (f", γ={args.ducb_gamma}" if args.mutator_strategy in ("ducb", "decaying_ucb") else ""))
+          + (f", γ={args.ducb_gamma}, c={args.exploration}"
+             if args.mutator_strategy == "ducb" else ""))
     print(f"   Max mutation depth: {args.max_mutation_depth}")
     print(f"   Validation: {'enabled (SBERT + structural)' if args.enable_validation else 'disabled'}")
     print(f"   Eval cache: {'enabled' if hc_config.enable_eval_cache else 'disabled'}")
     print(f"   Output dir: {args.output_dir}")
     
-    # Estimate LLM calls
-    estimated_calls = len(prompts_with_rules) * (1 + args.iterations)  # baseline + iterations
-    print(f"\n📊 Estimated LLM calls: ~{estimated_calls}")
-
     # Configure Semgrep execution
     configure_semgrep(
         rule_config=args.semgrep_config,
@@ -520,7 +525,7 @@ def main():
     print(f"\U0001f50d Semgrep inputs/outputs → {semgrep_debug_dir}/semgrep_debug.jsonl", flush=True)
 
     # Create hill climber
-    climber = HillClimber(backend, pool, hc_config, validator=validator,
+    climber = HillClimber(backend, pool, hc_config, validator=validator, # type: ignore
                           composite_evaluator=composite_evaluator)
     
     # Run optimization with per-prompt rules
@@ -529,9 +534,7 @@ def main():
     print("=" * 70)
     
     try:
-        result = climber.optimize_per_prompt_rules(
-            prompts_with_rules=prompts_with_rules,
-        )
+        result = climber.optimize_per_prompt_rules(prompts_with_rules=prompts_with_rules)
     except LLMError as e:
         print(f"\n❌ LLM Error: {e}")
         sys.exit(1)
@@ -579,6 +582,7 @@ def main():
                 "mutators": args.mutators,
                 "mutator_strategy": args.mutator_strategy,
                 "ducb_gamma": args.ducb_gamma,
+                "exploration": args.exploration,
                 "max_mutation_depth": args.max_mutation_depth,
                 "enable_validation": args.enable_validation,
                 "selection": args.selection,
@@ -682,6 +686,7 @@ def main():
                 "mutators":               args.mutators,
                 "mutator_strategy":       args.mutator_strategy,
                 "ducb_gamma":             args.ducb_gamma,
+                "exploration":            args.exploration,
                 "max_mutation_depth":     args.max_mutation_depth,
                 "enable_validation":      args.enable_validation,
                 "enable_eval_cache":     not args.no_eval_cache,
@@ -735,6 +740,7 @@ def main():
             f"    --mutators {' '.join(shlex.quote(m) for m in args.mutators)} \\",
             f"    --mutator-strategy {shlex.quote(args.mutator_strategy)} \\",
             f"    --ducb-gamma {args.ducb_gamma} \\",
+            f"    --exploration {args.exploration} \\",
             f"    --max-mutation-depth {args.max_mutation_depth} \\",
             f"    --semgrep-config {shlex.quote(str(semgrep_config['rule_config']))} \\",
             f"    --semgrep-timeout-seconds {semgrep_config['subprocess_timeout_seconds']} \\",

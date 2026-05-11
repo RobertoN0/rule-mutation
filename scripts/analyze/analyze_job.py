@@ -11,7 +11,7 @@ Sections (use --section to print only one):
     overview        Run metadata + top-level fitness outcome
     efficiency      Iteration throughput, cache hit rate, LLM call rate
     rules           Per-rule best delta + code divergence + prompts affected
-    bandit          Arm pull counts, mean reward, exploration balance (DECAYING_UCB)
+    bandit          Arm pull counts, mean reward, exploration balance (D-UCB)
     compounding     Mutation depth + saturation state per rule
     divergence      Code divergence distribution: mean, zero-div prompts, per-rule best
     vulns           Vulnerability type breakdown (check_ids frequency from intermediates)

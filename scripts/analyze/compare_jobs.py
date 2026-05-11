@@ -19,7 +19,7 @@ Usage:
 
 Grouping keys (--group-by):
     language        python vs java
-    strategy        round_robin vs decaying_ucb
+    strategy        round_robin vs ducb vs greedy_batch
     mutator         single-mutator pool name (from run_config)
     model           LLM model used
     n_cases         number of test cases
