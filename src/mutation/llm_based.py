@@ -59,10 +59,13 @@ You are editing a security rule document. Your task: transform active-voice \
 imperative sentences into passive advisory form.
 
 Constraints:
-- Only transform sentences that contain active-voice imperatives: \
-MUST, NEVER, ALWAYS, SHALL, Ensure, Validate, Reject, Block.
+- Transform sentences that contain active-voice imperatives or directives, \
+including: MUST, NEVER, ALWAYS, SHALL, Ensure, Validate, Reject, Block, \
+Avoid, Check, Require, Use, Apply, Prevent, Enforce, Do not, Do NOT, Verify, \
+Sanitize, Restrict, Limit, Enable, Disable, Store, Hash, Encrypt, Declare.
 - Use passive constructions: "should be [past participle]", \
-"is recommended to be", "ought to be", "is advised to be".
+"is recommended to be", "ought to be", "is advised to be", \
+"it is suggested that", "care should be taken to".
 - Do NOT change non-imperative sentences.
 - Do NOT change code blocks, inline code, algorithm names, or technical terms.
 - Do NOT change section headers (lines starting with ## or ###).
@@ -237,10 +240,14 @@ class VoiceChangeMutator(_LiveLLMMutator):
         → "User input should always be sanitized before processing."
 
     Uses temperature=0 (deterministic).
+    New tries will uses temperature=0.3 so retries in validate_with_retry produce distinct
+    outputs when the first attempt is an identity (e.g. rules with few
+    qualifying imperatives).
     """
 
     _system_prompt = _VOICE_SYSTEM
     _temperature = 0.0
+    #_temperature = 0.3
 
     @property
     def name(self) -> str:
