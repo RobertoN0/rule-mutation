@@ -112,7 +112,26 @@ class AggregatedFitness:
     mean_code_divergence: float = 0.0
     """Mean code_divergence over ALL prompts (total_div / n_prompts).
     Scale-invariant tiebreaker: naturally penalises narrow mutations that affect few prompts.
-    Used as the secondary axis in _dominates / _acceptance_reward."""
+    Used as the secondary axis in _dominates / _acceptance_reward (lex path).
+    Kept for backward compatibility — superseded by (proportion_divergent,
+    conditional_mean_divergence) for the (1+1) EA + Pareto archive path."""
+
+    proportion_divergent: float = 0.0
+    """(divergent prompts in the AFFECTED subset) / (affected prompts).
+    Pareto archive's f2 axis. Breadth of code change restricted to prompts whose
+    mutated rule was actually present. When `affected_indices` is unspecified
+    at aggregation time (initial baseline, greedy-batch, lex global), the
+    denominator falls back to all evaluated prompts."""
+
+    conditional_mean_divergence: float = 0.0
+    """(sum of code_divergence over AFFECTED prompts) / (divergent prompts in the
+    AFFECTED subset), or 0.0 when that denominator is 0. Pareto archive's f3 axis.
+    Depth of code change among the moved AFFECTED prompts. Falls back to global
+    when `affected_indices` is unspecified at aggregation time."""
+
+    num_prompts_affected: int = 0
+    """Size of the AFFECTED subset used as the f2 denominator. Equals num_prompts
+    when no filter was supplied at aggregation time."""
 
 
 def calculate_fitness(
@@ -158,13 +177,23 @@ def calculate_fitness(
 def aggregate_fitness(
     results: list[FitnessResult],
     strategy: FitnessStrategy = FitnessStrategy.SEVERITY_WEIGHTED,
+    *,
+    affected_indices: list[int] | None = None,
 ) -> AggregatedFitness:
     """Aggregate fitness results across multiple test prompts.
-    
+
     Args:
         results: List of FitnessResult from individual prompts.
         strategy: How to compute individual fitness values.
-        
+        affected_indices: Optional positional indices into `results` for the
+            subset of prompts whose mutated rule was actually present (the
+            AFFECTED subset). When supplied, f2 (proportion_divergent) and f3
+            (conditional_mean_divergence) are computed over this subset only,
+            so they reflect breadth/depth among prompts the mutation could
+            actually move — not diluted by unaffected prompts that received
+            no change. When None, both fall back to the full result set
+            (baseline evaluations, greedy_batch, legacy lex global runs).
+
     Returns:
         AggregatedFitness with summary statistics.
     """
@@ -185,6 +214,20 @@ def aggregate_fitness(
     n_divergent = sum(1 for r in results if r.code_divergence > DIV_THRESHOLD)
     mean_div = total_code_divergence / n  # mean over all prompts (including zero-divergence ones)
 
+    # f2 / f3 scoped to the AFFECTED subset when supplied — otherwise global.
+    if affected_indices is not None:
+        affected_results = [results[i] for i in affected_indices]
+        n_affected = len(affected_results)
+        total_div_affected = sum(r.code_divergence for r in affected_results)
+        n_div_affected = sum(1 for r in affected_results if r.code_divergence > DIV_THRESHOLD)
+    else:
+        n_affected = n
+        total_div_affected = total_code_divergence
+        n_div_affected = n_divergent
+
+    proportion_div = (n_div_affected / n_affected) if n_affected > 0 else 0.0
+    conditional_mean_div = (total_div_affected / n_div_affected) if n_div_affected > 0 else 0.0
+
     return AggregatedFitness(
         total_fitness=sum(fitness_values),
         mean_fitness=sum(fitness_values) / n,
@@ -196,4 +239,7 @@ def aggregate_fitness(
         total_code_divergence=total_code_divergence,
         n_divergent_prompts=n_divergent,
         mean_code_divergence=mean_div,
+        proportion_divergent=proportion_div,
+        conditional_mean_divergence=conditional_mean_div,
+        num_prompts_affected=n_affected,
     )

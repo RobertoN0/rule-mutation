@@ -301,6 +301,42 @@ def main():
         default=4,
         help="Max compounding mutations per rule before saturation (default: 4).",
     )
+    # ----- (1+1) EA + Pareto archive flags -----------------------------------
+    parser.add_argument(
+        "--optimizer",
+        default="ea",
+        choices=["lex", "ea", "random_baseline"],
+        help=(
+            "Optimizer family (default: ea). "
+            "ea = (1+1) EA over per-rule Pareto archive (3 objectives); "
+            "lex = legacy lex hill-climbing + bandit/RR; "
+            "random_baseline = pure random walk with depth-cap restart, no archive."
+        ),
+    )
+    parser.add_argument(
+        "--archive-cap",
+        type=int,
+        default=6,
+        help="EA only: max Pareto archive size per rule (default: 6, sweep-tunable).",
+    )
+    parser.add_argument(
+        "--restart-h",
+        type=int,
+        default=8,
+        help=(
+            "EA only: consecutive non-inserts before stagnation restart "
+            "(default: 8, sweep-tunable)."
+        ),
+    )
+    parser.add_argument(
+        "--max-depth-ea",
+        type=int,
+        default=4,
+        help=(
+            "EA / random_baseline: per-entry depth cap (mutations from original; default: 4). "
+            "When all archive entries hit this, the rule's archive is reset."
+        ),
+    )
     parser.add_argument(
         "--enable-validation",
         action="store_true",
@@ -495,15 +531,23 @@ def main():
         mutator_strategy=args.mutator_strategy,
         max_mutation_depth=args.max_mutation_depth,
         enable_eval_cache=not args.no_eval_cache,
+        optimizer=args.optimizer,
+        archive_cap=args.archive_cap,
+        restart_h=args.restart_h,
+        max_depth_ea=args.max_depth_ea,
     )
 
     print(f"\n⚙️  Hill Climbing Configuration:")
     print(f"   Test cases: {len(prompts_with_rules)}")
     print(f"   Max iterations: {hc_config.max_iterations}")
+    print(f"   Optimizer: {args.optimizer}"
+          + (f"   (archive_cap={args.archive_cap}, restart_h={args.restart_h}, "
+             f"max_depth_ea={args.max_depth_ea})" if args.optimizer == "ea" else "")
+          + (f"   (max_depth={args.max_depth_ea})" if args.optimizer == "random_baseline" else ""))
     print(f"   Mutators: {args.mutators} ({args.mutator_strategy})"
           + (f", γ={args.ducb_gamma}, c={args.exploration}"
              if args.mutator_strategy == "ducb" else ""))
-    print(f"   Max mutation depth: {args.max_mutation_depth}")
+    print(f"   Max mutation depth (lex path): {args.max_mutation_depth}")
     print(f"   Validation: {'enabled (SBERT + structural)' if args.enable_validation else 'disabled'}")
     print(f"   Eval cache: {'enabled' if hc_config.enable_eval_cache else 'disabled'}")
     print(f"   Output dir: {args.output_dir}")
@@ -584,6 +628,10 @@ def main():
                 "ducb_gamma": args.ducb_gamma,
                 "exploration": args.exploration,
                 "max_mutation_depth": args.max_mutation_depth,
+                "optimizer": args.optimizer,
+                "archive_cap": args.archive_cap,
+                "restart_h": args.restart_h,
+                "max_depth_ea": args.max_depth_ea,
                 "enable_validation": args.enable_validation,
                 "selection": args.selection,
                 "languages_filter": args.languages,
@@ -688,6 +736,10 @@ def main():
                 "ducb_gamma":             args.ducb_gamma,
                 "exploration":            args.exploration,
                 "max_mutation_depth":     args.max_mutation_depth,
+                "optimizer":              args.optimizer,
+                "archive_cap":            args.archive_cap,
+                "restart_h":              args.restart_h,
+                "max_depth_ea":           args.max_depth_ea,
                 "enable_validation":      args.enable_validation,
                 "enable_eval_cache":     not args.no_eval_cache,
                 "mutation_max_retries":   args.mutation_max_retries,

@@ -207,7 +207,25 @@ class HillClimbConfig:
     """Mutator selection strategy: random, round_robin, ducb, greedy_batch."""
 
     max_mutation_depth: int = 4
-    """Max compounding mutations per rule before saturation (Hyun et al. 2025)."""
+    """Max compounding mutations per rule before saturation (Hyun et al. 2025).
+    Used by the legacy lex optimizer path."""
+
+    # ----- (1+1) EA + Pareto archive (optimizer="ea") ------------------
+    optimizer: str = "lex"
+    """Optimizer family. One of:
+        "lex"             — current lex hill-climbing + bandit/RR (default, unchanged)
+        "ea"              — (1+1) EA over per-rule Pareto archive (3 objectives)
+        "random_baseline" — pure random walk with depth-cap restart (no archive)
+    """
+
+    archive_cap: int = 6
+    """EA only: max Pareto archive size per rule. Sweep-tunable."""
+
+    restart_h: int = 8
+    """EA only: consecutive non-inserts before stagnation restart. Sweep-tunable."""
+
+    max_depth_ea: int = 4
+    """EA / random_baseline: per-entry depth cap (mutations from original)."""
 
     enable_eval_cache: bool = True
     """Reuse cached (code, Semgrep result) for prompts whose assembled rule
@@ -544,6 +562,7 @@ class HillClimber:
         tracker: CurrentBestTracker | None = None,
         selected_mutator: Mutator | None = None,
         batch_mutations: dict[str, str] | None = None,
+        parent_text_override: str | None = None,
     ) -> tuple[AggregatedFitness, list[EvaluationResult]]:
         """Evaluate prompts where each has its own rules.
 
@@ -573,10 +592,14 @@ class HillClimber:
         pre_validation_metadata: dict[str, Any] = {}
 
         if target_rule_id is not None and mutator_fn is not None:
-            # Use tracker's current best (compounding) if available,
-            # otherwise fall back to the raw text from the first matching prompt
-            if tracker is not None:
-                original_text: str | None = tracker.get_current(target_rule_id)
+            # Parent-text resolution order:
+            #   1. parent_text_override (EA path — explicit parent from archive)
+            #   2. tracker.get_current() (lex path — compounding best)
+            #   3. raw text from first matching prompt (legacy fallback)
+            if parent_text_override is not None:
+                original_text: str | None = parent_text_override
+            elif tracker is not None:
+                original_text = tracker.get_current(target_rule_id)
             else:
                 original_text = next(
                     (
@@ -785,7 +808,21 @@ class HillClimber:
             else:
                 self._log(f"       → TC#{tc_id}: Score={fitness.weighted_score:.3f}, Vulns={fitness.raw_count}")
 
-        aggregated = aggregate_fitness(fitness_results, self.config.fitness_strategy)
+        # When a single rule is targeted (round_robin / D-UCB / EA / random_baseline),
+        # restrict f2 / f3 denominators to the prompts whose rule set actually
+        # contains that rule — otherwise the breadth/depth signals get diluted
+        # by unaffected prompts. greedy_batch and the initial baseline mutate
+        # everywhere (or nothing), so the global denominator is correct there.
+        affected_indices = (
+            [i for i, pwr in enumerate(prompts_with_rules) if target_rule_id in pwr.rule_ids]
+            if target_rule_id is not None
+            else None
+        )
+        aggregated = aggregate_fitness(
+            fitness_results,
+            self.config.fitness_strategy,
+            affected_indices=affected_indices,
+        )
 
         # Mutation changes were pre-computed once for the whole iteration
         sample_changes = pre_mutation_changes
@@ -970,6 +1007,19 @@ class HillClimber:
         original_rule = "\n---\n".join(
             pwr.combined_rules for pwr in prompts_with_rules if pwr.combined_rules
         )[:5000] + "..."
+
+        # ──────────────────────────────────────────────────────────────────
+        # Dispatch: EA / random_baseline branch off here.
+        # Existing lex code path falls through unchanged below.
+        # ──────────────────────────────────────────────────────────────────
+        if self.config.optimizer in ("ea", "random_baseline"):
+            return self._run_ea_or_random(
+                prompts_with_rules=prompts_with_rules,
+                all_rule_ids=all_rule_ids,
+                original_fitness=original_fitness,
+                original_rule=original_rule,
+                start_time=start_time,
+            )
 
         # Initialize best
         best_fitness = original_fitness
@@ -1190,6 +1240,144 @@ class HillClimber:
             per_rule_best_code_divergence=per_rule_best_code_divergence,
             pool_arm_stats=self.pool.get_arm_summary(),
             compounding_state=tracker.snapshot(),
+            eval_cache_stats={
+                "enabled": self.config.enable_eval_cache,
+                "hits": self._eval_cache_hits,
+                "misses": self._eval_cache_misses,
+                "total_entries": len(self._eval_cache),
+            },
+        )
+
+        if self.config.save_intermediate and self.config.output_dir:
+            self._save_results(result)
+
+        return result
+
+    def _run_ea_or_random(
+        self,
+        *,
+        prompts_with_rules: list["PromptWithRules"],  # type: ignore
+        all_rule_ids: list[str],
+        original_fitness: AggregatedFitness,
+        original_rule: str,
+        start_time: float,
+    ) -> HillClimbResult:
+        """Dispatch wrapper for optimizer="ea" or "random_baseline".
+
+        Builds the evaluate_fn closure, calls the runner from
+        ``ea_optimizer.py``, then maps the result back into HillClimbResult so
+        downstream serialisation (hillclimb_summary_*.json,
+        hillclimb_per_rule_*.json) keeps working.
+        """
+        from .ea_optimizer import run_ea, run_random_baseline
+
+        # Per-rule original texts (first occurrence wins; rules are stable)
+        rule_originals: dict[str, str] = {}
+        for pwr in prompts_with_rules:
+            for rid, text in pwr.individual_rules.items():
+                rule_originals.setdefault(rid, text)
+        # Defensive: every all_rule_ids entry must have an original text
+        missing = [rid for rid in all_rule_ids if rid not in rule_originals]
+        if missing:
+            raise RuntimeError(
+                f"EA dispatch: {len(missing)} rule(s) missing individual_rules text: {missing[:3]}"
+            )
+
+        def evaluate_fn(
+            target_rule_id: str,
+            parent_text: str,
+            mutator: Mutator,
+            iteration: int,
+            phase: str,
+        ) -> tuple[AggregatedFitness, list[EvaluationResult], list[str], dict[str, Any], "str | None"]:
+            """Closure: invokes the per-prompt eval pipeline with EA parent text."""
+            try:
+                return self._evaluate_with_per_prompt_rules(  # type: ignore[return-value]
+                    prompts_with_rules,
+                    target_rule_id=target_rule_id,
+                    mutator_fn=lambda _t, _m=mutator: _m.mutate(_t).mutated,
+                    iteration=iteration,
+                    phase=phase,
+                    tracker=None,                       # EA bypasses lex tracker
+                    selected_mutator=mutator,
+                    batch_mutations=None,
+                    parent_text_override=parent_text,
+                )
+            except Exception:
+                raise
+
+        seed = self.pool.seed  # share seed with mutator pool for full-run reproducibility
+
+        if self.config.optimizer == "ea":
+            ea_result = run_ea(
+                prompts_with_rules=prompts_with_rules,
+                all_rule_ids=all_rule_ids,
+                rule_originals=rule_originals,
+                baseline_fitness=original_fitness,
+                mutators=self.pool.mutators,
+                evaluate_fn=evaluate_fn,
+                iteration_result_factory=IterationResult,
+                per_rule_result_factory=PerRuleResult,
+                max_iterations=self.config.max_iterations,
+                archive_cap=self.config.archive_cap,
+                restart_h=self.config.restart_h,
+                max_depth=self.config.max_depth_ea,
+                seed=seed,
+                log=self._log,
+            )
+        else:  # "random_baseline"
+            ea_result = run_random_baseline(
+                prompts_with_rules=prompts_with_rules,
+                all_rule_ids=all_rule_ids,
+                rule_originals=rule_originals,
+                mutators=self.pool.mutators,
+                evaluate_fn=evaluate_fn,
+                iteration_result_factory=IterationResult,
+                per_rule_result_factory=PerRuleResult,
+                max_iterations=self.config.max_iterations,
+                max_depth=self.config.max_depth_ea,
+                seed=seed,
+                log=self._log,
+            )
+
+        total_time = time.perf_counter() - start_time
+        best_fitness = ea_result.best_fitness or original_fitness
+
+        self._log(
+            f"\n📦 {self.config.optimizer} run complete: "
+            f"{len(ea_result.iterations)} iterations, "
+            f"best f1={best_fitness.total_semgrep_delta:+.2f} "
+            f"(rule={ea_result.best_rule_id}), "
+            f"{sum(1 for r in ea_result.per_rule_results if r.is_improvement)} accepted insertions"
+        )
+
+        # best_rule is a sentinel — the full archive text lives in
+        # compounding_state.<rule_id>.current_entries[i].rule_text after the
+        # snapshot fix in pareto_archive.py.
+        result = HillClimbResult(
+            original_rule=original_rule,
+            best_rule=(
+                f"[{self.config.optimizer}: best in rule={ea_result.best_rule_id} "
+                f"— full archive in compounding_state.{ea_result.best_rule_id}]"
+                if ea_result.best_rule_id else
+                "[per-rule Pareto archives — see compounding_state]"
+            ),
+            original_fitness=original_fitness,
+            best_fitness=best_fitness,
+            iterations=ea_result.iterations,
+            total_time_seconds=total_time,
+            total_llm_calls=self._total_llm_calls,
+            config=self.config,
+            per_rule_results=ea_result.per_rule_results,
+            per_rule_best_delta=ea_result.per_rule_best_delta,
+            per_rule_best_code_divergence=ea_result.per_rule_best_code_divergence,
+            pool_arm_stats={
+                "strategy": self.config.optimizer,
+                "arms": {},
+                "mutator_stats": ea_result.mutator_stats,
+                "restart_reason_counts": ea_result.restart_reason_counts,
+            },
+            compounding_state=ea_result.archives_snapshot,  # archives keyed by rule_id
             eval_cache_stats={
                 "enabled": self.config.enable_eval_cache,
                 "hits": self._eval_cache_hits,

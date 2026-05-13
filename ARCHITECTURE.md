@@ -277,7 +277,7 @@ N_CASES=4 N_ITERATIONS=5 MUTATOR=paraphrase LANGUAGES=c ENABLE_VALIDATION=1 \
   sbatch --job-name="paraphrase_map" \
          --output="logs/paraphrase_%j.out" \
          --error="logs/paraphrase_%j.err" \
-         scripts/slurm/slurm_rules_map_qwen32b.sh
+         scripts/slurm/slurm_bandit_qwen32b.sh
 ```
 
 ### Reproducing a past run

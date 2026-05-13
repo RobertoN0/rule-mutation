@@ -77,7 +77,7 @@ N_CASES=4 N_ITERATIONS=5 MUTATOR=paraphrase LANGUAGES=c ENABLE_VALIDATION=1 \
   sbatch --job-name="paraphrase_val" \
          --output="logs/paraphrase_%j.out" \
          --error="logs/paraphrase_%j.err" \
-         scripts/slurm/slurm_rules_map_qwen32b.sh
+         scripts/slurm/slurm_bandit_qwen32b.sh
 
 # Scale-up — all 9 mutators, all languages, 16 cases, 10 iterations
 for MUTATOR in fluff verb_weakening synonym_replacement add_random_word \
@@ -87,7 +87,7 @@ for MUTATOR in fluff verb_weakening synonym_replacement add_random_word \
     sbatch --time=02:30:00 --job-name="${MUTATOR}_su" \
            --output="logs/${MUTATOR}_scaleup_%j.out" \
            --error="logs/${MUTATOR}_scaleup_%j.err" \
-           scripts/slurm/slurm_rules_map_qwen32b.sh
+           scripts/slurm/slurm_bandit_qwen32b.sh
 done
 ```
 
@@ -107,7 +107,7 @@ See [WORKFLOW.md](WORKFLOW.md) for full setup, environment activation, and resul
 │   └── llm_backends/      # DelftBlue local backend (Groq legacy)
 ├── scripts/
 │   ├── experiments/       # run_with_rules_map.py — main experiment entry point
-│   └── slurm/             # slurm_rules_map_qwen32b.sh — SLURM job script
+│   └── slurm/             # slurm_bandit_qwen32b.sh (lex/D-UCB) + slurm_ea_qwen32b.sh (EA / random_baseline)
 ├── project-codeguard/     # 23 CodeGuard security rules (git submodule)
 ├── literature_review/     # Paper PDFs + INDEX_AND_LINKS.md + analysis docs
 ├── pipeline_breakdown/    # Pre-computed interesting cases + rule retrieval map

@@ -12,10 +12,12 @@ Why needed:
 - Keeps core experiment entry point separate from validation and ops utilities.
 
 ## slurm/
-- slurm_rules_map_qwen32b.sh: Main SBATCH launcher for local DelftBlue execution.
+- slurm_bandit_qwen32b.sh: SBATCH launcher for the legacy lex / D-UCB / round-robin path.
+- slurm_ea_qwen32b.sh: SBATCH launcher for the (1+1) EA and random_baseline optimizers.
 
 Run as:
-- `sbatch scripts/slurm/slurm_rules_map_qwen32b.sh`
+- `sbatch scripts/slurm/slurm_bandit_qwen32b.sh`
+- `sbatch scripts/slurm/slurm_ea_qwen32b.sh`
 
 Why needed:
 - Encapsulates cluster resource config and reproducible runtime setup.

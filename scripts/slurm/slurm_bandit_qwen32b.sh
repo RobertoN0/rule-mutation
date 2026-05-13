@@ -19,14 +19,14 @@
 # 
 # Usage:
 #   # Default (16 cases, 10 iterations, FP16, first selection, 1h30 wall-time)
-#   sbatch scripts/slurm/slurm_rules_map_qwen32b.sh
+#   sbatch scripts/slurm/slurm_bandit_qwen32b.sh
 #
 #   # Validation run (4 C-language cases, 5 iterations, specific mutator)
 #   N_CASES=4 N_ITERATIONS=5 MUTATORS=paraphrase LANGUAGES=c ENABLE_VALIDATION=1 \
 #     sbatch --job-name="paraphrase_map" \
 #            --output="/home/rnegro/thesis/rule-mutation/logs/paraphrase_%j.out" \
 #            --error="/home/rnegro/thesis/rule-mutation/logs/paraphrase_%j.err" \
-#            scripts/slurm/slurm_rules_map_qwen32b.sh
+#            scripts/slurm/slurm_bandit_qwen32b.sh
 #
 #   # Multi-mutator pool with round-robin selection (50 iterations, 2h30 wall-time)
 #   N_ITERATIONS=50 MUTATORS="verb_weakening synonym_replacement add_random_word" \
@@ -34,17 +34,17 @@
 #     sbatch --time=2:30:00 --job-name="pool_rr" \
 #            --output="/home/rnegro/thesis/rule-mutation/logs/pool_rr_%j.out" \
 #            --error="/home/rnegro/thesis/rule-mutation/logs/pool_rr_%j.err" \
-#            scripts/slurm/slurm_rules_map_qwen32b.sh
+#            scripts/slurm/slurm_bandit_qwen32b.sh
 #
 #   # Scale-up run (all languages, 2h wall-time override)
 #   N_CASES=16 N_ITERATIONS=10 MUTATORS=synonym_replacement ENABLE_VALIDATION=1 \
 #     sbatch --time=2:00:00 --job-name="synrep_map" \
 #            --output="/home/rnegro/thesis/rule-mutation/logs/synrep_%j.out" \
 #            --error="/home/rnegro/thesis/rule-mutation/logs/synrep_%j.err" \
-#            scripts/slurm/slurm_rules_map_qwen32b.sh
+#            scripts/slurm/slurm_bandit_qwen32b.sh
 #
 #   # With 4-bit quantization (18GB VRAM, use gpu-a100-small partition)
-#   QUANTIZATION=4bit sbatch scripts/slurm/slurm_rules_map_qwen32b.sh
+#   QUANTIZATION=4bit sbatch scripts/slurm/slurm_bandit_qwen32b.sh
 #############################################################################
 
 set -e  # Exit on error
@@ -203,6 +203,7 @@ python scripts/experiments/run_with_rules_map.py \
     --seed "$SEED" \
     --mutators $MUTATORS \
     --mutator-strategy "$MUTATOR_STRATEGY" \
+    --optimizer lex \
     --ducb-gamma "$DUCB_GAMMA" \
     --exploration "$EXPLORATION" \
     --max-mutation-depth "$MAX_MUTATION_DEPTH" \
