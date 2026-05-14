@@ -376,6 +376,40 @@ Manually curated prompts designed to elicit insecure completions from coding ass
 
 ---
 
+## Paper 41 — ARIEL: Automated Repair of Feature Interaction Failures in ADS (Ben Abdessalem et al., ISSTA 2020)
+**Relevance: Primary algorithmic precedent for the (1+1) EA + Pareto archive design — inverted objective**
+
+The direct precedent for our optimizer. ARIEL's structure is the (1+1) EA + many-objective archive that the thesis adopts wholesale, with one critical inversion: ARIEL *repairs* rules so safety-requirement tests pass, while we *mutate* rules so the LLM produces code that fails more Semgrep checks. Same algorithmic class, opposite objective sign.
+
+Five concrete mappings into our codebase:
+1. **(1+1) EA chosen over GP because evaluations are expensive.** Their justification — "evaluating a pool of patches in each iteration/generation becomes too expensive (in the order of hours)" — is the verbatim argument we use in the Approach chapter for not using NSGA-II / SPEA2 / GP. Our evaluation cost (LLM generation + Semgrep batch) puts us in the same regime.
+2. **Multi-objectivization to escape local optima.** "Multi-objectivization can lead to better results than classical single-objective approaches… helps store partial patches that individually fix different faults" — direct support for our 3-objective (f1 = semgrep_delta, f2 = proportion_divergent, f3 = conditional_mean_divergence) decomposition. A scalar f1 alone would miss prompts that move on breadth/depth only.
+3. **Archive cap 2×k with eviction by aggregated fitness D = Σ Ω_i.** Their cap is `2 × k` where k = number of safety requirements; ours is `cap=6` per rule. Eviction picks the entry with the lowest `D` (sum of all objectives). We implement the same in [pareto_archive.py:307-313](src/optimizer/pareto_archive.py#L307-L313) via `score_sum()`.
+4. **Stagnation-restart counter h with reset to original rule.** ARIEL's h=8 was picked by preliminary experiments and matches our `restart_h=8` choice exactly. They also reset the archive to the original faulty rule on stagnation — we reset to the original CodeGuard rule text identically.
+5. **Roulette-Wheel mutator selection weighted by suspiciousness.** ARIEL samples mutators with probability proportional to a fault-localization score. We currently sample uniformly. **This is a clean future-work direction** — we already collect per-mutator archive-add counts in `mutator_stats[name]['archive_adds']`, and our existing bandit-strategy machinery (D-UCB / DYTS) naturally generalises to weighted EA mutator selection.
+
+**Cite in**: Approach (primary methodological precedent), Related Work (single-state vs population-based EA in expensive-evaluation domains), Discussion (the repair-vs-mutation inversion as a novel contribution).
+
+---
+
+## Paper 42 — Chugh et al. 2016 — Survey on Expensive Multiobjective Optimization with EAs
+**Relevance: Background / framing of the field; supplies vocabulary and future-work hooks**
+
+The taxonomic anchor for the Background chapter. The thesis applies an expensive multiobjective EA to a code-security domain that the survey does not cover, but the survey provides the field's vocabulary (Pareto optimality, ideal/nadir, evolution control, function-vs-fitness approximation), the canonical algorithms to namedrop in Related Work (ParEGO, SMS-EGO, MOEA/D-EGO, K-RVEA), and the empirical context that 5000 expensive evaluations sits firmly in the upper-expensive band of the surveyed budgets.
+
+Two specific things to lift directly into the thesis:
+1. **Function-evaluation budget framing.** Surveyed budgets range from 50 to 30,000; ours (~5000 Semgrep calls per run) is upper-expensive. This empirically justifies the algorithmic conservatism of (1+1) EA over population-based methods.
+2. **The fixed-vs-adaptive evolution control distinction.** Most surveyed algorithms use fixed evolution control (deterministic schedule of when to query the expensive function); we are also fixed. Naming the dichotomy makes our design choice legible.
+
+Three future-work hooks the survey unlocks (all distinct from current implementation):
+- **Surrogate on Semgrep fitness.** Train a regressor on rule-text → expected f1 to skip evaluation for clearly-bad mutations. Section 3.3 of the survey gives the framework; Kriging or RBF are the obvious starting points. Note the survey's warning: training-time cost is "usually neglected" but can dominate when the model is heavy — relevant if we ever try this.
+- **Fitness *classification* rather than function approximation.** Pareto-SVM (Loshchilov 2010, surveyed §3.7) classifies candidates as "will improve archive / won't" without evaluating the real fitness. For us this would mean a learned predictor over `(rule_text, mutator, parent_entry) → P(archive_add)`.
+- **Weighted ensemble of mutator types.** The survey discusses metamodel ensembles in §3.5; the analogue for us is the 8-mutator pool we already maintain, and the natural extension is weighted-by-past-success sampling (which connects to the ARIEL roulette-wheel point and to our existing D-UCB / DYTS bandit machinery).
+
+**Cite in**: Background (formal definitions of expensive MOP, Pareto front, evolution control), Related Work (Kriging-based MOO survey landscape — ParEGO/SMS-EGO/MOEA/D-EGO/K-RVEA — for completeness), Future Work (surrogate fitness, classification-based screening, weighted mutator selection).
+
+---
+
 ---
 
 ## Implementation Summary Table
@@ -424,3 +458,5 @@ Manually curated prompts designed to elicit insecure completions from coding ass
 | 38 — LLMSecEval | Cross-check dataset (planned) | ~3–4h ingestion adapter |
 | 39 — Chapelle & Li *(opt)* | — (empirical basis for DYTS default) | Cited in bandit-choice justification |
 | 40 — SecurityEval *(opt)* | — (third cross-check dataset) | Optional; Python-only, 121 prompts |
+| 41 — ARIEL | **(1+1) EA + Pareto archive, cap=6, restart_h=8, score_sum eviction** | Roulette-Wheel mutator selection weighted by archive-add rate |
+| 42 — Chugh survey | Background framing (expensive MOP vocabulary, evolution control) | Surrogate on Semgrep fitness; Pareto-SVM classification screening; weighted mutator ensemble |

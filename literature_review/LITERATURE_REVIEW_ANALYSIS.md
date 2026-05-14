@@ -1272,6 +1272,83 @@ SecurityEval provides 121 prompts (Python) covering 75 distinct CWE types, each 
 
 ---
 
+## Paper 41 — Automated Repair of Feature Interaction Failures in Automated Driving Systems (ARIEL)
+**File:** `3395363.3397386.pdf`
+**Venue:** ISSTA 2020
+**Authors:** Ben Abdessalem, Panichella, Nejati, Briand, Stifter
+
+### Summary
+ARIEL is a search-based automated program repair technique for integration rules in Automated Driving Systems (ADS). Integration rules arbitrate which feature (Auto Cruise Control, Pedestrian Protection, etc.) controls the vehicle at each time step; faults manifest as safety-requirement violations under simulation-based test cases. The algorithm is a **(1+1) Evolutionary Algorithm with a many-objective archive** — each objective tracks the worst-case severity of one safety requirement across the test suite. Single-state was chosen specifically because each test case is a simulation that runs the ADS through 1200 time-steps and takes minutes; population-based GP "becomes too expensive (in the order of hours)" per generation. Each iteration: (1) sample one parent patch from the archive, (2) apply fault localization to pick a faulty statement (Tarantula-derived suspiciousness, weighted by failure severity), (3) generate offspring by applying multiple mutations with probability `0.5^counter`, (4) evaluate offspring on full test suite, (5) admit to archive if non-dominated. Mutation operators are domain-specific: `modify` (change a threshold or relational operator in a precondition) and `shift` (reorder rules in the decision tree). The archive is bounded at `2 × k` entries (k = number of safety requirements) with overflow eviction by **aggregated fitness D = Σ Ω_i** — the entry with the lowest sum of objective values is dropped. A **stagnation-restart** counter triggers archive reset to the original faulty rule-set after `h = 8` generations without an admission (h chosen by preliminary experiments). Evaluated on two industrial ADS systems within a 16-hour wall-time budget: ARIEL repairs all faults in 5 hours (AutoDrive1, 4 failing test cases) and 11 hours (AutoDrive2, 2 failing test cases) on average over 20 runs, outperforming GP and Random-Search baselines with statistical significance (Wilcoxon p<0.05, large effect sizes).
+
+### Thesis Relevance
+This is the **primary algorithmic precedent for our optimizer**. ARIEL's (1+1) EA + many-objective archive is the exact structure the thesis adopts, with one critical inversion: ARIEL *repairs* faulty rules so safety tests pass; we *mutate* CodeGuard security rules so the LLM produces code that fails more Semgrep checks. Same algorithmic class, opposite objective sign — the LLM under test is our "system under test", the rule text is our "patch", and Semgrep findings count is our "severity-of-failure" objective inverted.
+
+Five direct mappings into our codebase:
+
+1. **(1+1) EA selected over population-based methods because evaluations are expensive.** Their argument transfers verbatim: a population of 40 patches at minutes each per evaluation becomes hours per generation. Our equivalent: 25 prompts × LLM generation + Semgrep batch is similarly expensive, justifying single-state over NSGA-II / SPEA2 / GP.
+
+2. **Multi-objectivization to escape local optima.** ARIEL formalizes the same intuition we use for the 3-objective archive: a partial patch that fixes one safety requirement is worth keeping even if it doesn't yet fix others — the archive preserves diversity of partial solutions. Our (f1, f2, f3) decomposition serves the same role: a mutation that improves only on breadth (f2) or depth (f3) is admitted even when f1 doesn't move.
+
+3. **Archive cap = 2×k with eviction by D = Σ Ω_i.** ARIEL caps the archive at twice the number of safety requirements; we cap at 6 per rule. ARIEL evicts by the sum of all objective values when the archive overflows; we implement the same in [pareto_archive.py:307-313](src/optimizer/pareto_archive.py#L307-L313) via `score_sum() = f1 + f2 + f3` with tie-breaking by `iteration_added`.
+
+4. **Stagnation restart with h=8.** ARIEL's restart threshold was picked by preliminary experiments at h=8; ours matches exactly at `restart_h=8`. Both algorithms reset to the original (unmutated) rule on restart.
+
+5. **Roulette-Wheel mutator selection weighted by suspiciousness.** ARIEL biases mutator sampling toward statements with high fault-localization scores. We currently sample uniformly. This is a clean future-work direction — we already collect `mutator_stats[name]['archive_adds']` and have D-UCB / DYTS bandit infrastructure that generalises to this.
+
+The single most important framing for the thesis Approach chapter: **same algorithm, opposite objective direction**. Citing ARIEL grounds our algorithmic conservatism in a well-cited expensive-evaluation precedent, then the inversion (repair → adversarial mutation) becomes the novel contribution.
+
+### Implementation Status
+
+| Component | Status | Notes |
+|---|---|---|
+| (1+1) EA with single-state evolution | ✅ Implemented | [ea_optimizer.py](src/optimizer/ea_optimizer.py) |
+| Per-rule Pareto archive | ✅ Implemented | [pareto_archive.py](src/optimizer/pareto_archive.py) |
+| Archive cap with `score_sum` eviction | ✅ Implemented | `cap=6`, eviction by lowest score_sum + youngest iteration_added |
+| Stagnation-restart counter `h` | ✅ Implemented | `restart_h=8`, reset to original rule text |
+| Multi-objectivization (3 objectives) | ✅ Implemented | f1=semgrep_delta, f2=proportion_divergent, f3=conditional_mean_divergence |
+| Roulette-Wheel mutator selection | ❌ Future work | Currently uniform; bd-coq tracks this extension |
+| Fault localization | ❌ Not applicable | We have no failing/passing test partition in the ARIEL sense |
+| Modify / Shift operators | ❌ Not applicable | Our domain is NLP rule text, not decision-tree integration rules |
+| Patch minimization | ❌ Future work | Greedy removal of mutations that aren't needed for the fitness gain |
+
+---
+
+## Paper 42 — A Survey on Handling Computationally Expensive Multiobjective Optimization Problems with Evolutionary Algorithms
+**File:** `Chugh_Survey_Expensive_Multiobjective_Optimization.pdf`
+**Authors:** Chugh, Sindhya, Hakanen, Miettinen
+**Year:** 2016 (45 algorithms surveyed, 2008–2016)
+
+### Summary
+Comprehensive survey of expensive multiobjective optimization with EAs. Establishes the field's taxonomy of approximation strategies — **problem approximation** (simplify the original problem, e.g. 3D Navier-Stokes → 2D Euler), **function approximation** (replace expensive objective functions with a surrogate / metamodel), and **fitness approximation** (replace the fitness *concept* — predict rank, dominance class, or hypervolume contribution rather than objective values). Most surveyed algorithms use function approximation; Kriging dominates the metamodel choice (used by ParEGO, SMS-EGO, MOEA/D-EGO, K-RVEA) due to its uncertainty estimates. The survey provides a unified 10-step function-approximation framework: an initial sampling stage (~11n-1 points) followed by a surrogate-managed evolution stage that interleaves metamodel-guided evaluation with selective re-evaluation on the real expensive function (called *evolution control*, either fixed or adaptive). Six core challenges are catalogued: choice of metamodel, training time, when to update, how to update, ensemble management, and constraint handling. The survey identifies six promising elements (ensemble metamodels, hybrid local-global search, combined approximation types) and seven persistent issues (objective-space dimensionality limits at three, neglected training time in reported wall-clock, constraint handling weakly addressed). Function-evaluation budgets across the 45 surveyed algorithms range from 50 to 30,000.
+
+### Thesis Relevance
+This is the **background / framing anchor** for the Background chapter. Unlike Paper 41 (ARIEL), no algorithm is directly adopted — the thesis applies an expensive multiobjective EA to a domain (rule-text mutation under LLM-based code generation) that the survey does not cover. But the survey supplies the field's formal vocabulary, the canonical algorithms to namedrop in Related Work, and the empirical evidence that our ~5000 Semgrep-call budget sits firmly in the upper-expensive band.
+
+Two things to lift directly:
+
+1. **Function-evaluation budget framing.** "Budgets surveyed range 50–30,000." Our budget (200 iterations × 25 prompts = 5000 expensive Semgrep evaluations, plus ~200 LLM mutation calls) places us in the upper-expensive band, which empirically justifies our conservative (1+1) EA choice over population-based GP / NSGA-II.
+
+2. **Fixed-vs-adaptive evolution control distinction.** The survey defines fixed evolution control (deterministic schedule of when to query the expensive function) vs. adaptive (decision conditional on metamodel accuracy). We are fixed (every accepted mutation pays the real Semgrep cost). Naming the dichotomy makes our design choice legible in the thesis.
+
+Three future-work hooks the survey unlocks, all genuinely distinct from the current pipeline:
+
+- **Surrogate on Semgrep fitness.** Train a regressor over (rule_text_embedding, mutator_id, depth) → expected Δf1. Section 3.3 of the survey gives the framework; Kriging (uncertainty-bearing) or RBF (cheaper) are the obvious starting points. Survey warning: training time is "usually neglected when reporting results" but can dominate if the metamodel is heavy — relevant if we ever try this.
+- **Fitness *classification* rather than function approximation.** Pareto-SVM (Loshchilov 2010, surveyed §3.7) classifies candidates as "will improve archive / won't" without computing the real fitness. For us: a learned `(rule_text, mutator, parent_entry) → P(archive_add)` predictor would let us screen out mutations cheaply.
+- **Weighted mutator ensemble.** The survey discusses metamodel ensembles in §3.5; the analogue for us is the 8-mutator pool we already maintain. Weighted-by-past-success sampling is the natural extension and connects directly to the ARIEL roulette-wheel point — both papers converge on weighted operator selection as the unimplemented improvement.
+
+### Implementation Status
+
+| Component | Status | Notes |
+|---|---|---|
+| Expensive-MOP vocabulary (Pareto front, dominance, ideal/nadir) | ✅ Implicit | Used informally; survey provides formal citations for thesis |
+| Function approximation / surrogate on Semgrep | ❌ Future work | Background unlocks; not in scope this thesis |
+| Fixed evolution control | ✅ Implemented | Every accepted mutation pays real Semgrep cost |
+| Pareto-SVM-style classification screening | ❌ Future work | Cheaper alternative to surrogate fitness |
+| Weighted-by-success mutator selection | ❌ Future work | Connects to ARIEL roulette-wheel; bd-coq tracks |
+| 3-objective archive within field-typical bounds | ✅ Aligned | Survey notes most algorithms cap at 3 objectives; ours has exactly 3 |
+
+---
+
 ---
 
 # Updated Gap Analysis (Perplexity deep-research pass, 2026-04-24)
