@@ -13,7 +13,13 @@
 #############################################################################
 # SBST Experiment: (1+1) EA + Pareto archive OR random_baseline.
 #
-# Ad-hoc SLURM wrapper for the new optimizers introduced 2026-05-12.
+# Wall-time calibration (25 cases, fp16, gpu-a100):
+#   ~2.7 min/iteration regardless of optimizer. Empirical baselines:
+#   EA  python 200 iters → ~11-12h   EA  java 200 iters → ~9h
+#   rand python 200 iters → ~9.5h    rand java 200 iters → ~9h
+#   Validation adds SBERT + optional perplexity (same 32B model reused);
+#   with retries (MUTATION_MAX_RETRIES=2) budget 1.5× the base wall time.
+#
 # The legacy lex / D-UCB / round-robin path is served by the original
 #   scripts/slurm/slurm_bandit_qwen32b.sh
 # — this file is exclusively for OPTIMIZER ∈ {ea, random_baseline}.
@@ -27,19 +33,35 @@
 #     sbatch --time=0:30:00 --job-name="ea_smoke" \
 #            scripts/slurm/slurm_ea_qwen32b.sh
 #
-#   # Full sweep — 200 iters python, 4h walltime
-#   N_CASES=25 N_ITERATIONS=200 LANGUAGES=python \
-#     sbatch --time=4:00:00 --job-name="ea_python_200" \
+#   # Full sweep — 200 iters python, shuffled prompt order (avoid saturated head)
+#   N_CASES=25 N_ITERATIONS=200 LANGUAGES=python SELECTION=random \
+#     sbatch --time=12:00:00 --job-name="ea_python_200" \
 #            scripts/slurm/slurm_ea_qwen32b.sh
 #
-#   # Pure random baseline for ablation
-#   OPTIMIZER=random_baseline N_CASES=25 N_ITERATIONS=200 LANGUAGES=python \
-#     sbatch --time=4:00:00 --job-name="rand_python_200" \
+#   # Full sweep — 200 iters java
+#   N_CASES=25 N_ITERATIONS=200 LANGUAGES=java SELECTION=random \
+#     sbatch --time=10:00:00 --job-name="ea_java_200" \
+#            scripts/slurm/slurm_ea_qwen32b.sh
+#
+#   # Pure random baseline for ablation — python
+#   OPTIMIZER=random_baseline N_CASES=25 N_ITERATIONS=200 LANGUAGES=python SELECTION=random \
+#     sbatch --time=10:00:00 --job-name="rand_python_200" \
+#            scripts/slurm/slurm_ea_qwen32b.sh
+#
+#   # Pure random baseline — java
+#   OPTIMIZER=random_baseline N_CASES=25 N_ITERATIONS=200 LANGUAGES=java SELECTION=random \
+#     sbatch --time=10:00:00 --job-name="rand_java_200" \
+#            scripts/slurm/slurm_ea_qwen32b.sh
+#
+#   # Validation timing probe — 10 cases, 10 iters, full pipeline on
+#   N_CASES=10 N_ITERATIONS=10 LANGUAGES=python SELECTION=random \
+#   ENABLE_VALIDATION=1 ENABLE_PERPLEXITY=1 MUTATION_MAX_RETRIES=2 \
+#     sbatch --time=2:00:00 --job-name="ea_val_timing" \
 #            scripts/slurm/slurm_ea_qwen32b.sh
 #
 #   # Archive-size sweep — six jobs at different caps
 #   for cap in 2 4 6 8 10 12; do
-#     ARCHIVE_CAP=$cap N_ITERATIONS=200 \
+#     ARCHIVE_CAP=$cap N_ITERATIONS=200 SELECTION=random \
 #       sbatch --job-name="ea_cap${cap}" scripts/slurm/slurm_ea_qwen32b.sh
 #   done
 #############################################################################

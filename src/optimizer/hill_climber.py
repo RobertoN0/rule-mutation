@@ -341,6 +341,13 @@ class HillClimbResult:
     eval_cache_stats: dict | None = None
     """Hit/miss counts for the per-prompt generation+Semgrep cache."""
 
+    total_input_tokens: int = 0
+    """Cumulative input-token count across all code-generation LLM calls.
+    Persisted to hillclimb_summary_*.json for cost estimation against paid APIs."""
+
+    total_output_tokens: int = 0
+    """Cumulative output-token count across all code-generation LLM calls."""
+
     @property
     def improvement_ratio(self) -> float:
         """Ratio of best fitness to original fitness."""
@@ -431,6 +438,8 @@ class HillClimber:
 
         # Tracking
         self._total_llm_calls = 0
+        self._total_input_tokens = 0
+        self._total_output_tokens = 0
 
         # Evaluation cache: (tc_id, sha256(rule_text)) -> {code, gen_latency_ms,
         # semgrep_result, analysis_latency_ms}.  Hits skip both code generation
@@ -460,26 +469,24 @@ class HillClimber:
         return self.SYSTEM_TEMPLATE.format(rules=rule_text)
     
     def _generate_code(
-        self, 
-        rule_text: str | None, 
+        self,
+        rule_text: str | None,
         prompt: TestPrompt,
-    ) -> tuple[str, float]:
+    ) -> tuple[str, float, int, int]:
         """Generate code using the LLM with given rule.
-        
-        Args:
-            rule_text: Rule to inject, or None for baseline.
-            prompt: Test prompt to generate code for.
-        
+
         Returns:
-            Tuple of (generated_code, latency_ms).
+            Tuple of (generated_code, latency_ms, input_tokens, output_tokens).
         """
         system = self._build_system_prompt(rule_text)
         messages = [{"role": "user", "content": prompt.prompt}]
-        
+
         response = self.llm.generate(system=system, messages=messages)
         self._total_llm_calls += 1
-        
-        return response.content, response.latency_ms
+        self._total_input_tokens += response.input_tokens
+        self._total_output_tokens += response.output_tokens
+
+        return response.content, response.latency_ms, response.input_tokens, response.output_tokens
     
     def _apply_targeted_mutation(
         self,
@@ -644,8 +651,9 @@ class HillClimber:
         # ------------------------------------------------------------------
         # Phase 1 — Generate code for every prompt (sequential LLM calls)
         # ------------------------------------------------------------------
-        # Each item: (code, gen_latency_ms, test_prompt, pwr, mutated_rule_file, rule_ids)
-        generated: list[tuple[str, float, TestPrompt, Any, str | None, list[str]]] = []
+        # Each item: (code, gen_latency_ms, input_tokens, output_tokens,
+        #             test_prompt, pwr, mutated_rule_file, rule_ids)
+        generated: list[tuple[str, float, int, int, TestPrompt, Any, str | None, list[str]]] = []
         # Per-prompt Semgrep result (cached or fresh) and per-sample analysis time.
         semgrep_results: list[Any] = [None] * len(prompts_with_rules)
         analysis_latency_per_sample: list[float] = [0.0] * len(prompts_with_rules)
@@ -719,13 +727,13 @@ class HillClimber:
                 gen_latency = cache_hit["gen_latency_ms"]
                 semgrep_results[idx] = cache_hit["semgrep_result"]
                 analysis_latency_per_sample[idx] = cache_hit["analysis_latency_ms"]
-                generated.append((code, gen_latency, test_prompt, pwr, mutated_rule_file, pwr.rule_ids))
+                generated.append((code, gen_latency, 0, 0, test_prompt, pwr, mutated_rule_file, pwr.rule_ids))
             else:
                 self._eval_cache_misses += 1
                 if cache_enabled:
                     cache_hit_flags[idx] = False
-                code, gen_latency = self._generate_code(rule_text, test_prompt)
-                generated.append((code, gen_latency, test_prompt, pwr, mutated_rule_file, pwr.rule_ids))
+                code, gen_latency, in_tok, out_tok = self._generate_code(rule_text, test_prompt)
+                generated.append((code, gen_latency, in_tok, out_tok, test_prompt, pwr, mutated_rule_file, pwr.rule_ids))
                 fresh_indices.append(idx)
 
         # ------------------------------------------------------------------
@@ -736,7 +744,7 @@ class HillClimber:
                 f"   ⚡ Running Semgrep batch on {len(fresh_indices)} samples "
                 f"({len(generated) - len(fresh_indices)} reused from cache)..."
             )
-            fresh_samples = [(generated[i][0], generated[i][2].language) for i in fresh_indices]
+            fresh_samples = [(generated[i][0], generated[i][4].language) for i in fresh_indices]
             analysis_start = time.perf_counter()
             fresh_semgrep = run_semgrep_batch_dir(fresh_samples)
             total_analysis_ms = (time.perf_counter() - analysis_start) * 1000
@@ -762,9 +770,11 @@ class HillClimber:
         # ------------------------------------------------------------------
         results: list[EvaluationResult] = []
         fitness_results: list[FitnessResult] = []
+        # Collect log lines keyed by index so we can re-emit fresh-first.
+        tc_log_lines: dict[int, str] = {}
 
         for idx, (semgrep_result, item) in enumerate(zip(semgrep_results, generated)):
-            code, gen_latency, test_prompt, pwr, mutated_rule_file, rule_ids = item
+            code, gen_latency, in_tok, out_tok, test_prompt, pwr, mutated_rule_file, rule_ids = item
 
             fitness = calculate_fitness(semgrep_result, self.config.fitness_strategy)
 
@@ -798,15 +808,34 @@ class HillClimber:
                 eval_result, idx, phase, mutated_rule_file, rule_ids, target_rule_id,
                 eval_cache_hit=cache_hit_flags[idx],
             )
+
+            # Build per-TC log line (deferred — printed in fresh-first order below).
+            # Token counts are accumulated into self._total_input_tokens /
+            # _total_output_tokens and persisted to the summary JSON; not printed
+            # per-iteration to keep the log readable.
             if fitness.composite_score is not None:
-                self._log(
+                tc_log_lines[idx] = (
                     f"       → TC#{tc_id}: Vulns={fitness.raw_count} "
                     f"Score={fitness.weighted_score:.3f}, "
                     f"Δ={fitness.composite_score:+.3f}, "
-                    f"Div={fitness.code_divergence:.3f}, "
+                    f"Div={fitness.code_divergence:.3f}"
                 )
             else:
-                self._log(f"       → TC#{tc_id}: Score={fitness.weighted_score:.3f}, Vulns={fitness.raw_count}")
+                tc_log_lines[idx] = (
+                    f"       → TC#{tc_id}: Score={fitness.weighted_score:.3f}, "
+                    f"Vulns={fitness.raw_count}"
+                )
+
+        # Emit affected (fresh-generated) prompts first, then a blank line,
+        # then the cached prompts — so the new results are always at the top.
+        fresh_set = set(fresh_indices)
+        for idx in fresh_indices:
+            self._log(tc_log_lines[idx])
+        if fresh_indices and len(fresh_indices) < len(generated):
+            self._log("")
+        for idx in range(len(generated)):
+            if idx not in fresh_set:
+                self._log(tc_log_lines[idx])
 
         # When a single rule is targeted (round_robin / D-UCB / EA / random_baseline),
         # restrict f2 / f3 denominators to the prompts whose rule set actually
@@ -941,7 +970,9 @@ class HillClimber:
         """
         start_time = time.perf_counter()
         self._total_llm_calls = 0
-        
+        self._total_input_tokens = 0
+        self._total_output_tokens = 0
+
         self._log(f"Starting per-prompt-rules optimization: {self.config.max_iterations} iterations, "
                   f"{len(prompts_with_rules)} prompts")
 
@@ -1194,6 +1225,10 @@ class HillClimber:
         else:
             self._log(f"Optimization complete in {total_time:.1f}s")
         self._log(f"Total LLM calls: {self._total_llm_calls}")
+        self._log(
+            f"Total tokens (code-gen): {self._total_input_tokens}in / "
+            f"{self._total_output_tokens}out"
+        )
         self._log(f"Completed iterations: {len(iterations)}/{self.config.max_iterations}")
         self._log(f"Original fitness: {original_fitness.total_fitness:.1f}")
         self._log(f"Best fitness:     {best_fitness.total_fitness:.1f}")
@@ -1234,6 +1269,8 @@ class HillClimber:
             iterations=iterations,
             total_time_seconds=total_time,
             total_llm_calls=self._total_llm_calls,
+            total_input_tokens=self._total_input_tokens,
+            total_output_tokens=self._total_output_tokens,
             config=self.config,
             per_rule_results=per_rule_results,
             per_rule_best_delta=per_rule_best_delta,
@@ -1367,6 +1404,8 @@ class HillClimber:
             iterations=ea_result.iterations,
             total_time_seconds=total_time,
             total_llm_calls=self._total_llm_calls,
+            total_input_tokens=self._total_input_tokens,
+            total_output_tokens=self._total_output_tokens,
             config=self.config,
             per_rule_results=ea_result.per_rule_results,
             per_rule_best_delta=ea_result.per_rule_best_delta,
@@ -1512,6 +1551,8 @@ class HillClimber:
             "analysis_latency_ms": result.analysis_latency_ms,
             "eval_cache_hit": eval_cache_hit,
             "llm_calls_so_far": self._total_llm_calls,
+            "input_tokens_so_far": self._total_input_tokens,
+            "output_tokens_so_far": self._total_output_tokens,
         }
         
         result_path = intermediate_dir / f"{phase}_{index:03d}_{timestamp}.json"
@@ -1541,6 +1582,8 @@ class HillClimber:
             "improvement": result.fitness_increase,
             "total_time_seconds": result.total_time_seconds,
             "total_llm_calls": result.total_llm_calls,
+            "total_input_tokens": result.total_input_tokens,
+            "total_output_tokens": result.total_output_tokens,
         }
         if result.pool_arm_stats:
             summary["pool_arm_stats"] = result.pool_arm_stats

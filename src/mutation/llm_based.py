@@ -190,17 +190,16 @@ class _LiveLLMMutator(Mutator):
                 changes=["LLM output failed structural check; identity returned"],
             )
 
-        changes = [
-            f"llm_latency_ms={response.latency_ms:.0f}",
-            f"output_tokens={response.output_tokens}",
-        ]
-
         return MutationResult(
             original=text,
             mutated=full_doc,
             mutation_type=self.name,
-            changes=changes,
-            metadata={"llm_response_latency_ms": response.latency_ms},
+            changes=[],
+            metadata={
+                "llm_latency_ms": response.latency_ms,
+                "llm_input_tokens": response.input_tokens,
+                "llm_output_tokens": response.output_tokens,
+            },
         )
 
 
@@ -347,16 +346,14 @@ class ParaphraseMutator(_LiveLLMMutator):
                 changes=["LLM output failed structural check; identity returned"],
             )
 
-        changes = [
-            f"llm_latency_ms={response.latency_ms:.0f}",
-            f"output_tokens={response.output_tokens}",
-            f"inline_code_tokens_masked={len(originals)}",
-        ]
-
         return MutationResult(
             original=text,
             mutated=full_doc,
             mutation_type=self.name,
-            changes=changes,
-            metadata={"llm_response_latency_ms": response.latency_ms},
+            changes=[f"inline_code_spans_masked={len(originals)}"],
+            metadata={
+                "llm_latency_ms": response.latency_ms,
+                "llm_input_tokens": response.input_tokens,
+                "llm_output_tokens": response.output_tokens,
+            },
         )

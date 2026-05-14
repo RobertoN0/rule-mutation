@@ -227,8 +227,11 @@ def run_ea(
                 f"f3={candidate_fitness.conditional_mean_divergence:.3f} "
                 f"(archive_size={len(archive)})")
         else:
-            log(f"   ✗ rejected: dominated by existing archive member "
-                f"(stagnation_streak={archive._iterations_since_insert})")
+            log(f"   ✗ rejected: f1={candidate_fitness.total_semgrep_delta:+.2f} "
+                f"f2={candidate_fitness.proportion_divergent:.3f} "
+                f"f3={candidate_fitness.conditional_mean_divergence:.3f} "
+                f"— dominated by archive member "
+                f"(rule_stagnation={archive._iterations_since_insert}/{archive.restart_h})")
 
         # ---- 6. Track best-per-rule for HillClimbResult compatibility
         fitness_delta = candidate_fitness.total_semgrep_delta
@@ -256,6 +259,10 @@ def run_ea(
             is_improvement=accepted,
             num_prompts_affected=num_affected,
         ))
+
+        # ---- 8. Periodic archive snapshot (every 20 iterations) -------------
+        if (i + 1) % 20 == 0:
+            _log_archive_snapshot(log=log, archives=archives, iteration=i + 1)
 
     # ---- Final: collect archive snapshots + global best ---------------------
     archives_snapshot = {rid: arc.snapshot() for rid, arc in archives.items()}
@@ -516,6 +523,27 @@ def run_random_baseline(
 
 def _short_rid(rid: str) -> str:
     return rid.replace("codeguard-", "cg-")
+
+
+def _log_archive_snapshot(
+    *,
+    log: Callable[[str], None],
+    archives: dict[str, "ParetoArchive"],
+    iteration: int,
+) -> None:
+    """Print a compact archive state table every N iterations."""
+    log(f"\n   📦 Archive snapshot @ iter {iteration}")
+    log(f"   {'Rule':<38} {'size':>4} {'streak':>7} {'bestF1':>7} {'bestF2':>7} {'bestF3':>7}")
+    for rid, arc in archives.items():
+        if arc.entries:
+            best_f1 = max(e.f1 for e in arc.entries)
+            best_f2 = max(e.f2 for e in arc.entries)
+            best_f3 = max(e.f3 for e in arc.entries)
+        else:
+            best_f1 = best_f2 = best_f3 = 0.0
+        streak_str = f"{arc._iterations_since_insert}/{arc.restart_h}"
+        log(f"   {_short_rid(rid):<38} {len(arc):>4} {streak_str:>7} "
+            f"{best_f1:>+7.2f} {best_f2:>7.3f} {best_f3:>7.3f}")
 
 
 def _log_ea_summary(
