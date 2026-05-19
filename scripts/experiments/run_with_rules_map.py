@@ -26,7 +26,31 @@ import argparse
 import json
 import os
 import sys
+import warnings
 from pathlib import Path
+
+# Silence noisy third-party output that floods the log:
+#   * nlpaug emits SyntaxWarnings about `\s` escape sequences on import.
+#   * nlpaug.SynonymAug calls nltk.download('averaged_perceptron_tagger') on
+#     every augment() — defensive but produces hundreds of "[nltk_data] ..."
+#     lines per experiment. We pre-fetch the corpora once (quiet) so the
+#     defensive download finds them present and stays silent.
+warnings.filterwarnings(
+    "ignore",
+    category=SyntaxWarning,
+    module=r"nlpaug.*",
+)
+try:
+    import nltk  # type: ignore
+    for _pkg in ("wordnet", "omw-1.4", "averaged_perceptron_tagger",
+                 "averaged_perceptron_tagger_eng", "punkt", "punkt_tab"):
+        try:
+            nltk.download(_pkg, quiet=True, raise_on_error=False)
+        except Exception:
+            pass
+except ImportError:
+    pass
+
 
 # Add src to path for imports
 def _resolve_project_root() -> Path:
@@ -41,8 +65,23 @@ def _resolve_project_root() -> Path:
 PROJECT_ROOT = _resolve_project_root()
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.llm_backends import LLMConfig, DelftBlueLocalBackend
+# Load .env from project root so API keys defined there flow into os.environ.
+try:
+    from dotenv import load_dotenv  # type: ignore
+    load_dotenv(PROJECT_ROOT / ".env")
+except ImportError:
+    pass
+
+from src.llm_backends import LLMConfig, ClaudeBackend, OpenAIBackend
 from src.llm_backends.base import LLMError
+
+# DelftBlue local backend depends on the [gpu] extras (accelerate, bitsandbytes).
+# Import lazily so the API-only replication path on macOS/Windows still works.
+try:
+    from src.llm_backends import DelftBlueLocalBackend  # noqa: F401
+    _HAS_DELFTBLUE = True
+except ImportError:
+    _HAS_DELFTBLUE = False
 from src.mutation import (
     VerbWeakeningMutator,
     SynonymReplacementMutator,
@@ -81,6 +120,36 @@ DEFAULT_RULES_MAP = (
     "map_qwen32b_python_java.json"
 )
 RULES_DIR = PROJECT_ROOT / "project-codeguard" / "skills" / "software-security" / "rules"
+
+
+class _TeeStream:
+    """Write text to multiple streams in lockstep.
+
+    Used to duplicate stdout/stderr into ``<output_dir>/run.log`` so local runs
+    leave a persistent log next to their artifacts (mirroring DelftBlue SLURM
+    ``.out`` / ``.err`` files landing in ``logs/``).
+    """
+
+    def __init__(self, *streams):
+        self._streams = streams
+
+    def write(self, data):
+        for s in self._streams:
+            try:
+                s.write(data)
+                s.flush()
+            except (ValueError, OSError):
+                pass
+
+    def flush(self):
+        for s in self._streams:
+            try:
+                s.flush()
+            except (ValueError, OSError):
+                pass
+
+    def isatty(self):
+        return self._streams[0].isatty() if self._streams else False
 
 
 
@@ -233,20 +302,29 @@ def main():
     )
     parser.add_argument(
         "--model", "-m",
-        default="Qwen/Qwen2.5-Coder-32B-Instruct",
-        help="Model to use (default: Qwen/Qwen2.5-Coder-32B-Instruct for Groq, or HF model path for local)"
+        default=None,
+        help=(
+            "Model identifier. If omitted, resolved per --backend: "
+            "claude → claude-haiku-4-5, openai → gpt-4o-mini, "
+            "delftblue → Qwen/Qwen2.5-Coder-32B-Instruct."
+        ),
     )
     parser.add_argument(
         "--backend", "-b",
         default="delftblue",
-        choices=["local", "delftblue"],
-        help="LLM backend: local/delftblue (HuggingFace local inference on GPU node)"
+        choices=["claude", "openai", "delftblue"],
+        help=(
+            "LLM backend: claude (Anthropic Messages API), "
+            "openai (OpenAI Chat Completions API), "
+            "delftblue (HuggingFace local inference on a DelftBlue GPU node, "
+            "requires [gpu] extras)."
+        ),
     )
     parser.add_argument(
         "--quantization",
         default="fp16",
         choices=["fp16", "4bit"],
-        help="Quantization for local backend: fp16 (default) or 4bit"
+        help="Quantization for the delftblue backend: fp16 (default) or 4bit"
     )
     parser.add_argument(
         "--dry-run",
@@ -266,7 +344,8 @@ def main():
         help=(
             "Space-separated list of mutation operators (default: synonym_replacement). "
             "LLM-based mutators (negation_injection, voice_change, paraphrase) "
-            "require --backend local/delftblue. Single value works for backward compat."
+            "require a real LLM backend (delftblue/claude/openai). "
+            "Single value works for backward compat."
         ),
     )
     parser.add_argument(
@@ -351,7 +430,7 @@ def main():
         help=(
             "Add perplexity-ratio gate to the quality validator (ratio ≤ 2.5). "
             "Requires --enable-validation. Reuses the already-loaded generation "
-            "model — no second model is loaded. No-op when --backend is not local/delftblue."
+            "model — no second model is loaded. No-op when --backend is not delftblue."
         ),
     )
     parser.add_argument(
@@ -405,7 +484,28 @@ def main():
     )
     
     args = parser.parse_args()
-    
+
+    # Install stdout/stderr tee → <output_dir>/run.log so local runs leave a
+    # persistent log next to their artifacts (DelftBlue SLURM .out/.err files
+    # already land in logs/)
+    if args.output_dir is not None:
+        args.output_dir.mkdir(parents=True, exist_ok=True)
+        _log_path = args.output_dir / "run.log"
+        _log_fh = open(_log_path, "w", buffering=1)  # line-buffered
+        _orig_stdout, _orig_stderr = sys.stdout, sys.stderr
+        sys.stdout = _TeeStream(_orig_stdout, _log_fh)
+        sys.stderr = _TeeStream(_orig_stderr, _log_fh)
+        import atexit as _atexit
+        def _restore_streams():
+            sys.stdout = _orig_stdout
+            sys.stderr = _orig_stderr
+            try:
+                _log_fh.close()
+            except Exception:
+                pass
+        _atexit.register(_restore_streams)
+        print(f"📝 Logging stdout+stderr to {_log_path}")
+
     print("=" * 70)
     print("🚀 SBST: Hill Climbing with Per-Prompt Rule Mapping")
     print("=" * 70)
@@ -433,16 +533,32 @@ def main():
     if not prompts_with_rules:
         print("❌ Error: No prompts loaded")
         sys.exit(1)
-    
+
+    # Resolve default model per backend if --model was not provided.
+    if args.model is None:
+        BACKEND_DEFAULT_MODELS = {
+            "claude":    "claude-haiku-4-5",
+            "openai":    "gpt-4o-mini",
+            "delftblue": "Qwen/Qwen2.5-Coder-32B-Instruct",
+        }
+        args.model = BACKEND_DEFAULT_MODELS[args.backend]
+
     # Create LLM backend
     if args.dry_run:
         print("\n🔧 DRY RUN MODE: Using mock backend")
         backend = create_mock_backend()
-    elif args.backend in ("local", "delftblue"):
+    elif args.backend == "delftblue":
         # Local HuggingFace backend for DelftBlue GPU nodes
+        if not _HAS_DELFTBLUE:
+            print(
+                "❌ DelftBlue backend requires the [gpu] extras "
+                "(accelerate/bitsandbytes). Install them with:\n"
+                "     uv sync --extra gpu"
+            )
+            sys.exit(1)
         print(f"\n🤖 Initializing DelftBlue local backend: {args.model}")
         print(f"   Quantization: {args.quantization}")
-        
+
         config = LLMConfig(
             model=args.model,
             temperature=0.0,
@@ -454,7 +570,7 @@ def main():
             },
         )
         try:
-            backend = DelftBlueLocalBackend(config)
+            backend = DelftBlueLocalBackend(config)  # type: ignore[name-defined]
             if backend.is_available():
                 print("   ✅ Model found in local cache")
             else:
@@ -464,18 +580,75 @@ def main():
         except LLMError as e:
             print(f"❌ Error initializing local backend: {e}")
             sys.exit(1)
-    
+    elif args.backend == "claude":
+        # Anthropic Claude backend (replication-friendly, paid API)
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+        if not api_key:
+            print("\n❌ Error: ANTHROPIC_API_KEY environment variable not set")
+            print("   Get your key from: https://console.anthropic.com")
+            print("   Then add it to .env (see .env.example) or export it.")
+            sys.exit(1)
+
+        print(f"\n🤖 Initializing Claude backend: {args.model}")
+        config = LLMConfig(
+            model=args.model,
+            api_key=api_key,
+            temperature=0.0,
+            max_tokens=4096,
+        )
+        try:
+            backend = ClaudeBackend(config)
+            if backend.is_available():
+                print("   ✅ Anthropic API key present (deferred connectivity check)")
+        except LLMError as e:
+            print(f"❌ Error initializing Claude backend: {e}")
+            sys.exit(1)
+    elif args.backend == "openai":
+        # OpenAI Chat Completions backend (paid API)
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            print("\n❌ Error: OPENAI_API_KEY environment variable not set")
+            print("   Get your key from: https://platform.openai.com/api-keys")
+            print("   Then add it to .env (see .env.example) or export it.")
+            sys.exit(1)
+
+        print(f"\n🤖 Initializing OpenAI backend: {args.model}")
+        config = LLMConfig(
+            model=args.model,
+            api_key=api_key,
+            temperature=0.0,
+            max_tokens=4096,
+        )
+        try:
+            backend = OpenAIBackend(config)
+            if backend.is_available():
+                print("   ✅ OpenAI API connection verified")
+            else:
+                print("   ⚠️  Could not verify OpenAI API connection — will attempt anyway")
+        except LLMError as e:
+            print(f"❌ Error initializing OpenAI backend: {e}")
+            sys.exit(1)
+
     # Create mutator pool
     _LLM_MUTATORS = {"negation_injection", "voice_change", "paraphrase"}
+    _LLM_BACKENDS = {"delftblue", "claude", "openai"}
     has_llm_mutator = any(m in _LLM_MUTATORS for m in args.mutators)
 
-    if has_llm_mutator and args.backend not in ("local", "delftblue"):
+    if has_llm_mutator and args.backend not in _LLM_BACKENDS:
         llm_names = [m for m in args.mutators if m in _LLM_MUTATORS]
         print(
-            f"\n❌ Error: LLM mutator(s) {llm_names} require --backend local or delftblue "
-            f"(got: {args.backend}). LLM-based mutators share the code-gen backend."
+            f"\n❌ Error: LLM mutator(s) {llm_names} need a real LLM backend "
+            f"(delftblue/claude/openai). Got --backend={args.backend}."
         )
         sys.exit(1)
+
+    if has_llm_mutator and args.backend in ("claude", "openai"):
+        llm_names = [m for m in args.mutators if m in _LLM_MUTATORS]
+        print(
+            f"\n💸 NOTE: LLM mutator(s) {llm_names} share the code-gen backend "
+            f"({args.backend}). They will issue ADDITIONAL paid API calls — "
+            f"budget accordingly."
+        )
 
     print(f"\n🧬 Initializing mutator pool: {args.mutators} "
           f"(strategy={args.mutator_strategy}, seed={args.seed})")
@@ -492,7 +665,7 @@ def main():
     # Create validator if enabled
     validator = None
     if args.enable_validation:
-        use_ppl = getattr(args, "enable_perplexity", False) and args.backend in ("local", "delftblue")
+        use_ppl = getattr(args, "enable_perplexity", False) and args.backend == "delftblue"
         ppl_model_handle = None
         ppl_tokenizer_handle = None
         if use_ppl:
@@ -594,6 +767,11 @@ def main():
     print(f"Iterations run: {len(result.iterations)}")
     print(f"Total time: {result.total_time_seconds:.1f}s")
     print(f"LLM calls: {result.total_llm_calls}")
+    print(
+        f"Tokens: {result.total_input_tokens:,} in + "
+        f"{result.total_output_tokens:,} out = "
+        f"{result.total_input_tokens + result.total_output_tokens:,}"
+    )
     print()
     print(f"Original fitness: {result.original_fitness.total_fitness:.1f}")
     print(f"  - Vulnerable prompts: {result.original_fitness.num_vulnerable}/{result.original_fitness.num_prompts}")
@@ -619,7 +797,7 @@ def main():
                 "timestamp": timestamp,
                 "backend": args.backend,
                 "model": args.model,
-                "quantization": args.quantization if args.backend in ("local", "delftblue") else None,
+                "quantization": args.quantization if args.backend == "delftblue" else None,
                 "num_cases": len(prompts_with_rules),
                 "num_iterations": len(result.iterations),
                 "seed": args.seed,
@@ -647,6 +825,8 @@ def main():
                 "improvement_ratio": result.improvement_ratio,
                 "total_time_seconds": result.total_time_seconds,
                 "total_llm_calls": result.total_llm_calls,
+                "total_input_tokens": result.total_input_tokens,
+                "total_output_tokens": result.total_output_tokens,
                 "original_vulnerable": result.original_fitness.num_vulnerable,
                 "best_vulnerable": result.best_fitness.num_vulnerable,
             },
