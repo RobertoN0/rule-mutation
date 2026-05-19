@@ -26,6 +26,7 @@ fitness.
 
 from __future__ import annotations
 
+import hashlib
 import random
 from dataclasses import dataclass, field
 from typing import Any
@@ -164,6 +165,7 @@ class ParetoArchive:
         self.restart_history: list[dict[str, Any]] = []
         self.n_inserts: int = 0
         self.n_rejected: int = 0
+        self.n_identity_rejected: int = 0
 
         self._seed_with_original(iteration=0)
 
@@ -278,6 +280,15 @@ class ParetoArchive:
         ``mark_tried`` separately, because that bookkeeping is required even
         for rejected offspring.
         """
+        candidate_hash = hashlib.sha256(candidate_text.encode("utf-8")).digest()
+        for existing in self.entries:
+            existing_hash = hashlib.sha256(existing.rule_text.encode("utf-8")).digest()
+            if existing_hash == candidate_hash and existing.rule_text == candidate_text:
+                self._iterations_since_insert += 1
+                self.n_rejected += 1
+                self.n_identity_rejected += 1
+                return False
+
         candidate = ArchiveEntry(
             rule_text=candidate_text,
             f1=candidate_fitness.total_semgrep_delta,
@@ -334,6 +345,7 @@ class ParetoArchive:
             "iterations_since_insert": self._iterations_since_insert,
             "n_inserts": self.n_inserts,
             "n_rejected": self.n_rejected,
+            "n_identity_rejected": self.n_identity_rejected,
             "current_entries": [e.snapshot() for e in self.entries],
             "restart_history": list(self.restart_history),
         }

@@ -718,8 +718,6 @@ class HillClimber:
             )
 
             tc_id = pwr.metadata.get('test_case_id', f'case_{idx}')
-            if idx == 0 or idx == len(prompts_with_rules) - 1:
-                self._log(f"   [{idx+1}/{len(prompts_with_rules)}] Generating code for TC#{tc_id}...")
 
             cache_hit = None
             if cache_enabled:
@@ -740,6 +738,8 @@ class HillClimber:
                 self._eval_cache_misses += 1
                 if cache_enabled:
                     cache_hit_flags[idx] = False
+                if idx == 0 or idx == len(prompts_with_rules) - 1:
+                    self._log(f"   [{idx+1}/{len(prompts_with_rules)}] Generating code for TC#{tc_id}...")
                 code, gen_latency, in_tok, out_tok = self._generate_code(rule_text, test_prompt)
                 generated.append((code, gen_latency, in_tok, out_tok, test_prompt, pwr, mutated_rule_file, pwr.rule_ids))
                 fresh_indices.append(idx)

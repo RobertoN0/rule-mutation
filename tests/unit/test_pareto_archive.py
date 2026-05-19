@@ -9,6 +9,7 @@ Covers:
   A-6   Restart triggers: stagnation / depth_saturated / mutator_exhausted.
   A-7   Restart preserves history snapshot, re-seeds to size 1.
   A-8   Snapshot round-trips through json.dumps.
+  A-9   Identity rule-text candidates are rejected before Pareto insertion.
 """
 
 import json
@@ -143,6 +144,30 @@ class TestDominance:
         # A and B should be evicted by MEGA
         assert len(arc) == 1
         assert arc.entries[0].rule_text == "MEGA"
+
+    def test_identity_rule_text_candidate_rejected(self):
+        arc = _make_archive()
+        parent = arc.entries[0]
+
+        accepted = arc.try_add(
+            "ORIGINAL", _fit(1.0, 1.0, 1.0),
+            iteration=1, parent=parent, mutator_name="m0",
+        )
+
+        assert not accepted
+        assert len(arc) == 1
+        assert arc.entries[0].rule_text == "ORIGINAL"
+        assert arc.n_rejected == 1
+        assert arc.n_identity_rejected == 1
+        assert arc.snapshot()["n_identity_rejected"] == 1
+
+        same_fitness_different_text = arc.try_add(
+            "DIFFERENT", _fit(0.0, 0.0, 0.0),
+            iteration=2, parent=parent, mutator_name="m1",
+        )
+        assert same_fitness_different_text
+        assert len(arc) == 2
+        assert arc.n_identity_rejected == 1
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
