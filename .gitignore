@@ -25,3 +25,13 @@ LaTex_thesis_scripts/
 
 CLAUDE.md
 experiments/analysis/
+analysis_outputs/
+AGENTS.md
+STATUS.md
+.beads-bundle-backup/
+results/
+
+# Smoke-test convenience: 2-case Anthropic retrieval map. Kept locally so we
+# can re-run quick smokes without rebuilding the map, but not committed
+# because it embeds an Anthropic-generated mapping with API-side variability.
+pipeline_breakdown/rule_retrieval_output/retrieval_map_haiku45_2cases.json
