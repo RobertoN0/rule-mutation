@@ -4,6 +4,95 @@
 
 This document explains how to run experiments and interpret results.
 
+> **Note (2026-05-19):** the sections below "Basic Workflow" → end refer to the
+> older Pipeline 1/2 flow (Groq + llama, pre-EA). They are kept for reference
+> until a full rewrite. The **active workflow** is the **Local ↔ DelftBlue**
+> split documented immediately below.
+
+---
+
+## Local ↔ DelftBlue round-trip
+
+Since the pipeline executes on DelftBlue A100 nodes but development and analysis
+happen on the local workstation, a typical iteration is:
+
+```
+[local] edit code → commit → push
+[remote] git pull → uv sync → sbatch
+[remote] (Claude on DelftBlue) analyze results → write analysis_report.md
+[local] git pull → scp analysis_report.md → review → plan next iteration
+```
+
+### One-time DelftBlue setup
+
+On DelftBlue (login node), after the workspace clone:
+
+```bash
+# 1. Install uv (DelftBlue docs explicitly endorse this)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# 2. Point the uv cache at scratch (avoid filling /home quota)
+echo 'export UV_CACHE_DIR=/scratch/$USER/uv-cache' >> ~/.bashrc
+
+# 3. Sync (includes the gpu extra for accelerate + bitsandbytes)
+cd ~/thesis/rule-mutation
+uv sync --extra gpu
+```
+
+The DelftBlue HF cache, Semgrep rules, and SLURM scripts stay where they are
+(`/scratch/$USER/models`, `/scratch/$USER/semgrep-rules/security-audit`, the
+three `scripts/slurm/*.sh` files). SLURM scripts will eventually be migrated
+off conda — tracked as portability item P2.
+
+### Per-iteration flow
+
+```bash
+# === LOCAL: develop & commit ===
+cd /home/rober/Desktop/Thesis-worskpace/rule-mutation
+# ... edit code, run tests ...
+uv run pytest tests/unit/ -q
+git add -p && git commit -m "..."
+git push
+
+# === DELFTBLUE: pull, sync, submit ===
+ssh delftblue
+cd ~/thesis/rule-mutation
+git pull
+uv sync --extra gpu      # picks up any new deps
+sbatch scripts/slurm/slurm_ea_qwen32b.sh      # or whichever wrapper
+squeue --me              # confirm queued
+
+# === DELFTBLUE: after job completes, run analysis (in a Claude session) ===
+# Paste the contents of analysis_prompts/post_run_analysis.md into Claude Code
+# on DelftBlue, with JOB_IDS filled in. Claude writes analysis_report_<date>.md.
+
+# === LOCAL: pull report ===
+scp 'rnegro@login03.delftblue.tudelft.nl:~/thesis/rule-mutation/analysis_report_*.md' \
+    /home/rober/Desktop/Thesis-worskpace/rule-mutation/
+# (Result trees stay on DelftBlue; only the report comes back. If you want the
+# raw results, see rsync_followup.sh at the workspace root.)
+```
+
+### What stays on DelftBlue, what comes back
+
+| Stays on DelftBlue | Comes back to local |
+|---|---|
+| Raw results (`experiments/results/job*/`) — large (~100–500 MB per run) | The single `analysis_report_*.md` per run |
+| HF model cache (`/scratch/$USER/models/`) | — |
+| Semgrep rules (`/scratch/$USER/semgrep-rules/`) | — |
+| SLURM `.out`/`.err` (`logs/`) | Optionally pulled if a job failed |
+| `uv` venv (`.venv/`) | — (per-host) |
+| `uv.lock` | **YES** — committed and pulled via git |
+| Source changes | **YES** — committed and pulled via git |
+
+### The analysis prompt
+
+The reusable prompt template lives at
+[`analysis_prompts/post_run_analysis.md`](analysis_prompts/post_run_analysis.md).
+Fill in `{{JOB_IDS}}` (and any extra context) before pasting into the DelftBlue
+Claude session. The prompt wraps the existing `analyze-results` skill and pins
+the output structure so reports are comparable across runs.
+
 ---
 
 ## Basic Workflow

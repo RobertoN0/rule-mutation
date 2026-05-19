@@ -67,6 +67,43 @@ For full details on each mutator and the quality validator, see [ARCHITECTURE.md
 
 ---
 
+## Setup
+
+Dependency management is via [`uv`](https://docs.astral.sh/uv/) (Python ≥3.11). One canonical lockfile, deterministic installs, works the same locally and on DelftBlue.
+
+```bash
+# 1. Install uv (skip if already on PATH)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# 2. Clone with the project-codeguard submodule
+git clone --recurse-submodules https://github.com/RobertoN0/rule-mutation.git
+cd rule-mutation
+
+# 3. Install dependencies (creates .venv/)
+uv sync                  # core
+uv sync --extra dev      # + pytest for development
+
+# 4. Verify
+uv run pytest tests/unit/ -q     # should report 176/176 passing
+```
+
+### Optional extras
+
+- `--extra gpu` — adds `accelerate` + `bitsandbytes` for quantized inference on CUDA hosts (DelftBlue A100, etc.). Skip on CPU-only machines.
+
+### DelftBlue notes
+
+On DelftBlue login nodes (which have outbound HTTPS), use the same install command. Redirect uv's cache to `/scratch` to avoid filling the small `/home` quota:
+
+```bash
+export UV_CACHE_DIR=/scratch/$USER/uv-cache
+uv sync --extra gpu      # DelftBlue uses the GPU extras
+```
+
+DelftBlue's Python documentation [explicitly recommends](https://doc.dhpc.tudelft.nl/delftblue/Python/) this install pattern.
+
+---
+
 ## Running Experiments (DelftBlue HPC)
 
 Experiments run on DelftBlue A100 GPU nodes with Qwen2.5-Coder-32B-Instruct loaded locally (`HF_HUB_OFFLINE=1`).
