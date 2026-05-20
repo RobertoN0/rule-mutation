@@ -15,7 +15,10 @@ dependencies = [
     "anthropic>=0.40,<1",
 
     # Static analysis
-    "semgrep>=1.85,<2",
+    # Pinned to 1.85.0 for DelftBlue compatibility: newer wheels (>=1.130) require
+    # manylinux_2_35, but DelftBlue ships glibc 2.28 (manylinux_2_28). 1.85.0 has the
+    # last compatible wheel that still supports all rules we use.
+    "semgrep==1.85.0",
 
     # Datasets and tabular data
     "datasets>=3.0,<5",
