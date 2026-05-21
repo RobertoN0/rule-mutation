@@ -15,7 +15,13 @@ Architecture (locked 2026-05-08 supervisor meeting):
                           (strict per-name dedup; stochastic mutators get one shot)
 
 Restart triggers (any of):
-    1. ``h`` consecutive iterations without an archive insertion (stagnation)
+    1. ``h`` consecutive *attempts on this archive* without an insertion
+       (stagnation). The counter is per-archive: it only advances when
+       ``try_add`` is called on this rule's archive (i.e. this rule was
+       picked AND the mutator produced text). With N rules and uniform
+       parent sampling, each archive sees ~``max_iterations/N`` attempts
+       in a full run, so ``restart_h`` should be set as a fraction of that
+       envelope, NOT as a raw EA loop length.
     2. all entries have ``depth >= max_depth``                   (depth_saturated)
     3. all entries have ``len(tried_mutators) == n_mutators``    (mutator_exhausted)
 
@@ -120,8 +126,9 @@ class ParetoArchive:
     cap :
         Maximum archive size before eviction.
     restart_h :
-        Number of consecutive non-inserting iterations that triggers a
-        stagnation restart.
+        Number of consecutive non-inserting *attempts on this archive* that
+        triggers a stagnation restart. Counted only when ``try_add`` is
+        invoked on this archive — NOT once per EA loop iteration.
     max_depth :
         Cap on per-entry depth (mutations from original).
     n_mutators :
@@ -161,7 +168,9 @@ class ParetoArchive:
         self._rng = rng
 
         self.entries: list[ArchiveEntry] = []
-        self._iterations_since_insert: int = 0
+        # Count of try_add calls on THIS archive since its last successful
+        # insert. NOT a count of EA loop iterations — see class docstring.
+        self._attempts_since_insert: int = 0
         self.restart_history: list[dict[str, Any]] = []
         self.n_inserts: int = 0
         self.n_rejected: int = 0
@@ -188,7 +197,7 @@ class ParetoArchive:
                 fitness=self._baseline_fitness,
             )
         ]
-        self._iterations_since_insert = 0
+        self._attempts_since_insert = 0
 
     def restart(self, current_iteration: int, reason: str) -> None:
         """Snapshot pre-reset state into restart_history, then re-seed."""
@@ -212,7 +221,7 @@ class ParetoArchive:
             "fully_exhausted"     — every entry blocked for any reason
         or (False, None) when at least one entry is still parent-eligible.
         """
-        if self._iterations_since_insert >= self.restart_h:
+        if self._attempts_since_insert >= self.restart_h:
             return True, "stagnation"
 
         eligible = [e for e in self.entries if e.is_parent_eligible(self.max_depth, self.n_mutators)]
@@ -284,7 +293,7 @@ class ParetoArchive:
         for existing in self.entries:
             existing_hash = hashlib.sha256(existing.rule_text.encode("utf-8")).digest()
             if existing_hash == candidate_hash and existing.rule_text == candidate_text:
-                self._iterations_since_insert += 1
+                self._attempts_since_insert += 1
                 self.n_rejected += 1
                 self.n_identity_rejected += 1
                 return False
@@ -304,7 +313,7 @@ class ParetoArchive:
         # Reject if any existing member dominates the candidate
         for existing in self.entries:
             if existing.dominates(candidate):
-                self._iterations_since_insert += 1
+                self._attempts_since_insert += 1
                 self.n_rejected += 1
                 return False
 
@@ -324,7 +333,7 @@ class ParetoArchive:
             survivors.pop(evict_idx)
 
         self.entries = survivors
-        self._iterations_since_insert = 0
+        self._attempts_since_insert = 0
         self.n_inserts += 1
         return True
 
@@ -342,7 +351,11 @@ class ParetoArchive:
             "restart_h": self.restart_h,
             "max_depth": self.max_depth,
             "n_mutators": self.n_mutators,
-            "iterations_since_insert": self._iterations_since_insert,
+            # JSON key kept as "iterations_since_insert" for backward compat with
+            # historical hillclimb_per_rule_*.json consumers. The semantic name
+            # is "attempts since insert" — see ParetoArchive docstring.
+            "iterations_since_insert": self._attempts_since_insert,
+            "attempts_since_insert": self._attempts_since_insert,
             "n_inserts": self.n_inserts,
             "n_rejected": self.n_rejected,
             "n_identity_rejected": self.n_identity_rejected,

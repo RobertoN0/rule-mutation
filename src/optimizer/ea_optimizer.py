@@ -62,9 +62,17 @@ class EARunResult:
     per_rule_best_code_divergence: dict[str, float] = field(default_factory=dict)
 
     mutator_stats: dict[str, dict[str, int]] = field(default_factory=dict)
-    """Per-mutator counters: {name: {"attempts": N, "archive_adds": M}}.
-    For random_baseline, "archive_adds" tracks "produced a logged candidate"
-    (i.e. mutation succeeded). For EA it's true archive insertions."""
+    """Per-mutator counters: {name: {"attempts": N, "archive_adds": M, "archive_adds_f1": K}}.
+
+    - ``attempts``         : number of times this mutator was invoked.
+    - ``archive_adds``     : EA → true archive insertions (passes Pareto check);
+                             random_baseline → "produced a logged candidate"
+                             (mutation succeeded).
+    - ``archive_adds_f1``  : subset of ``archive_adds`` where the candidate's
+                             ``total_semgrep_delta`` was strictly greater than its
+                             parent's f1. Lets you distinguish mutators that move
+                             the primary fitness signal from mutators that only
+                             advance the f2/f3 (divergence) trade-off axes."""
 
     restart_reason_counts: dict[str, int] = field(default_factory=dict)
     """Total restart events bucketed by reason across all rules."""
@@ -133,9 +141,12 @@ def run_ea(
     per_rule_best_div: dict[str, float] = {rid: 0.0 for rid in all_rule_ids}
     rate_limit_hit = False
 
-    # Mutator effectiveness counters — for end-of-run summary + future bandit ablation
+    # Mutator effectiveness counters — for end-of-run summary + future bandit ablation.
+    # archive_adds_f1 is the subset of archive_adds where f1 strictly improved over
+    # the parent's f1. Separates "moved the primary metric" from "advanced the
+    # f2/f3 Pareto trade-off only" — see ANALYSIS_2026-05-21.md F6.
     mutator_stats: dict[str, dict[str, int]] = {
-        m.name: {"attempts": 0, "archive_adds": 0} for m in mutators
+        m.name: {"attempts": 0, "archive_adds": 0, "archive_adds_f1": 0} for m in mutators
     }
     # Restart-reason counters across all rules
     restart_reason_counts: dict[str, int] = {
@@ -222,6 +233,8 @@ def run_ea(
         )
         if accepted:
             mutator_stats[mutator_name]["archive_adds"] += 1
+            if candidate_fitness.total_semgrep_delta > parent.f1:
+                mutator_stats[mutator_name]["archive_adds_f1"] += 1
             log(f"   ✅ archive add: f1={candidate_fitness.total_semgrep_delta:+.2f} "
                 f"f2={candidate_fitness.proportion_divergent:.3f} "
                 f"f3={candidate_fitness.conditional_mean_divergence:.3f} "
@@ -231,7 +244,7 @@ def run_ea(
                 f"f2={candidate_fitness.proportion_divergent:.3f} "
                 f"f3={candidate_fitness.conditional_mean_divergence:.3f} "
                 f"— dominated by archive member "
-                f"(rule_stagnation={archive._iterations_since_insert}/{archive.restart_h})")
+                f"(rule_stagnation={archive._attempts_since_insert}/{archive.restart_h})")
 
         # ---- 6. Track best-per-rule for HillClimbResult compatibility
         fitness_delta = candidate_fitness.total_semgrep_delta
@@ -320,6 +333,9 @@ class _RandomWalkRuleState:
     """Per-rule state for the random-walk baseline."""
 
     current_text: str
+    current_f1: float = 0.0
+    """f1 (= total_semgrep_delta) of ``current_text``. Baseline is 0 by
+    construction. Used to credit ``archive_adds_f1`` when a step advances f1."""
     depth: int = 0
     tried_for_current: set[str] = field(default_factory=set)
     restart_history: list[dict[str, Any]] = field(default_factory=list)
@@ -368,9 +384,11 @@ def run_random_baseline(
     best_fitness: AggregatedFitness | None = None
     best_rule_text: str = ""
 
-    # Per-mutator stats and per-reason restart counts (parallel to run_ea shape)
+    # Per-mutator stats and per-reason restart counts (parallel to run_ea shape).
+    # archive_adds_f1 = "produced a candidate whose f1 > the walk's current f1"
+    # (since random_baseline always advances, this measures strict f1 gains).
     mutator_stats: dict[str, dict[str, int]] = {
-        m.name: {"attempts": 0, "archive_adds": 0} for m in mutators
+        m.name: {"attempts": 0, "archive_adds": 0, "archive_adds_f1": 0} for m in mutators
     }
     restart_reason_counts: dict[str, int] = {"depth_cap": 0, "mutator_exhausted": 0}
 
@@ -384,6 +402,7 @@ def run_random_baseline(
                 "iteration": i, "reason": "depth_cap", "depth_at_reset": state.depth,
             })
             state.current_text = rule_originals[rule_id]
+            state.current_f1 = 0.0
             state.depth = 0
             state.tried_for_current = set()
             restart_reason_counts["depth_cap"] += 1
@@ -393,6 +412,7 @@ def run_random_baseline(
                 "iteration": i, "reason": "mutator_exhausted", "depth_at_reset": state.depth,
             })
             state.current_text = rule_originals[rule_id]
+            state.current_f1 = 0.0
             state.depth = 0
             state.tried_for_current = set()
             restart_reason_counts["mutator_exhausted"] += 1
@@ -430,10 +450,14 @@ def run_random_baseline(
             continue
 
         # No acceptance test — always advance the walk
+        parent_f1 = state.current_f1
         state.current_text = iter_mutated_text
+        state.current_f1 = candidate_fitness.total_semgrep_delta
         state.depth += 1
         state.tried_for_current = set()  # new version → fresh slate
         mutator_stats[mutator_name]["archive_adds"] += 1  # "produced a candidate"
+        if candidate_fitness.total_semgrep_delta > parent_f1:
+            mutator_stats[mutator_name]["archive_adds_f1"] += 1
 
         # Log candidate's 3-vector for post-hoc analysis
         state.all_candidates.append({
@@ -541,7 +565,7 @@ def _log_archive_snapshot(
             best_f3 = max(e.f3 for e in arc.entries)
         else:
             best_f1 = best_f2 = best_f3 = 0.0
-        streak_str = f"{arc._iterations_since_insert}/{arc.restart_h}"
+        streak_str = f"{arc._attempts_since_insert}/{arc.restart_h}"
         log(f"   {_short_rid(rid):<38} {len(arc):>4} {streak_str:>7} "
             f"{best_f1:>+7.2f} {best_f2:>7.3f} {best_f3:>7.3f}")
 
@@ -586,18 +610,21 @@ def _log_ea_summary(
     for reason, count in restart_reason_counts.items():
         log(f"    {reason:<20} {count}")
 
-    log("\n🧬  Mutator effectiveness (EA inserts only):")
-    log(f"{'mutator':<30} {'attempts':>10} {'inserts':>10} {'success%':>10}")
-    log("─" * 64)
-    # Sort by inserts desc, then attempts desc for stable order
+    log("\n🧬  Mutator effectiveness (EA archive inserts):")
+    log(f"{'mutator':<30} {'attempts':>10} {'inserts':>10} {'ins_f1':>10} {'ins%':>8} {'f1%':>8}")
+    log("─" * 80)
+    # Sort by ins_f1 desc, then inserts desc, then attempts desc for stable order
     for name, stats in sorted(
         mutator_stats.items(),
-        key=lambda kv: (-kv[1]["archive_adds"], -kv[1]["attempts"], kv[0]),
+        key=lambda kv: (-kv[1].get("archive_adds_f1", 0), -kv[1]["archive_adds"],
+                        -kv[1]["attempts"], kv[0]),
     ):
         att = stats["attempts"]
         ins = stats["archive_adds"]
+        ins_f1 = stats.get("archive_adds_f1", 0)
         rate = (100.0 * ins / att) if att > 0 else 0.0
-        log(f"{name:<30} {att:>10} {ins:>10} {rate:>9.1f}%")
+        rate_f1 = (100.0 * ins_f1 / att) if att > 0 else 0.0
+        log(f"{name:<30} {att:>10} {ins:>10} {ins_f1:>10} {rate:>7.1f}% {rate_f1:>7.1f}%")
 
     log("\n🏛  Final archive contents (3 best entries per rule by f1):")
     for rid in all_rule_ids:
@@ -648,14 +675,18 @@ def _log_random_summary(
     for reason, count in restart_reason_counts.items():
         log(f"    {reason:<20} {count}")
 
-    log("\n🎲  Mutator attempt counts:")
-    log(f"{'mutator':<30} {'attempts':>10} {'produced':>10}")
-    log("─" * 56)
+    log("\n🎲  Mutator attempt counts (random_baseline walk):")
+    log(f"{'mutator':<30} {'attempts':>10} {'produced':>10} {'f1_gain':>10} {'f1%':>8}")
+    log("─" * 75)
     for name, stats in sorted(
         mutator_stats.items(),
-        key=lambda kv: (-kv[1]["attempts"], kv[0]),
+        key=lambda kv: (-kv[1].get("archive_adds_f1", 0), -kv[1]["attempts"], kv[0]),
     ):
-        log(f"{name:<30} {stats['attempts']:>10} {stats['archive_adds']:>10}")
+        att = stats["attempts"]
+        prod = stats["archive_adds"]
+        f1_gain = stats.get("archive_adds_f1", 0)
+        rate_f1 = (100.0 * f1_gain / att) if att > 0 else 0.0
+        log(f"{name:<30} {att:>10} {prod:>10} {f1_gain:>10} {rate_f1:>7.1f}%")
 
     if best_fitness is not None:
         log(f"\n🏆 Global best candidate: rule={_short_rid(best_rule_id or '?')} "
