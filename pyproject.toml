@@ -22,6 +22,10 @@ dependencies = [
 
     # Datasets and tabular data
     "datasets>=3.0,<5",
+    # fsspec pinned to <=2026.2.0 because datasets declares fsspec[http]<=2026.2.0 but uv
+    # resolves the latest release (2026.4.0+). Without this pin, `uv pip check` emits a
+    # conflict. Upper-bound lag in the datasets package — unrelated to our code.
+    "fsspec==2026.2.0",
     "pandas>=2.0,<3",
 
     # Config / IO
