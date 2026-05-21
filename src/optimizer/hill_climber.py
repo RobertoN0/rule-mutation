@@ -457,7 +457,104 @@ class HillClimber:
         self._eval_cache: dict[tuple[str, str], dict[str, Any]] = {}
         self._eval_cache_hits = 0
         self._eval_cache_misses = 0
-    
+
+        # bd-3wa: per-iter writer state. iterations.jsonl is opened lazily on
+        # first write and closed by _close_iterations_writer at end of run.
+        # Coexists with the legacy intermediate_results/ + hillclimb_summary
+        # files during the augment-first transition (see §9.1).
+        self._iterations_jsonl_file: Any | None = None
+        self._iterations_jsonl_path: Any | None = None
+
+    def _open_iterations_writer(self) -> None:
+        """Open iterations.jsonl for append. No-op if output_dir is None."""
+        if self._iterations_jsonl_file is not None:
+            return
+        output_dir = self.config.output_dir
+        if not output_dir:
+            return
+        from pathlib import Path
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        self._iterations_jsonl_path = output_dir / "iterations.jsonl"
+        self._iterations_jsonl_file = open(self._iterations_jsonl_path, "a", encoding="utf-8")
+
+    def _append_iteration_record(self, record: dict) -> None:
+        """Append a canonical per-iter record to iterations.jsonl.
+
+        Schema (bd-3wa Phase 1, augment-first):
+            iter, timestamp, rule_id, mutator, parent_depth, candidate_depth,
+            mutation_identity, validation_passed, f1, f2, f3, accepted,
+            f1_advance, num_prompts_affected, llm_calls_total,
+            input_tokens_total, output_tokens_total, selection_meta {...}
+
+        selection_meta carries strategy-specific fields:
+          - ea:              parent_iter, archive_size_before/after,
+                             attempts_since_insert, n_eligible_rules
+          - random_baseline: walk_depth_before/after, restart_triggered
+          - baseline:        baseline=true (single record, iter=0)
+        """
+        if self._iterations_jsonl_file is None:
+            self._open_iterations_writer()
+        if self._iterations_jsonl_file is None:
+            return  # no output_dir; silent skip
+        self._iterations_jsonl_file.write(json.dumps(record) + "\n")
+        self._iterations_jsonl_file.flush()
+
+    def _close_iterations_writer(self) -> None:
+        """Close iterations.jsonl. Safe to call multiple times."""
+        if self._iterations_jsonl_file is not None:
+            try:
+                self._iterations_jsonl_file.close()
+            finally:
+                self._iterations_jsonl_file = None
+
+    def _save_archive_snapshot(
+        self,
+        iteration: int,
+        archives_snapshot: dict[str, dict],
+    ) -> None:
+        """Dump the full archive state for a single EA iteration.
+
+        Written under <output_dir>/archive_snapshots/iter{N}.json with inline
+        rule_text per §9.1 Q3 (self-contained, data-loss-resistant). Called
+        every 20 iters by run_ea.
+        """
+        output_dir = self.config.output_dir
+        if not output_dir:
+            return
+        from pathlib import Path
+        snap_dir = Path(output_dir) / "archive_snapshots"
+        snap_dir.mkdir(parents=True, exist_ok=True)
+        snap_path = snap_dir / f"iter{iteration:04d}.json"
+        payload = {
+            "iteration": iteration,
+            "archives": archives_snapshot,
+        }
+        with open(snap_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
+
+    def _save_intermediate_iter_jsonl(
+        self,
+        iter_id: str,
+        results: list[dict],
+    ) -> None:
+        """Pack one iteration's per-prompt evaluation records into one JSONL.
+
+        Written under <output_dir>/intermediate/{iter_id}.jsonl. Coexists with
+        the legacy intermediate_results/ tree during Phase 1 (augment-first).
+        iter_id examples: "baseline", "ea_iter0001", "rand_iter0042".
+        """
+        output_dir = self.config.output_dir
+        if not output_dir:
+            return
+        from pathlib import Path
+        new_dir = Path(output_dir) / "intermediate"
+        new_dir.mkdir(parents=True, exist_ok=True)
+        path = new_dir / f"{iter_id}.jsonl"
+        with open(path, "w", encoding="utf-8") as f:
+            for r in results:
+                f.write(json.dumps(r) + "\n")
+
     def _log(self, message: str) -> None:
         """Print if verbose mode enabled."""
         if self.config.verbose:
@@ -708,6 +805,7 @@ class HillClimber:
                         save_text, tc_id, idx, iteration, pwr.rule_ids, target_rule_id,
                         mutation_changes=pre_mutation_changes,
                         validation_metadata=pre_validation_metadata,
+                        parent_text=parent_text_override,
                     )
 
             test_prompt = TestPrompt(
@@ -780,6 +878,10 @@ class HillClimber:
         fitness_results: list[FitnessResult] = []
         # Collect log lines keyed by index so we can re-emit fresh-first.
         tc_log_lines: dict[int, str] = {}
+        # bd-3wa: per-prompt records for the new intermediate/{phase}.jsonl dump
+        # (one JSONL per EA/random iteration; coexists with legacy per-prompt
+        # JSON files in intermediate_results/ during Phase 1).
+        intermediate_records: list[dict] = []
 
         for idx, (semgrep_result, item) in enumerate(zip(semgrep_results, generated)):
             code, gen_latency, in_tok, out_tok, test_prompt, pwr, mutated_rule_file, rule_ids = item
@@ -814,10 +916,12 @@ class HillClimber:
             )
             results.append(eval_result)
 
-            self._save_intermediate_result(
+            record = self._save_intermediate_result(
                 eval_result, idx, phase, mutated_rule_file, rule_ids, target_rule_id,
                 eval_cache_hit=cache_hit_flags[idx],
             )
+            if record is not None:
+                intermediate_records.append(record)
 
             # Build per-TC log line (deferred — printed in fresh-first order below).
             # Token counts are accumulated into self._total_input_tokens /
@@ -865,6 +969,11 @@ class HillClimber:
 
         # Mutation changes were pre-computed once for the whole iteration
         sample_changes = pre_mutation_changes
+
+        # bd-3wa Phase 1: pack this iteration's per-prompt records into one JSONL
+        # under intermediate/{phase}.jsonl. Coexists with legacy intermediate_results/.
+        if intermediate_records:
+            self._save_intermediate_iter_jsonl(phase, intermediate_records)
 
         return aggregated, results, sample_changes, pre_validation_metadata, pre_mutated_text # type: ignore
 
@@ -1356,37 +1465,47 @@ class HillClimber:
 
         seed = self.pool.seed  # share seed with mutator pool for full-run reproducibility
 
-        if self.config.optimizer == "ea":
-            ea_result = run_ea(
-                prompts_with_rules=prompts_with_rules,
-                all_rule_ids=all_rule_ids,
-                rule_originals=rule_originals,
-                baseline_fitness=original_fitness,
-                mutators=self.pool.mutators,
-                evaluate_fn=evaluate_fn,
-                iteration_result_factory=IterationResult,
-                per_rule_result_factory=PerRuleResult,
-                max_iterations=self.config.max_iterations,
-                archive_cap=self.config.archive_cap,
-                restart_h=self.config.restart_h,
-                max_depth=self.config.max_depth_ea,
-                seed=seed,
-                log=self._log,
-            )
-        else:  # "random_baseline"
-            ea_result = run_random_baseline(
-                prompts_with_rules=prompts_with_rules,
-                all_rule_ids=all_rule_ids,
-                rule_originals=rule_originals,
-                mutators=self.pool.mutators,
-                evaluate_fn=evaluate_fn,
-                iteration_result_factory=IterationResult,
-                per_rule_result_factory=PerRuleResult,
-                max_iterations=self.config.max_iterations,
-                max_depth=self.config.max_depth_ea,
-                seed=seed,
-                log=self._log,
-            )
+        # bd-3wa Phase 1: open iterations.jsonl writer; pass it + archive snapshot
+        # writer as callbacks so the runners stay output-dir agnostic. try/finally
+        # guarantees the file handle closes even on rate-limit / OOM mid-run.
+        self._open_iterations_writer()
+        try:
+            if self.config.optimizer == "ea":
+                ea_result = run_ea(
+                    prompts_with_rules=prompts_with_rules,
+                    all_rule_ids=all_rule_ids,
+                    rule_originals=rule_originals,
+                    baseline_fitness=original_fitness,
+                    mutators=self.pool.mutators,
+                    evaluate_fn=evaluate_fn,
+                    iteration_result_factory=IterationResult,
+                    per_rule_result_factory=PerRuleResult,
+                    max_iterations=self.config.max_iterations,
+                    archive_cap=self.config.archive_cap,
+                    restart_h=self.config.restart_h,
+                    max_depth=self.config.max_depth_ea,
+                    seed=seed,
+                    log=self._log,
+                    iter_record_fn=self._append_iteration_record,
+                    archive_snapshot_fn=self._save_archive_snapshot,
+                )
+            else:  # "random_baseline"
+                ea_result = run_random_baseline(
+                    prompts_with_rules=prompts_with_rules,
+                    all_rule_ids=all_rule_ids,
+                    rule_originals=rule_originals,
+                    mutators=self.pool.mutators,
+                    evaluate_fn=evaluate_fn,
+                    iteration_result_factory=IterationResult,
+                    per_rule_result_factory=PerRuleResult,
+                    max_iterations=self.config.max_iterations,
+                    max_depth=self.config.max_depth_ea,
+                    seed=seed,
+                    log=self._log,
+                    iter_record_fn=self._append_iteration_record,
+                )
+        finally:
+            self._close_iterations_writer()
 
         total_time = time.perf_counter() - start_time
         best_fitness = ea_result.best_fitness or original_fitness
@@ -1451,6 +1570,7 @@ class HillClimber:
         target_rule_id: str | None = None,
         mutation_changes: list[str] | None = None,
         validation_metadata: dict | None = None,
+        parent_text: str | None = None,
     ) -> str:
         """Save the mutated rule to an iteration subdirectory and return its path.
 
@@ -1492,12 +1612,19 @@ class HillClimber:
         if not rule_file.exists():
             rule_file.write_text(mutated_text, encoding="utf-8")
 
+            # bd-3wa: mutation_identity = True iff the mutator returned text
+            # byte-identical to its parent (post-6ac526b try_add rejects this,
+            # but the event is still observable for analysis).
+            mutation_identity = (
+                parent_text is not None and mutated_text == parent_text
+            )
             meta = {
                 "iteration": iteration,
                 "target_rule_id": target_rule_id,
                 "all_rule_ids": original_rule_ids,
                 "changes": mutation_changes or [],
                 "validation": validation_metadata or {},
+                "mutation_identity": mutation_identity,
             }
             (iter_dir / "meta.json").write_text(
                 json.dumps(meta, indent=2), encoding="utf-8"
@@ -1514,14 +1641,16 @@ class HillClimber:
         original_rule_ids: list[str],
         target_rule_id: str | None = None,
         eval_cache_hit: bool | None = None,
-    ) -> None:
+    ) -> dict | None:
         """Save individual prompt result immediately after evaluation.
 
         This ensures we don't lose data if rate limits are hit mid-evaluation.
+        Also returns the record dict so callers can pack a JSONL per iter for
+        bd-3wa's new intermediate/ layout (Phase 1: dual write).
         """
         output_dir = self.config.output_dir
         if not output_dir:
-            return
+            return None
         
         # Create intermediate_results subdirectory
         intermediate_dir = output_dir / "intermediate_results"
@@ -1571,7 +1700,8 @@ class HillClimber:
         result_path = intermediate_dir / f"{phase}_{index:03d}_{timestamp}.json"
         with open(result_path, "w") as f:
             json.dump(result_data, f, indent=2)
-    
+        return result_data
+
     def _save_results(self, result: HillClimbResult) -> None:
         """Save results to output directory."""
         output_dir = self.config.output_dir

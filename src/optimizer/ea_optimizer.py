@@ -98,6 +98,9 @@ def run_ea(
     max_depth: int,
     seed: int | None,
     log: Callable[[str], None],
+    iter_record_fn: Callable[[dict], None] | None = None,
+    archive_snapshot_fn: Callable[[int, dict[str, dict]], None] | None = None,
+    snapshot_every: int = 20,
 ) -> EARunResult:
     """Run the (1+1) EA + Pareto archive optimization.
 
@@ -113,7 +116,16 @@ def run_ea(
 
     All RNG draws use a single :class:`random.Random` seeded from ``seed`` so
     that a fixed seed reproduces the full run.
+
+    bd-3wa Phase 1 (augment-first): ``iter_record_fn`` is invoked once per EA
+    loop iteration with a strategy-agnostic record (see hill_climber._append_
+    iteration_record docstring). ``archive_snapshot_fn`` is invoked every
+    ``snapshot_every`` iterations with the current per-rule archive snapshot
+    dict (inline rule_text per §9.1 Q3). Both are no-ops when None — keeps the
+    runner usable without an output directory.
     """
+    import time as _time
+    from datetime import datetime as _dt
     rng = random.Random(seed)
     n_mutators = len(mutators)
     mutator_names = [m.name for m in mutators]
@@ -155,6 +167,9 @@ def run_ea(
     }
 
     for i in range(max_iterations):
+        # Track per-iter selection_meta state for the iterations.jsonl record.
+        restarts_this_iter: list[dict[str, Any]] = []
+
         # ---- 0. Restart any rule whose triggers fired since last iteration
         for rid, arc in archives.items():
             should, reason = arc.should_restart()
@@ -164,6 +179,7 @@ def run_ea(
                 arc.restart(current_iteration=i, reason=reason)
                 if reason in restart_reason_counts:
                     restart_reason_counts[reason] += 1
+                restarts_this_iter.append({"rule_id": rid, "reason": reason})
 
         # ---- 1. Pick rule uniformly from those with at least one eligible entry
         eligible_rids = [
@@ -217,11 +233,44 @@ def run_ea(
             # the same dead-end forever, and skip the archive insert.
             archive.mark_tried(parent, mutator_name)
             log(f"   ⚠️ No mutated text produced; marked {mutator_name} tried for parent")
+            if iter_record_fn is not None:
+                iter_record_fn({
+                    "iter": i + 1,
+                    "timestamp": _dt.utcnow().isoformat() + "Z",
+                    "rule_id": rule_id,
+                    "mutator": mutator_name,
+                    "parent_depth": parent.depth,
+                    "candidate_depth": None,
+                    "mutation_identity": None,
+                    "validation_passed": False,
+                    "f1": None, "f2": None, "f3": None,
+                    "accepted": False,
+                    "f1_advance": False,
+                    "num_prompts_affected": num_affected,
+                    "llm_calls_total": None,
+                    "input_tokens_total": None,
+                    "output_tokens_total": None,
+                    "selection_meta": {
+                        "strategy": "ea",
+                        "parent_iter": parent.iteration_added,
+                        "parent_f1": parent.f1,
+                        "archive_size_before": len(archive),
+                        "archive_size_after": len(archive),
+                        "attempts_since_insert": archive._attempts_since_insert,
+                        "restarts_this_iter": restarts_this_iter,
+                    },
+                })
             continue
 
         # ---- 4. Mark tried (regardless of archive outcome) ---------------
         archive.mark_tried(parent, mutator_name)
         mutator_stats[mutator_name]["attempts"] += 1
+
+        # bd-3wa: capture mutation_identity flag BEFORE archive insertion
+        # (post-6ac526b try_add rejects identity, but the event is still
+        # observable for analysis).
+        mutation_identity = (iter_mutated_text == parent.rule_text)
+        archive_size_before = len(archive)
 
         # ---- 5. Offer offspring to the archive ---------------------------
         accepted = archive.try_add(
@@ -274,8 +323,44 @@ def run_ea(
         ))
 
         # ---- 8. Periodic archive snapshot (every 20 iterations) -------------
-        if (i + 1) % 20 == 0:
+        if (i + 1) % snapshot_every == 0:
             _log_archive_snapshot(log=log, archives=archives, iteration=i + 1)
+            if archive_snapshot_fn is not None:
+                archive_snapshot_fn(
+                    i + 1,
+                    {rid: arc.snapshot() for rid, arc in archives.items()},
+                )
+
+        # ---- 9. bd-3wa: emit per-iter record into iterations.jsonl -----------
+        if iter_record_fn is not None:
+            iter_record_fn({
+                "iter": i + 1,
+                "timestamp": _dt.utcnow().isoformat() + "Z",
+                "rule_id": rule_id,
+                "mutator": mutator_name,
+                "parent_depth": parent.depth,
+                "candidate_depth": parent.depth + 1,
+                "mutation_identity": mutation_identity,
+                "validation_passed": True,
+                "f1": candidate_fitness.total_semgrep_delta,
+                "f2": candidate_fitness.proportion_divergent,
+                "f3": candidate_fitness.conditional_mean_divergence,
+                "accepted": accepted,
+                "f1_advance": accepted and (candidate_fitness.total_semgrep_delta > parent.f1),
+                "num_prompts_affected": num_affected,
+                "llm_calls_total": None,    # populated by hill_climber from its counters if needed
+                "input_tokens_total": None,
+                "output_tokens_total": None,
+                "selection_meta": {
+                    "strategy": "ea",
+                    "parent_iter": parent.iteration_added,
+                    "parent_f1": parent.f1,
+                    "archive_size_before": archive_size_before,
+                    "archive_size_after": len(archive),
+                    "attempts_since_insert": archive._attempts_since_insert,
+                    "restarts_this_iter": restarts_this_iter,
+                },
+            })
 
     # ---- Final: collect archive snapshots + global best ---------------------
     archives_snapshot = {rid: arc.snapshot() for rid, arc in archives.items()}
@@ -355,6 +440,7 @@ def run_random_baseline(
     max_depth: int,
     seed: int | None,
     log: Callable[[str], None],
+    iter_record_fn: Callable[[dict], None] | None = None,
 ) -> EARunResult:
     """Random walk with depth-cap restart, no archive, no acceptance.
 
@@ -363,7 +449,11 @@ def run_random_baseline(
     depth, log the candidate. If depth hits ``max_depth`` (or all mutators have
     been tried on current_text), reset to the original. Log every candidate's
     3-vector for post-hoc EA-vs-random distribution analysis.
+
+    bd-3wa Phase 1: ``iter_record_fn`` is invoked once per iteration with a
+    strategy-agnostic record (selection_meta.strategy="random_baseline").
     """
+    from datetime import datetime as _dt
     rng = random.Random(seed)
     n_mutators = len(mutators)
     mutator_names = [m.name for m in mutators]
@@ -396,6 +486,7 @@ def run_random_baseline(
         rule_id = rng.choice(all_rule_ids)
         state = states[rule_id]
 
+        restart_triggered: str | None = None
         # Restart triggers BEFORE picking a mutator
         if state.depth >= max_depth:
             state.restart_history.append({
@@ -406,6 +497,7 @@ def run_random_baseline(
             state.depth = 0
             state.tried_for_current = set()
             restart_reason_counts["depth_cap"] += 1
+            restart_triggered = "depth_cap"
             log(f"   ↻ rule={rule_id.replace('codeguard-', 'cg-')} restart: depth_cap")
         elif len(state.tried_for_current) >= n_mutators:
             state.restart_history.append({
@@ -416,6 +508,7 @@ def run_random_baseline(
             state.depth = 0
             state.tried_for_current = set()
             restart_reason_counts["mutator_exhausted"] += 1
+            restart_triggered = "mutator_exhausted"
             log(f"   ↻ rule={rule_id.replace('codeguard-', 'cg-')} restart: mutator_exhausted")
 
         available = [m for m in mutator_names if m not in state.tried_for_current]
@@ -444,10 +537,36 @@ def run_random_baseline(
         # Mark mutator tried even if validation produced no text — avoids retrying
         state.tried_for_current.add(mutator_name)
         mutator_stats[mutator_name]["attempts"] += 1
+        walk_depth_before = state.depth
 
         if iter_mutated_text is None:
             log(f"   ⚠️ No mutated text; marked {mutator_name} tried for this version")
+            if iter_record_fn is not None:
+                iter_record_fn({
+                    "iter": i + 1,
+                    "timestamp": _dt.utcnow().isoformat() + "Z",
+                    "rule_id": rule_id,
+                    "mutator": mutator_name,
+                    "parent_depth": walk_depth_before,
+                    "candidate_depth": None,
+                    "mutation_identity": None,
+                    "validation_passed": False,
+                    "f1": None, "f2": None, "f3": None,
+                    "accepted": False,
+                    "f1_advance": False,
+                    "num_prompts_affected": num_affected,
+                    "selection_meta": {
+                        "strategy": "random_baseline",
+                        "walk_depth_before": walk_depth_before,
+                        "walk_depth_after": walk_depth_before,
+                        "restart_triggered": restart_triggered,
+                        "parent_f1": state.current_f1,
+                    },
+                })
             continue
+
+        # bd-3wa: capture mutation_identity BEFORE advancing the walk
+        mutation_identity = (iter_mutated_text == state.current_text)
 
         # No acceptance test — always advance the walk
         parent_f1 = state.current_f1
@@ -499,6 +618,32 @@ def run_random_baseline(
             is_improvement=True,
             num_prompts_affected=num_affected,
         ))
+
+        # bd-3wa: emit per-iter record into iterations.jsonl
+        if iter_record_fn is not None:
+            iter_record_fn({
+                "iter": i + 1,
+                "timestamp": _dt.utcnow().isoformat() + "Z",
+                "rule_id": rule_id,
+                "mutator": mutator_name,
+                "parent_depth": walk_depth_before,
+                "candidate_depth": state.depth,
+                "mutation_identity": mutation_identity,
+                "validation_passed": True,
+                "f1": candidate_fitness.total_semgrep_delta,
+                "f2": candidate_fitness.proportion_divergent,
+                "f3": candidate_fitness.conditional_mean_divergence,
+                "accepted": True,  # random_baseline always advances
+                "f1_advance": candidate_fitness.total_semgrep_delta > parent_f1,
+                "num_prompts_affected": num_affected,
+                "selection_meta": {
+                    "strategy": "random_baseline",
+                    "walk_depth_before": walk_depth_before,
+                    "walk_depth_after": state.depth,
+                    "restart_triggered": restart_triggered,
+                    "parent_f1": parent_f1,
+                },
+            })
 
     # Build snapshot dict mirroring archive snapshot shape (consistent JSON)
     snapshot = {
