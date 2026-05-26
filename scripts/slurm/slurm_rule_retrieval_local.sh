@@ -72,17 +72,22 @@ echo "  Exclude map: ${EXCLUDE_MAP:-none}"
 echo "  Resume: ${RESUME:-none}"
 echo ""
 
-# Activate conda environment
-echo "=== Activating Environment ==="
-source /scratch/$USER/software/miniconda3/etc/profile.d/conda.sh
-conda activate sbst
+REPO_ROOT="${REPO_ROOT:-/home/rnegro/thesis/rule-mutation}"
+cd "$REPO_ROOT"
 
-if [ "$CONDA_DEFAULT_ENV" != "sbst" ]; then
-    echo "ERROR: Failed to activate sbst environment"
+# Activate the venv and call python directly below. NEVER switch to `uv run python`:
+# uv run re-syncs the venv to the lockfile on every invocation, which would revert the
+# manually-installed CUDA torch (2.12.0+cu126) back to the lock's CPU pin. Inference
+# would then silently run on CPU.
+echo "=== Activating uv Environment ==="
+source "$REPO_ROOT/.venv/bin/activate"
+
+if [ -z "$VIRTUAL_ENV" ]; then
+    echo "ERROR: Failed to activate uv environment at $REPO_ROOT/.venv"
     exit 1
 fi
 
-echo "Environment: $CONDA_DEFAULT_ENV"
+echo "Environment: $VIRTUAL_ENV"
 echo "Python: $(which python)"
 echo ""
 
@@ -103,10 +108,6 @@ echo ""
 
 # Ensure logs directory exists
 mkdir -p logs
-
-# Repo root
-REPO_ROOT="${REPO_ROOT:-/home/rnegro/thesis/rule-mutation}"
-cd "$REPO_ROOT"
 
 export PYTHONUNBUFFERED=1
 
