@@ -176,7 +176,7 @@ def run_ea(
             if should:
                 log(f"   ↻ rule={rid.replace('codeguard-', 'cg-')} restart: {reason} "
                     f"(archive_size={len(arc)})")
-                arc.restart(current_iteration=i, reason=reason)
+                arc.restart(current_iteration=i + 1, reason=reason)
                 if reason in restart_reason_counts:
                     restart_reason_counts[reason] += 1
                 restarts_this_iter.append({"rule_id": rid, "reason": reason})
@@ -202,7 +202,7 @@ def run_ea(
         available = archive.available_mutators(parent, mutator_names)
         if not available:
             # Should be caught by restart trigger; defensive guard
-            archive.restart(current_iteration=i, reason="mutator_exhausted")
+            archive.restart(current_iteration=i + 1, reason="mutator_exhausted")
             continue
         mutator_name = rng.choice(available)
         mutator = mutator_by_name[mutator_name]
@@ -251,14 +251,15 @@ def run_ea(
                     "input_tokens_total": None,
                     "output_tokens_total": None,
                     "selection_meta": {
-                        "strategy": "ea",
                         "parent_iter": parent.iteration_added,
                         "parent_f1": parent.f1,
                         "archive_size_before": len(archive),
                         "archive_size_after": len(archive),
                         "attempts_since_insert": archive._attempts_since_insert,
+                        "n_eligible_rules": len(eligible_rids),
                         "restarts_this_iter": restarts_this_iter,
                     },
+                    "validation_metadata": val_metadata or {},
                 })
             continue
 
@@ -276,7 +277,7 @@ def run_ea(
         accepted = archive.try_add(
             candidate_text=iter_mutated_text,
             candidate_fitness=candidate_fitness,
-            iteration=i,
+            iteration=i + 1,
             parent=parent,
             mutator_name=mutator_name,
         )
@@ -289,11 +290,26 @@ def run_ea(
                 f"f3={candidate_fitness.conditional_mean_divergence:.3f} "
                 f"(archive_size={len(archive)})")
         else:
-            log(f"   ✗ rejected: f1={candidate_fitness.total_semgrep_delta:+.2f} "
-                f"f2={candidate_fitness.proportion_divergent:.3f} "
-                f"f3={candidate_fitness.conditional_mean_divergence:.3f} "
-                f"— dominated by archive member "
-                f"(rule_stagnation={archive._attempts_since_insert}/{archive.restart_h})")
+            _tol = 1e-9
+            _cf1 = candidate_fitness.total_semgrep_delta
+            _cf2 = candidate_fitness.proportion_divergent
+            _cf3 = candidate_fitness.conditional_mean_divergence
+            _dom = next(
+                (e for e in archive.entries
+                 if (e.f1 >= _cf1 - _tol and e.f2 >= _cf2 - _tol and e.f3 >= _cf3 - _tol
+                     and (e.f1 > _cf1 + _tol or e.f2 > _cf2 + _tol or e.f3 > _cf3 + _tol))),
+                None,
+            )
+            if _dom is not None:
+                log(f"   ✗ rejected: cand(f1={_cf1:+.2f}, f2={_cf2:.3f}, f3={_cf3:.3f})"
+                    f" — dominated by entry[iter={_dom.iteration_added}, depth={_dom.depth}]"
+                    f" (f1={_dom.f1:+.2f}, f2={_dom.f2:.3f}, f3={_dom.f3:.3f})"
+                    f" [archive_size={len(archive)}/cap={archive.cap},"
+                    f" stagnation={archive._attempts_since_insert}/{archive.restart_h}]")
+            else:
+                log(f"   ✗ rejected (identity): cand(f1={_cf1:+.2f}, f2={_cf2:.3f}, f3={_cf3:.3f})"
+                    f" [archive_size={len(archive)}/cap={archive.cap},"
+                    f" stagnation={archive._attempts_since_insert}/{archive.restart_h}]")
 
         # ---- 6. Track best-per-rule for HillClimbResult compatibility
         fitness_delta = candidate_fitness.total_semgrep_delta
@@ -352,15 +368,24 @@ def run_ea(
                 "input_tokens_total": None,
                 "output_tokens_total": None,
                 "selection_meta": {
-                    "strategy": "ea",
                     "parent_iter": parent.iteration_added,
                     "parent_f1": parent.f1,
                     "archive_size_before": archive_size_before,
                     "archive_size_after": len(archive),
                     "attempts_since_insert": archive._attempts_since_insert,
+                    "n_eligible_rules": len(eligible_rids),
                     "restarts_this_iter": restarts_this_iter,
                 },
+                "validation_metadata": val_metadata or {},
             })
+
+    # ---- Final archive snapshot (unconditional — covers the last iterations
+    # when max_iterations is not a multiple of snapshot_every) ----------------
+    if archive_snapshot_fn is not None and max_iterations > 0:
+        archive_snapshot_fn(
+            max_iterations,
+            {rid: arc.snapshot() for rid, arc in archives.items()},
+        )
 
     # ---- Final: collect archive snapshots + global best ---------------------
     archives_snapshot = {rid: arc.snapshot() for rid, arc in archives.items()}
@@ -562,6 +587,7 @@ def run_random_baseline(
                         "restart_triggered": restart_triggered,
                         "parent_f1": state.current_f1,
                     },
+                    "validation_metadata": val_metadata or {},
                 })
             continue
 
@@ -643,6 +669,7 @@ def run_random_baseline(
                     "restart_triggered": restart_triggered,
                     "parent_f1": parent_f1,
                 },
+                "validation_metadata": val_metadata or {},
             })
 
     # Build snapshot dict mirroring archive snapshot shape (consistent JSON)

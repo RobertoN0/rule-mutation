@@ -41,12 +41,12 @@ def _validator(use_sbert: bool = False, use_perplexity: bool = False, **kw) -> M
 
 EXPECTED_QUALITY_KEYS = {
     "instruction_adherent",
-    "sbert_similarity", "sbert_threshold",
-    "perplexity_ratio", "perplexity_threshold",
-    "inline_code_retention", "keyword_retention", "keyword_threshold",
+    "sbert_step",
+    "perplexity_ratio",
+    "inline_code_retention", "keyword_retention",
     "security_intent_preserved",
     "readability_grade_original", "readability_grade_mutated", "readability_grade_delta",
-    "passes_all", "changed", "mutation_type",
+    "passes_all", "changed",
 }
 
 
@@ -121,11 +121,11 @@ class TestInstructionAdherence:
 class TestSBERTSimilarity:
 
     def test_sbert_disabled(self):
-        """C-C3: with use_sbert=False, sbert_similarity is None and doesn't gate."""
+        """C-C3: with use_sbert=False, sbert_step is None and doesn't gate."""
         v = _validator(use_sbert=False)
         result = v.validate(_make_result())
         quality = result.metadata["quality"]
-        assert quality["sbert_similarity"] is None
+        assert quality["sbert_step"] is None
         # Should still pass (None doesn't gate)
         assert quality["passes_all"] is True
 
@@ -142,7 +142,7 @@ class TestSBERTSimilarity:
             result = v.validate(_make_result())
 
         quality = result.metadata["quality"]
-        assert quality["sbert_similarity"] == 0.90
+        assert quality["sbert_step"] == 0.90
         assert quality["passes_all"] is True
 
     def test_sbert_fail(self):
@@ -153,7 +153,7 @@ class TestSBERTSimilarity:
             result = v.validate(_make_result())
 
         quality = result.metadata["quality"]
-        assert quality["sbert_similarity"] == 0.70
+        assert quality["sbert_step"] == 0.70
         assert quality["passes_all"] is False
 
 
@@ -375,19 +375,15 @@ class TestRetryStochastic:
             r.metadata["quality"] = {
                 "passes_all": call_count[0] >= 2,
                 "instruction_adherent": True,
-                "sbert_similarity": None,
-                "sbert_threshold": 0.75,
+                "sbert_step": None,
                 "perplexity_ratio": None,
-                "perplexity_threshold": 2.0,
                 "inline_code_retention": 1.0,
                 "keyword_retention": 0.90,
-                "keyword_threshold": 0.70,
                 "security_intent_preserved": True,
                 "readability_grade_original": None,
                 "readability_grade_mutated": None,
                 "readability_grade_delta": None,
                 "changed": True,
-                "mutation_type": r.mutation_type,
             }
             return r
 
@@ -402,19 +398,15 @@ def _force_fail_validation(result: MutationResult) -> MutationResult:
     result.metadata["quality"] = {
         "passes_all": False,
         "instruction_adherent": True,
-        "sbert_similarity": 0.50,
-        "sbert_threshold": 0.75,
+        "sbert_step": 0.50,
         "perplexity_ratio": None,
-        "perplexity_threshold": 2.0,
         "inline_code_retention": 1.0,
         "keyword_retention": 0.90,
-        "keyword_threshold": 0.70,
         "security_intent_preserved": True,
         "readability_grade_original": None,
         "readability_grade_mutated": None,
         "readability_grade_delta": None,
         "changed": True,
-        "mutation_type": result.mutation_type,
     }
     return result
 
@@ -433,5 +425,8 @@ class TestMetadataFlow:
 
         v.validate(result)
         assert "quality" in result.metadata
-        assert isinstance(result.metadata["quality"], dict)
-        assert result.metadata["quality"]["mutation_type"] == "fluff"
+        quality = result.metadata["quality"]
+        assert isinstance(quality, dict)
+        assert "passes_all" in quality
+        assert "sbert_step" in quality
+        assert "mutation_type" not in quality

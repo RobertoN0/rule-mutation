@@ -11,8 +11,8 @@ Architecture (locked 2026-05-08 supervisor meeting):
     plus per-entry state used by the (1+1) EA's parent sampler:
 
         depth           — number of mutations from the original (cap = max_depth)
-        tried_mutators  — set of mutator names already applied to *this* entry
-                          (strict per-name dedup; stochastic mutators get one shot)
+        attempted_children — set of mutator names already applied to *this* entry
+                             (strict per-name dedup; stochastic mutators get one shot)
 
 Restart triggers (any of):
     1. ``h`` consecutive *attempts on this archive* without an insertion
@@ -23,7 +23,7 @@ Restart triggers (any of):
        in a full run, so ``restart_h`` should be set as a fraction of that
        envelope, NOT as a raw EA loop length.
     2. all entries have ``depth >= max_depth``                   (depth_saturated)
-    3. all entries have ``len(tried_mutators) == n_mutators``    (mutator_exhausted)
+    3. all entries have ``len(attempted_children) == n_mutators``    (mutator_exhausted)
 
 On restart the archive snapshots its state into ``restart_history`` and
 re-seeds with a single depth-0 entry holding the original rule + baseline
@@ -54,7 +54,7 @@ class ArchiveEntry:
     f2: float                           # proportion_divergent
     f3: float                           # conditional_mean_divergence
     depth: int
-    tried_mutators: set[str] = field(default_factory=set)
+    attempted_children: set[str] = field(default_factory=set)
     iteration_added: int = 0
     mutation_path: list[str] = field(default_factory=list)
     fitness: AggregatedFitness | None = None
@@ -81,7 +81,7 @@ class ArchiveEntry:
         return self.depth >= max_depth
 
     def is_mutator_exhausted(self, n_mutators: int) -> bool:
-        return len(self.tried_mutators) >= n_mutators
+        return len(self.attempted_children) >= n_mutators
 
     def is_parent_eligible(self, max_depth: int, n_mutators: int) -> bool:
         return not (
@@ -97,7 +97,7 @@ class ArchiveEntry:
             "f2": round(self.f2, 6),
             "f3": round(self.f3, 6),
             "depth": self.depth,
-            "tried_mutators": sorted(self.tried_mutators),
+            "attempted_children": sorted(self.attempted_children),
             "iteration_added": self.iteration_added,
             "mutation_path": list(self.mutation_path),
             "rule_text": self.rule_text,
@@ -191,7 +191,7 @@ class ParetoArchive:
                 f2=self._baseline_fitness.proportion_divergent,
                 f3=self._baseline_fitness.conditional_mean_divergence,
                 depth=0,
-                tried_mutators=set(),
+                attempted_children=set(),
                 iteration_added=iteration,
                 mutation_path=[],
                 fitness=self._baseline_fitness,
@@ -253,7 +253,7 @@ class ParetoArchive:
 
     def available_mutators(self, entry: ArchiveEntry, all_mutator_names: list[str]) -> list[str]:
         """Mutator names not yet tried on ``entry``."""
-        return [m for m in all_mutator_names if m not in entry.tried_mutators]
+        return [m for m in all_mutator_names if m not in entry.attempted_children]
 
     def mark_tried(self, entry: ArchiveEntry, mutator_name: str) -> None:
         """Record that ``mutator_name`` has been applied to ``entry``.
@@ -262,7 +262,7 @@ class ParetoArchive:
         offspring entered the archive — otherwise rejected offspring would let
         the same (parent, mutator) pair be retried forever.
         """
-        entry.tried_mutators.add(mutator_name)
+        entry.attempted_children.add(mutator_name)
 
     # ------------------------------------------------------------------
     # Insertion
@@ -304,7 +304,7 @@ class ParetoArchive:
             f2=candidate_fitness.proportion_divergent,
             f3=candidate_fitness.conditional_mean_divergence,
             depth=parent.depth + 1,
-            tried_mutators=set(),
+            attempted_children=set(),
             iteration_added=iteration,
             mutation_path=list(parent.mutation_path) + [mutator_name],
             fitness=candidate_fitness,

@@ -447,16 +447,13 @@ class MutationQualityValidator:
         result.metadata["quality"] = {
             # Criterion 1
             "instruction_adherent": instruction_adherent,
-            # Criterion 2
-            "sbert_similarity": sbert_similarity,
-            "sbert_threshold": self.sbert_threshold,
+            # Criterion 2: sbert_step = sim vs parent (single-step drift)
+            "sbert_step": sbert_similarity,
             # Criterion 3
             "perplexity_ratio": perplexity_ratio,
-            "perplexity_threshold": self.perplexity_threshold,
             # Criterion 4
             "inline_code_retention": round(inline_code_retention, 4),
             "keyword_retention": round(keyword_retention, 4),
-            "keyword_threshold": self.keyword_threshold,
             "security_intent_preserved": security_intent_preserved,
             # Criterion 5 (informational)
             "readability_grade_original": readability_orig,
@@ -469,7 +466,6 @@ class MutationQualityValidator:
             # Summary
             "passes_all": passes_all,
             "changed": result.changed,
-            "mutation_type": result.mutation_type,
         }
 
         return result
@@ -589,8 +585,8 @@ class MutationQualityValidator:
                 )
                 return result  # early exit on first passing candidate
 
-            # Track best-so-far by SBERT similarity
-            sim = quality.get("sbert_similarity") or 0.0
+            # Track best-so-far by SBERT similarity (step vs parent)
+            sim = quality.get("sbert_step") or 0.0
             if sim > best_sim:
                 best_sim = sim
                 best_result = result

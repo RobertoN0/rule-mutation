@@ -14,6 +14,7 @@ Algorithm:
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import time
@@ -497,8 +498,20 @@ class HillClimber:
             self._open_iterations_writer()
         if self._iterations_jsonl_file is None:
             return  # no output_dir; silent skip
-        self._iterations_jsonl_file.write(json.dumps(record) + "\n")
-        self._iterations_jsonl_file.flush()
+        # Inject running token/call totals if the EA/random_baseline runner left
+        # them None (it can't see HillClimber's counters from inside the optimizer).
+        if record.get("llm_calls_total") is None:
+            record["llm_calls_total"] = self._total_llm_calls
+        if record.get("input_tokens_total") is None:
+            record["input_tokens_total"] = self._total_input_tokens
+        if record.get("output_tokens_total") is None:
+            record["output_tokens_total"] = self._total_output_tokens
+        fcntl.flock(self._iterations_jsonl_file.fileno(), fcntl.LOCK_EX)
+        try:
+            self._iterations_jsonl_file.write(json.dumps(record) + "\n")
+            self._iterations_jsonl_file.flush()
+        finally:
+            fcntl.flock(self._iterations_jsonl_file.fileno(), fcntl.LOCK_UN)
 
     def _close_iterations_writer(self) -> None:
         """Close iterations.jsonl. Safe to call multiple times."""
@@ -730,23 +743,68 @@ class HillClimber:
                         max_retries=self.config.mutation_max_retries,
                     )
                     pre_validation_metadata = mutation_result.metadata.get("quality", {})
-                    # Cumulative drift: SBERT vs the raw original rule (not current best)
-                    if tracker is not None and target_rule_id is not None and mutation_result.changed:
-                        raw_original = tracker.get_original(target_rule_id)
-                        orig_prose = self.validator._extract_prose_text(raw_original)
-                        cand_prose = self.validator._extract_prose_text(mutation_result.mutated)
-                        sbert_cum = self.validator._compute_sbert_similarity(orig_prose, cand_prose)
-                        pre_validation_metadata["sbert_cumulative_vs_original"] = sbert_cum
-                        pre_validation_metadata["depth_at_mutation"] = tracker.depth(target_rule_id)
+                    # Cumulative drift: SBERT vs the raw original rule (not current best).
+                    # Lex path: tracker.get_original() / tracker.depth() are authoritative.
+                    # EA path: tracker is None — look up the raw original from
+                    # prompts_with_rules.individual_rules[target_rule_id] (which holds
+                    # the on-disk original). Computed regardless of mutation_result.changed:
+                    # in EA the parent may already be drifted (depth>0), so sbert_cum is
+                    # informative even when the latest mutation was an identity.
+                    if target_rule_id is not None:
+                        if tracker is not None:
+                            raw_original = tracker.get_original(target_rule_id)
+                            _depth_at_mut = tracker.depth(target_rule_id)
+                        else:
+                            raw_original = next(
+                                (
+                                    pwr.individual_rules[target_rule_id]
+                                    for pwr in prompts_with_rules
+                                    if target_rule_id in pwr.individual_rules
+                                ),
+                                None,
+                            )
+                            _depth_at_mut = None  # EA archives depth separately on entries
+                        if raw_original is not None:
+                            orig_prose = self.validator._extract_prose_text(raw_original)
+                            cand_prose = self.validator._extract_prose_text(mutation_result.mutated)
+                            sbert_cum = self.validator._compute_sbert_similarity(orig_prose, cand_prose)
+                            pre_validation_metadata["sbert_cum"] = sbert_cum
+                            if _depth_at_mut is not None:
+                                pre_validation_metadata["depth_at_mutation"] = _depth_at_mut
+                    # B3: enriched validation log with iter, rule, mutator, REASON
+                    _passes = pre_validation_metadata.get("passes_all")
+                    if _passes is False:
+                        _sbert_v = pre_validation_metadata.get("sbert_step")
+                        _ppl_v = pre_validation_metadata.get("perplexity_ratio")
+                        _ic = pre_validation_metadata.get("inline_code_retention", 1.0)
+                        _kw = pre_validation_metadata.get("keyword_retention", 1.0)
+                        _val = self.validator
+                        if not pre_validation_metadata.get("instruction_adherent", True):
+                            _reason = "instruction_adherent=False"
+                        elif _sbert_v is not None and _val is not None and _sbert_v < _val.sbert_threshold:
+                            _reason = f"sbert_step<threshold ({_sbert_v:.2f} < {_val.sbert_threshold:.2f})"
+                        elif _ppl_v is not None and _val is not None and _ppl_v > _val.perplexity_threshold:
+                            _reason = f"perplexity_ratio>threshold ({_ppl_v:.2f} > {_val.perplexity_threshold:.2f})"
+                        elif _ic < 1.0:
+                            _reason = f"inline_code_retention<1.0 ({_ic:.2f})"
+                        elif _val is not None and _kw < _val.keyword_threshold:
+                            _reason = f"keyword_retention<threshold ({_kw:.2f} < {_val.keyword_threshold:.2f})"
+                        else:
+                            _reason = "unknown"
+                    else:
+                        _reason = "passed"
+                    _mut_name = iter_mutator.name if iter_mutator is not None else "?"
+                    _rule_short = (target_rule_id or "?").replace("codeguard-", "cg-")
                     self._log(
-                        f"   Validation: passes_all={pre_validation_metadata.get('passes_all')}, "
-                        f"adherent={pre_validation_metadata.get('instruction_adherent')}, "
-                        f"sbert_step={pre_validation_metadata.get('sbert_similarity')}, "
-                        f"sbert_cum={pre_validation_metadata.get('sbert_cumulative_vs_original')}, "
-                        f"ppl={pre_validation_metadata.get('perplexity_ratio')}, "
-                        f"inline_code={pre_validation_metadata.get('inline_code_retention')}, "
-                        f"keywords={pre_validation_metadata.get('keyword_retention')}, "
-                        f"retries_exhausted={pre_validation_metadata.get('retries_exhausted', False)}"
+                        f"   Validation [iter={iteration}, rule={_rule_short}, mut={_mut_name}]:\n"
+                        f"     passes_all={_passes}  REASON={_reason}\n"
+                        f"     adherent={pre_validation_metadata.get('instruction_adherent')}  "
+                        f"sbert_step={pre_validation_metadata.get('sbert_step')}  "
+                        f"sbert_cum={pre_validation_metadata.get('sbert_cum')}  "
+                        f"ppl={pre_validation_metadata.get('perplexity_ratio')}  "
+                        f"inline_code={pre_validation_metadata.get('inline_code_retention')}  "
+                        f"keywords={pre_validation_metadata.get('keyword_retention')}\n"
+                        f"     retries_exhausted={pre_validation_metadata.get('retries_exhausted', False)}"
                     )
                 else:
                     mutation_result = iter_mutator.mutate(original_text)
@@ -806,6 +864,7 @@ class HillClimber:
                         mutation_changes=pre_mutation_changes,
                         validation_metadata=pre_validation_metadata,
                         parent_text=parent_text_override,
+                        mutator_name=iter_mutator.name if iter_mutator is not None else None,
                     )
 
             test_prompt = TestPrompt(
@@ -1542,7 +1601,6 @@ class HillClimber:
             per_rule_best_code_divergence=ea_result.per_rule_best_code_divergence,
             pool_arm_stats={
                 "strategy": self.config.optimizer,
-                "arms": {},
                 "mutator_stats": ea_result.mutator_stats,
                 "restart_reason_counts": ea_result.restart_reason_counts,
             },
@@ -1571,6 +1629,7 @@ class HillClimber:
         mutation_changes: list[str] | None = None,
         validation_metadata: dict | None = None,
         parent_text: str | None = None,
+        mutator_name: str | None = None,
     ) -> str:
         """Save the mutated rule to an iteration subdirectory and return its path.
 
@@ -1620,10 +1679,8 @@ class HillClimber:
             )
             meta = {
                 "iteration": iteration,
+                "mutator": mutator_name,
                 "target_rule_id": target_rule_id,
-                "all_rule_ids": original_rule_ids,
-                "changes": mutation_changes or [],
-                "validation": validation_metadata or {},
                 "mutation_identity": mutation_identity,
             }
             (iter_dir / "meta.json").write_text(
@@ -1717,7 +1774,6 @@ class HillClimber:
             "llm_provider": self.llm.provider_name,
             "llm_model": self.llm.model_name,
             "mutators": self.pool.mutator_names,
-            "mutator_strategy": self.pool.strategy.value,
             "max_iterations": self.config.max_iterations,
             "num_iterations_run": len(result.iterations),
             "original_fitness": result.original_fitness.total_fitness,
@@ -1730,10 +1786,18 @@ class HillClimber:
         }
         if result.pool_arm_stats:
             summary["pool_arm_stats"] = result.pool_arm_stats
-        if result.compounding_state:
-            summary["compounding_state"] = result.compounding_state
         if result.eval_cache_stats:
             summary["eval_cache_stats"] = result.eval_cache_stats
+        summary["config"] = {
+            "archive_cap": self.config.archive_cap,
+            "restart_h": self.config.restart_h,
+            "max_depth_ea": self.config.max_depth_ea,
+            "n_cases": self.config.n_cases if hasattr(self.config, "n_cases") else None,
+            "n_iterations": self.config.max_iterations,
+            "selection": self.config.selection if hasattr(self.config, "selection") else None,
+            "validation_enabled": self.config.enable_validation,
+            "perplexity_enabled": self.config.enable_perplexity if hasattr(self.config, "enable_perplexity") else False,
+        }
         
         summary_path = output_dir / f"hillclimb_summary_{timestamp}.json"
         with open(summary_path, "w") as f:

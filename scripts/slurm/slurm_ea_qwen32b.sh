@@ -142,18 +142,23 @@ echo "Input files:"
 echo "  Rules map:       $RULES_MAP"
 echo ""
 
-# Activate conda environment
-echo "=== Activating Environment ==="
-source /scratch/$USER/software/miniconda3/etc/profile.d/conda.sh
-conda activate sbst
+REPO_ROOT="${REPO_ROOT:-/home/rnegro/thesis/rule-mutation}"
+cd "$REPO_ROOT"
 
-if [ "$CONDA_DEFAULT_ENV" != "sbst" ]; then
-    echo "❌ ERROR: Failed to activate sbst environment"
+# Activate the venv and call python directly below. NEVER switch to `uv run python`:
+# uv run re-syncs the venv to the lockfile on every invocation, which would revert the
+# manually-installed CUDA torch (2.12.0+cu126) back to the lock's CPU pin. Inference
+# would then silently run on CPU.
+echo "=== Activating uv Environment ==="
+source "$REPO_ROOT/.venv/bin/activate"
+
+if [ -z "$VIRTUAL_ENV" ]; then
+    echo "ERROR: Failed to activate uv environment at $REPO_ROOT/.venv"
     exit 1
 fi
 
-echo "✅ Environment: $CONDA_DEFAULT_ENV"
-echo "   Python: $(which python)"
+echo "Environment: $VIRTUAL_ENV"
+echo "Python: $(which python)"
 echo ""
 
 # HuggingFace offline (GPU nodes have no internet)
@@ -176,21 +181,9 @@ fi
 mkdir -p "$OUTPUT_DIR"
 mkdir -p logs
 
-# Flush SLURM logs into the output dir on any exit (matches legacy script)
-_flush_slurm_logs() {
-  for f in /home/rnegro/thesis/rule-mutation/logs/*${SLURM_JOB_ID}*.out \
-            /home/rnegro/thesis/rule-mutation/logs/*${SLURM_JOB_ID}*.err; do
-    [ -f "$f" ] && cp "$f" "${OUTPUT_DIR}/" 2>/dev/null || true
-  done
-}
-trap _flush_slurm_logs EXIT TERM INT
-
 echo "=== Starting Experiment ==="
 echo "Output directory: $OUTPUT_DIR"
 echo ""
-
-REPO_ROOT="${REPO_ROOT:-/home/rnegro/thesis/rule-mutation}"
-cd "$REPO_ROOT"
 
 export PYTHONUNBUFFERED=1
 export SEMGREP_RULESET
@@ -232,7 +225,7 @@ python scripts/experiments/run_with_rules_map.py \
     --selection "$SELECTION" \
     --iterations "$N_ITERATIONS" \
     --model "$MODEL_ID" \
-    --backend local \
+    --backend delftblue \
     --quantization "$QUANTIZATION" \
     --seed "$SEED" \
     --mutators $MUTATORS \

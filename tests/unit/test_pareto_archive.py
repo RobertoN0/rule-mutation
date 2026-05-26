@@ -74,7 +74,7 @@ class TestSeeding:
         entry = arc.entries[0]
         assert entry.rule_text == "ORIGINAL"
         assert entry.depth == 0
-        assert entry.tried_mutators == set()
+        assert entry.attempted_children == set()
         assert entry.f1 == 0.0
         assert entry.mutation_path == []
 
@@ -327,7 +327,7 @@ class TestRestart:
         # Re-seeded to size 1
         assert len(arc) == 1
         assert arc.entries[0].depth == 0
-        assert arc.entries[0].tried_mutators == set()
+        assert arc.entries[0].attempted_children == set()
         # History captured
         assert len(arc.restart_history) == 1
         h = arc.restart_history[0]
@@ -383,4 +383,36 @@ class TestEdgeCases:
         entry = arc.entries[0]
         arc.mark_tried(entry, "m0")
         arc.mark_tried(entry, "m0")
-        assert entry.tried_mutators == {"m0"}
+        assert entry.attempted_children == {"m0"}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# A8  iteration_added is 1-based (seeds stay 0)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestIterationAdded:
+
+    def test_seed_has_iteration_added_zero(self):
+        arc = _make_archive()
+        assert arc.entries[0].iteration_added == 0
+
+    def test_accepted_offspring_is_1based(self):
+        arc = _make_archive(cap=4, n_mutators=4)
+        parent = arc.entries[0]
+        # Loop index i=4 → iteration=i+1=5 passed to try_add
+        accepted = arc.try_add("CAND", _fit(1.0, 0.5, 0.3),
+                               iteration=5, parent=parent, mutator_name="m0")
+        assert accepted
+        inserted = next(e for e in arc.entries if e.rule_text == "CAND")
+        assert inserted.iteration_added == 5
+
+    def test_restart_seed_iteration_added_matches_caller(self):
+        arc = _make_archive(restart_h=1, max_depth=5, n_mutators=4, cap=4)
+        # Trigger stagnation by exhausting restart_h
+        parent = arc.entries[0]
+        arc.try_add("WORSE", _fit(-1.0, 0.0, 0.0),
+                    iteration=1, parent=parent, mutator_name="m0")
+        # After 1 failed attempt (restart_h=1), restart fires next iter
+        # Simulate restart call with 1-based iter = 11
+        arc.restart(current_iteration=11, reason="stagnation")
+        assert arc.entries[0].iteration_added == 11
