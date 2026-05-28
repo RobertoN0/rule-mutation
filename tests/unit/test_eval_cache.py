@@ -94,7 +94,7 @@ def test_cache_hit_skips_generation_and_semgrep(tmp_path: Path):
         # First call — cache miss: generate + semgrep
         agg1, res1, _, _, _ = hc._evaluate_with_per_prompt_rules(
             [pwr], mutator_fn=None, iteration=None, phase="baseline",
-            target_rule_id=None, selected_mutator=None, tracker=None, batch_mutations=None,
+            target_rule_id=None, selected_mutator=None,
         )
         assert len(backend.calls) == 1, "first call must generate"
         assert _semgrep_stub.call_count == 1, "first call must invoke Semgrep"
@@ -104,7 +104,7 @@ def test_cache_hit_skips_generation_and_semgrep(tmp_path: Path):
         # Second call with byte-identical rule_text — cache hit: skip both
         agg2, res2, _, _, _ = hc._evaluate_with_per_prompt_rules(
             [pwr], mutator_fn=None, iteration=None, phase="baseline",
-            target_rule_id=None, selected_mutator=None, tracker=None, batch_mutations=None,
+            target_rule_id=None, selected_mutator=None,
         )
         assert len(backend.calls) == 1, "second call must not generate (cache hit)"
         assert _semgrep_stub.call_count == 1, "second call must not invoke Semgrep (cache hit)"
@@ -135,11 +135,11 @@ def test_cache_miss_on_different_rule_text(tmp_path: Path):
     with patch("src.optimizer.hill_climber.run_semgrep_batch_dir", side_effect=_semgrep_stub):
         hc._evaluate_with_per_prompt_rules(
             [pwr_v1], mutator_fn=None, iteration=None, phase="baseline",
-            target_rule_id=None, selected_mutator=None, tracker=None, batch_mutations=None,
+            target_rule_id=None, selected_mutator=None,
         )
         hc._evaluate_with_per_prompt_rules(
             [pwr_v2], mutator_fn=None, iteration=None, phase="baseline",
-            target_rule_id=None, selected_mutator=None, tracker=None, batch_mutations=None,
+            target_rule_id=None, selected_mutator=None,
         )
         assert len(backend.calls) == 2, "different rule_text must trigger fresh generation"
         assert _semgrep_stub.call_count == 2
@@ -167,11 +167,11 @@ def test_cache_disabled_regenerates_every_time(tmp_path: Path):
     with patch("src.optimizer.hill_climber.run_semgrep_batch_dir", side_effect=_semgrep_stub):
         hc._evaluate_with_per_prompt_rules(
             [pwr], mutator_fn=None, iteration=None, phase="baseline",
-            target_rule_id=None, selected_mutator=None, tracker=None, batch_mutations=None,
+            target_rule_id=None, selected_mutator=None,
         )
         hc._evaluate_with_per_prompt_rules(
             [pwr], mutator_fn=None, iteration=None, phase="baseline",
-            target_rule_id=None, selected_mutator=None, tracker=None, batch_mutations=None,
+            target_rule_id=None, selected_mutator=None,
         )
         assert len(backend.calls) == 2, "cache disabled must always regenerate"
         assert _semgrep_stub.call_count == 2
@@ -202,14 +202,14 @@ def test_partial_cache_hit_batches_only_fresh_samples(tmp_path: Path):
         # Prime cache with pwr_0
         hc._evaluate_with_per_prompt_rules(
             [pwr_0], mutator_fn=None, iteration=None, phase="baseline",
-            target_rule_id=None, selected_mutator=None, tracker=None, batch_mutations=None,
+            target_rule_id=None, selected_mutator=None,
         )
         assert _semgrep_stub.last_batch_size == 1
 
         # Now run with both prompts — only pwr_1 should be fresh
         hc._evaluate_with_per_prompt_rules(
             [pwr_0, pwr_1], mutator_fn=None, iteration=None, phase="baseline",
-            target_rule_id=None, selected_mutator=None, tracker=None, batch_mutations=None,
+            target_rule_id=None, selected_mutator=None,
         )
         assert _semgrep_stub.last_batch_size == 1, "mixed batch must invoke Semgrep only on fresh samples"
         # Total LLM calls: 1 for priming + 1 for pwr_1 only

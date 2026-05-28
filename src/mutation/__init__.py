@@ -18,7 +18,7 @@ from .llm_based import (
     VoiceChangeMutator,
     ParaphraseMutator,
 )
-from .pool import MutatorPool, MutatorSelectionStrategy
+from .pool import MutatorPool
 from .quality import MutationQualityValidator
 from .security_lexicon import get_security_lexicon, build_security_lexicon
 from typing import TYPE_CHECKING
@@ -29,11 +29,8 @@ if TYPE_CHECKING:
 
 def create_mutator_pool(
     names: list[str],
-    strategy: str = "round_robin",
     seed: int | None = None,
     backend: "LLMBackend | None" = None,
-    gamma: float = 0.9,
-    exploration: float = 1.41,
 ) -> MutatorPool:
     """Create a :class:`MutatorPool` from a list of mutator names.
 
@@ -41,16 +38,11 @@ def create_mutator_pool(
     ----------
     names : list[str]
         Mutator names (same keys accepted by :func:`create_mutator`).
-    strategy : str
-        One of ``"round_robin"``, ``"ducb"``, ``"greedy_batch"``.
-    seed, backend, gamma, exploration
+    seed, backend
         Forwarded to :func:`create_mutator` / :class:`MutatorPool`.
     """
-    strat = MutatorSelectionStrategy(strategy)
     mutators = [create_mutator(n, seed=seed, backend=backend) for n in names]
-    return MutatorPool(
-        mutators, strategy=strat, seed=seed, gamma=gamma, exploration=exploration
-    )
+    return MutatorPool(mutators, seed=seed)
 
 
 def create_mutator(
@@ -107,7 +99,6 @@ __all__ = [
     "MutationQualityValidator",
     # Pool
     "MutatorPool",
-    "MutatorSelectionStrategy",
     # Security lexicon
     "get_security_lexicon",
     "build_security_lexicon",

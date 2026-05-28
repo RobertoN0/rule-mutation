@@ -349,32 +349,6 @@ def main():
         ),
     )
     parser.add_argument(
-        "--mutator-strategy",
-        default="round_robin",
-        choices=["round_robin", "ducb", "greedy_batch"],
-        help="Mutator/rule selection strategy (default: round_robin).",
-    )
-    parser.add_argument(
-        "--ducb-gamma",
-        type=float,
-        default=0.9,
-        help=(
-            "Discount factor γ ∈ (0, 1] for the D-UCB bandit strategy. "
-            "Smaller values adapt faster to non-stationary rewards (default: 0.9). "
-            "Only used when --mutator-strategy ducb."
-        ),
-    )
-    parser.add_argument(
-        "--exploration",
-        type=float,
-        default=1.41,
-        help=(
-            "Exploration constant c for the D-UCB UCB bonus "
-            "c·√(ln N / n_i) (default: 1.41 ≈ √2, Garivier-Moulines 2011 ξ=0.5 convention). "
-            "Only used when --mutator-strategy ducb."
-        ),
-    )
-    parser.add_argument(
         "--max-mutation-depth",
         type=int,
         default=4,
@@ -384,12 +358,11 @@ def main():
     parser.add_argument(
         "--optimizer",
         default="ea",
-        choices=["lex", "ea", "random_baseline"],
+        choices=["ea", "random_baseline"],
         help=(
             "Optimizer family (default: ea). "
             "ea = (1+1) EA over per-rule Pareto archive (3 objectives); "
-            "lex = legacy lex hill-climbing + bandit/RR; "
-            "random_baseline = pure random walk with depth-cap restart, no archive."
+            "random_baseline = stateless per-iteration multi-mutation sampler, no archive."
         ),
     )
     parser.add_argument(
@@ -650,16 +623,12 @@ def main():
             f"budget accordingly."
         )
 
-    print(f"\n🧬 Initializing mutator pool: {args.mutators} "
-          f"(strategy={args.mutator_strategy}, seed={args.seed})")
+    print(f"\n🧬 Initializing mutator pool: {args.mutators} (seed={args.seed})")
     backend_for_mutator = backend if has_llm_mutator else None # type: ignore
     pool = create_mutator_pool(
         args.mutators,
-        strategy=args.mutator_strategy,
         seed=args.seed,
         backend=backend_for_mutator,
-        gamma=args.ducb_gamma,
-        exploration=args.exploration,
     )
 
     # Create validator if enabled
@@ -701,7 +670,6 @@ def main():
         verbose=True,
         enable_validation=args.enable_validation,
         mutation_max_retries=args.mutation_max_retries,
-        mutator_strategy=args.mutator_strategy,
         max_mutation_depth=args.max_mutation_depth,
         enable_eval_cache=not args.no_eval_cache,
         optimizer=args.optimizer,
@@ -717,10 +685,7 @@ def main():
           + (f"   (archive_cap={args.archive_cap}, restart_h={args.restart_h}, "
              f"max_depth_ea={args.max_depth_ea})" if args.optimizer == "ea" else "")
           + (f"   (max_depth={args.max_depth_ea})" if args.optimizer == "random_baseline" else ""))
-    print(f"   Mutators: {args.mutators} ({args.mutator_strategy})"
-          + (f", γ={args.ducb_gamma}, c={args.exploration}"
-             if args.mutator_strategy == "ducb" else ""))
-    print(f"   Max mutation depth (lex path): {args.max_mutation_depth}")
+    print(f"   Mutators: {args.mutators}")
     print(f"   Validation: {'enabled (SBERT + structural)' if args.enable_validation else 'disabled'}")
     print(f"   Eval cache: {'enabled' if hc_config.enable_eval_cache else 'disabled'}")
     print(f"   Output dir: {args.output_dir}")

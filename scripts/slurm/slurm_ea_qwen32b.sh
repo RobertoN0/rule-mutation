@@ -20,9 +20,7 @@
 #   Validation adds SBERT + optional perplexity (same 32B model reused);
 #   with retries (MUTATION_MAX_RETRIES=2) budget 1.5× the base wall time.
 #
-# The legacy lex / D-UCB / round-robin path is served by the original
-#   scripts/slurm/slurm_bandit_qwen32b.sh
-# — this file is exclusively for OPTIMIZER ∈ {ea, random_baseline}.
+# This file is the only mutation-run launcher: OPTIMIZER ∈ {ea, random_baseline}.
 #
 # Usage:
 #   # Default: (1+1) EA, 16 cases, 10 iterations, archive_cap=6, restart_h=8.
@@ -84,12 +82,9 @@ LANGUAGES=${LANGUAGES:-}
 SEMGREP_RULESET=${SEMGREP_RULESET:-/scratch/$USER/semgrep-rules/security-audit}
 SEMGREP_TIMEOUT_SECONDS=${SEMGREP_TIMEOUT_SECONDS:-180}
 SEMGREP_JOBS=${SEMGREP_JOBS:-4}
-# Mutator pool: same list as the legacy script; --mutator-strategy is still
-# required because the pool is constructed regardless of optimizer, but EA
-# and random_baseline ignore the strategy and do their own constrained
-# random selection.
+# Mutator pool: the full 8-mutator set. EA and random_baseline do their own
+# constrained random selection over this pool (no pool-level strategy).
 MUTATORS=${MUTATORS:-"synonym_replacement add_random_word verb_weakening negation_injection voice_change paraphrase section_reorder_shuffle section_reorder_degrade"}
-MUTATOR_STRATEGY=${MUTATOR_STRATEGY:-round_robin}
 ENABLE_VALIDATION=${ENABLE_VALIDATION:-0}
 ENABLE_PERPLEXITY=${ENABLE_PERPLEXITY:-0}
 MUTATION_MAX_RETRIES=${MUTATION_MAX_RETRIES:-2}
@@ -101,7 +96,6 @@ RULES_MAP=${RULES_MAP:-"/home/rnegro/thesis/rule-mutation/pipeline_breakdown/rul
 # Validate OPTIMIZER value
 if [ "$OPTIMIZER" != "ea" ] && [ "$OPTIMIZER" != "random_baseline" ]; then
     echo "❌ ERROR: OPTIMIZER must be 'ea' or 'random_baseline' (got: $OPTIMIZER)."
-    echo "   For lex / D-UCB / round-robin runs use slurm_bandit_qwen32b.sh instead."
     exit 1
 fi
 
@@ -133,7 +127,6 @@ echo "  Semgrep rules:   $SEMGREP_RULESET"
 echo "  Semgrep timeout: ${SEMGREP_TIMEOUT_SECONDS}s"
 echo "  Semgrep jobs:    $SEMGREP_JOBS"
 echo "  Mutators:        $MUTATORS"
-echo "  Pool strategy:   $MUTATOR_STRATEGY  (ignored by EA/random_baseline — pool init only)"
 echo "  Validation:      $ENABLE_VALIDATION (1=enabled)"
 echo "  Perplexity gate: $ENABLE_PERPLEXITY (1=enabled; requires ENABLE_VALIDATION=1)"
 echo "  Eval cache:      $ENABLE_EVAL_CACHE (0=disabled)"
@@ -229,7 +222,6 @@ python scripts/experiments/run_with_rules_map.py \
     --quantization "$QUANTIZATION" \
     --seed "$SEED" \
     --mutators $MUTATORS \
-    --mutator-strategy "$MUTATOR_STRATEGY" \
     --optimizer "$OPTIMIZER" \
     --archive-cap "$ARCHIVE_CAP" \
     --restart-h "$RESTART_H" \

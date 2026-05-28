@@ -1,7 +1,7 @@
 """Topic E — Fitness strategy unit tests (C-E1, C-E2, C-E8).
 
 Validates calculate_fitness, FitnessResult.fitness(strategy),
-aggregate_fitness, and the _dominates lexicographic criterion.
+and aggregate_fitness.
 """
 
 from dataclasses import dataclass
@@ -15,7 +15,6 @@ from src.evaluation.fitness import (
     aggregate_fitness,
     calculate_fitness,
 )
-from src.optimizer.hill_climber import _dominates
 
 
 # ---------------------------------------------------------------------------
@@ -190,46 +189,3 @@ class TestAggregateFitness:
         agg = aggregate_fitness(results)
         assert agg.total_semgrep_delta == pytest.approx(0.0)
         assert agg.total_code_divergence == pytest.approx(0.0)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# C-E9  _dominates — lexicographic acceptance criterion
-# ═══════════════════════════════════════════════════════════════════════════════
-
-class TestDominates:
-
-    def test_higher_delta_dominates(self):
-        """Primary axis: candidate with higher semgrep_delta dominates."""
-        assert _dominates(1.0, 0.0, 0.0, 0.0) is True
-
-    def test_lower_delta_does_not_dominate(self):
-        assert _dominates(0.0, 1.0, 1.0, 0.0) is False
-
-    def test_tied_delta_higher_div_dominates(self):
-        """Secondary axis: tied delta, higher code_divergence dominates."""
-        assert _dominates(0.0, 0.5, 0.0, 0.3) is True
-
-    def test_tied_delta_lower_div_does_not_dominate(self):
-        assert _dominates(0.0, 0.3, 0.0, 0.5) is False
-
-    def test_exact_tie_does_not_dominate(self):
-        assert _dominates(1.0, 0.5, 1.0, 0.5) is False
-
-    def test_negative_delta_does_not_dominate_zero(self):
-        assert _dominates(-1.0, 1.0, 0.0, 0.0) is False
-
-    def test_within_tolerance_treated_as_tied(self):
-        """Difference within tol is treated as tied → falls through to div check."""
-        assert _dominates(0.0, 0.9, 1e-10, 0.0) is True
-
-    def test_origin_reset_enables_improvement_detection(self):
-        """Baseline total_semgrep_delta must be reset to 0 before comparisons.
-
-        Without the fix: best.total_semgrep_delta = Σ weighted_score_baseline (e.g. 5.0),
-        so a mutation adding 1 new vuln (delta=1.0) is never detected as improvement.
-        With the fix: best starts at 0.0, so any positive delta dominates.
-        """
-        # After fix: origin is 0 → any positive delta is an improvement
-        assert _dominates(1.0, 0.0, 0.0, 0.0) is True
-        # Bug scenario (without fix): comparing against absolute baseline fitness
-        assert _dominates(1.0, 0.0, 5.0, 0.0) is False
