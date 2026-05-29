@@ -344,10 +344,8 @@ class HillClimber:
         self._eval_cache_hits = 0
         self._eval_cache_misses = 0
 
-        # bd-3wa: per-iter writer state. iterations.jsonl is opened lazily on
-        # first write and closed by _close_iterations_writer at end of run.
-        # Coexists with the legacy intermediate_results/ + hillclimb_summary
-        # files during the augment-first transition (see §9.1).
+        # Per-iter writer state. iterations.jsonl is opened lazily on first
+        # write and closed by _close_iterations_writer at end of run.
         self._iterations_jsonl_file: Any | None = None
         self._iterations_jsonl_path: Any | None = None
 
@@ -367,17 +365,18 @@ class HillClimber:
     def _append_iteration_record(self, record: dict) -> None:
         """Append a canonical per-iter record to iterations.jsonl.
 
-        Schema (bd-3wa Phase 1, augment-first):
-            iter, timestamp, rule_id, mutator, parent_depth, candidate_depth,
-            mutation_identity, validation_passed, f1, f2, f3, accepted,
-            f1_advance, num_prompts_affected, llm_calls_total,
-            input_tokens_total, output_tokens_total, selection_meta {...}
+        Schema (2026-05-28 output spec):
+            iter, timestamp, strategy, rule_id, mutation_chain, chain_length,
+            mutation_identity, validation_passed, f1, f2, f3, f1_advance,
+            accepted, num_prompts_affected, llm_calls_total,
+            input_tokens_total, output_tokens_total, validation_metadata,
+            selection_meta {...}
 
         selection_meta carries strategy-specific fields:
-          - ea:              parent_iter, archive_size_before/after,
-                             attempts_since_insert, n_eligible_rules
-          - random_baseline: walk_depth_before/after, restart_triggered
-          - baseline:        baseline=true (single record, iter=0)
+          - ea:              parent_iter, parent_f1, parent_depth,
+                             archive_size_before/after, attempts_since_insert,
+                             n_eligible_rules, restarts_this_iter
+          - random_baseline: {} (no walk state, no parent, no restart)
         """
         if self._iterations_jsonl_file is None:
             self._open_iterations_writer()
@@ -474,8 +473,7 @@ class HillClimber:
     ) -> None:
         """Pack one iteration's per-prompt evaluation records into one JSONL.
 
-        Written under <output_dir>/intermediate/{iter_id}.jsonl. Coexists with
-        the legacy intermediate_results/ tree during Phase 1 (augment-first).
+        Written under <output_dir>/intermediate/{iter_id}.jsonl.
         iter_id examples: "baseline", "ea_iter0001", "rand_iter0042".
         """
         output_dir = self.config.output_dir
@@ -631,6 +629,15 @@ class HillClimber:
                         max_retries=self.config.mutation_max_retries,
                     )
                     pre_validation_metadata = mutation_result.metadata.get("quality", {})
+                    # Drop readability_grade_* — no metric uses it (schema spec
+                    # File 1a). Filtered here rather than in quality.py (which
+                    # stays untouched per the validation soft-gate decision).
+                    for _k in (
+                        "readability_grade_original",
+                        "readability_grade_mutated",
+                        "readability_grade_delta",
+                    ):
+                        pre_validation_metadata.pop(_k, None)
                     # Cumulative drift: SBERT vs the raw on-disk original rule.
                     # The parent (parent_text_override) may already be drifted
                     # (depth>0 in the EA), so sbert_cum is informative even when
@@ -811,9 +818,8 @@ class HillClimber:
         fitness_results: list[FitnessResult] = []
         # Collect log lines keyed by index so we can re-emit fresh-first.
         tc_log_lines: dict[int, str] = {}
-        # bd-3wa: per-prompt records for the new intermediate/{phase}.jsonl dump
-        # (one JSONL per EA/random iteration; coexists with legacy per-prompt
-        # JSON files in intermediate_results/ during Phase 1).
+        # Per-prompt records for the intermediate/{iter_id}.jsonl dump
+        # (one JSONL per EA / random / baseline iteration).
         intermediate_records: list[dict] = []
 
         for idx, (semgrep_result, item) in enumerate(zip(semgrep_results, generated)):
@@ -904,8 +910,7 @@ class HillClimber:
         # Mutation changes were pre-computed once for the whole iteration
         sample_changes = pre_mutation_changes
 
-        # bd-3wa Phase 1: pack this iteration's per-prompt records into one JSONL
-        # under intermediate/{phase}.jsonl. Coexists with legacy intermediate_results/.
+        # Pack this iteration's per-prompt records into intermediate/{iter_id}.jsonl.
         if intermediate_records:
             self._save_intermediate_iter_jsonl(phase, intermediate_records)
 
@@ -1022,8 +1027,7 @@ class HillClimber:
 
         Builds the evaluate_fn closure, calls the runner from
         ``ea_optimizer.py``, then maps the result back into HillClimbResult so
-        downstream serialisation (hillclimb_summary_*.json,
-        hillclimb_per_rule_*.json) keeps working.
+        downstream serialisation (hillclimb_summary_*.json) keeps working.
         """
         from .ea_optimizer import run_ea, run_random_baseline
 
@@ -1061,8 +1065,8 @@ class HillClimber:
 
         seed = self.pool.seed  # share seed with mutator pool for full-run reproducibility
 
-        # bd-3wa Phase 1: open iterations.jsonl writer; pass it + archive snapshot
-        # writer as callbacks so the runners stay output-dir agnostic. try/finally
+        # Open iterations.jsonl writer; pass it + the archive-snapshot writer
+        # as callbacks so the runners stay output-dir agnostic. try/finally
         # guarantees the file handle closes even on rate-limit / OOM mid-run.
         self._open_iterations_writer()
         try:
