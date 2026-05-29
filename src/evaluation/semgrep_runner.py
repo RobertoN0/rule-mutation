@@ -11,11 +11,32 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+
+
+# Resolve the `semgrep` executable once. Prefer PATH (covers an activated venv
+# or a system install), then fall back to the bin dir of the running Python
+# interpreter — so the pipeline still finds Semgrep when launched via
+# `.venv/bin/python` WITHOUT `source .venv/bin/activate` (which would otherwise
+# leave `.venv/bin` off PATH and make every scan fail with "not installed").
+_semgrep_exe: str | None = None
+
+
+def _resolve_semgrep_executable() -> str:
+    global _semgrep_exe
+    if _semgrep_exe is not None:
+        return _semgrep_exe
+    found = shutil.which("semgrep")
+    if not found:
+        candidate = Path(sys.executable).parent / "semgrep"
+        found = str(candidate) if candidate.exists() else "semgrep"
+    _semgrep_exe = found
+    return found
 
 
 # Language → file extension mapping for Semgrep temp-file naming
@@ -369,7 +390,7 @@ def run_semgrep(
         for c in config_args:
             config_flags.extend(["--config", c])
         semgrep_command = [
-            "semgrep",
+            _resolve_semgrep_executable(),
             "scan",
             *config_flags,
             "--json",
@@ -514,7 +535,7 @@ def run_semgrep_batch_dir(
         for c in config_args:
             config_flags.extend(["--config", c])
         cmd = [
-            "semgrep", "scan",
+            _resolve_semgrep_executable(), "scan",
             *config_flags,
             "--json",
             "--disable-version-check",
