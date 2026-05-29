@@ -226,15 +226,6 @@ def load_prompts_with_rules(
 
     print(f"✅ Created {len(prompts_with_rules)} prompts with rules")
 
-    rule_counts: dict[str, int] = {}
-    for pwr in prompts_with_rules:
-        for rid in pwr.rule_ids:
-            rule_counts[rid] = rule_counts.get(rid, 0) + 1
-
-    print(f"\n📊 Rule distribution:")
-    for rid, count in sorted(rule_counts.items(), key=lambda x: -x[1])[:8]:
-        print(f"   {rid}: {count}")
-
     return prompts_with_rules
 
 
@@ -631,7 +622,8 @@ def main():
             f"budget accordingly."
         )
 
-    print(f"\n🧬 Initializing mutator pool: {args.mutators} (seed={args.seed})")
+    print(f"\n🧬 Initializing mutator pool: {args.mutators}")
+    print(f"   Seed: {args.seed}")
     backend_for_mutator = backend if has_llm_mutator else None # type: ignore
     pool = create_mutator_pool(
         args.mutators,

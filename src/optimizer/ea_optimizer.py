@@ -548,8 +548,8 @@ def run_random_baseline(
         num_affected = sum(1 for pwr in prompts_with_rules if rule_id in pwr.rule_ids)
         log(f"\n\U0001f3b2 Iteration {i+1}/{max_iterations} "
             f"-- rule={rule_id.replace('codeguard-', 'cg-')} "
-            f"n={n} chain={'+'.join(chain_names)} "
-            f"{num_affected}/{len(prompts_with_rules)} prompts")
+            f"n={n} {num_affected}/{len(prompts_with_rules)} prompts "
+            f"chain={'+'.join(chain_names)}")
 
         try:
             (candidate_fitness, candidate_results, mutation_changes,

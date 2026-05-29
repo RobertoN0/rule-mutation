@@ -89,9 +89,13 @@ class ArchiveEntry:
         )
 
     def snapshot(self) -> dict[str, Any]:
-        """Full JSON-serialisable archive entry — includes rule_text so the
-        post-run JSON contains the complete archive without needing to
-        reconstruct rule texts from per-iteration mutated_rules/ files."""
+        """JSON-serialisable archive entry.
+
+        The rule text itself is NOT inlined — the snapshot writer adds a
+        ``rule_text_ref`` pointing at the corresponding ``mutated_rules/`` file
+        (derived from rule_id + iteration_added). Seed/original entries (depth 0)
+        have no mutated_rules file, so their ref is null and the text is the
+        on-disk original rule."""
         return {
             "f1": round(self.f1, 6),
             "f2": round(self.f2, 6),
@@ -100,7 +104,6 @@ class ArchiveEntry:
             "attempted_children": sorted(self.attempted_children),
             "iteration_added": self.iteration_added,
             "mutation_chain": list(self.mutation_path),
-            "rule_text": self.rule_text,
             "rule_text_length": len(self.rule_text),
         }
 

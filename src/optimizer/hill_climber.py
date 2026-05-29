@@ -413,10 +413,13 @@ class HillClimber:
     ) -> None:
         """Dump the full archive state for a single EA iteration.
 
-        Written under <output_dir>/archive_snapshots/iter{N}.json with inline
-        rule_text (self-contained, data-loss-resistant). The per-rule config
-        (cap/restart_h/max_depth/n_mutators, identical across rules) is hoisted
-        into one top-level ``config`` block. Called every 20 iters by run_ea.
+        Written under <output_dir>/archive_snapshots/iter{N}.json. Rule text is
+        NOT inlined: each entry carries a ``rule_text_ref`` pointing at the
+        corresponding ``mutated_rules/`` file (derived from rule_id +
+        iteration_added). Seed/original entries (depth 0) have no such file so
+        their ref is null (the text is the on-disk original rule). The per-rule
+        config (cap/restart_h/max_depth/n_mutators, identical across rules) is
+        hoisted into one top-level ``config`` block. Called every 20 iters by run_ea.
         """
         output_dir = self.config.output_dir
         if not output_dir:
@@ -426,6 +429,18 @@ class HillClimber:
         snap_dir.mkdir(parents=True, exist_ok=True)
         snap_path = snap_dir / f"iter{iteration:04d}.json"
 
+        def _add_refs(rid: str, entry: dict) -> dict:
+            """Attach rule_text_ref derived from rule_id + iteration_added."""
+            entry = dict(entry)
+            if entry.get("depth", 0) == 0:
+                entry["rule_text_ref"] = None  # seed: the original rule (not in mutated_rules)
+            else:
+                rule_short = rid.replace("codeguard-", "cg-")
+                entry["rule_text_ref"] = (
+                    f"mutated_rules/iter{entry['iteration_added']:03d}/{rule_short}.md"
+                )
+            return entry
+
         config: dict[str, Any] = {}
         archives: dict[str, dict] = {}
         for rid, rec in archives_snapshot.items():
@@ -433,6 +448,15 @@ class HillClimber:
             for key in ("cap", "restart_h", "max_depth", "n_mutators"):
                 if key in rec:
                     config[key] = rec.pop(key)
+            rec["current_entries"] = [_add_refs(rid, e) for e in rec.get("current_entries", [])]
+            new_history = []
+            for h in rec.get("restart_history", []):
+                h = dict(h)
+                h["entries_before_reset"] = [
+                    _add_refs(rid, e) for e in h.get("entries_before_reset", [])
+                ]
+                new_history.append(h)
+            rec["restart_history"] = new_history
             archives[rid] = rec
 
         payload = {
@@ -743,8 +767,10 @@ class HillClimber:
                 self._eval_cache_misses += 1
                 if cache_enabled:
                     cache_hit_flags[idx] = False
-                if idx == 0 or idx == len(prompts_with_rules) - 1:
-                    self._log(f"   [{idx+1}/{len(prompts_with_rules)}] Generating code for TC#{tc_id}...")
+                # Heartbeat for every freshly generated prompt. Indexed by prompt
+                # position so the marker never goes missing when the first or last
+                # prompt happens to be served from the cache.
+                self._log(f"   [{idx+1}/{len(prompts_with_rules)}] Generating code for TC#{tc_id}...")
                 code, gen_latency, in_tok, out_tok = self._generate_code(rule_text, test_prompt)
                 generated.append((code, gen_latency, in_tok, out_tok, test_prompt, pwr, mutated_rule_file, pwr.rule_ids))
                 fresh_indices.append(idx)
@@ -1218,9 +1244,10 @@ class HillClimber:
     ) -> dict | None:
         """Build one per-prompt evaluation record for intermediate/{iter_id}.jsonl.
 
-        Scalar / structured metadata first; the two large text blobs (``prompt``
-        and ``generated_code``) come last so the informative fields are visible
-        before them when a record is opened (output-schema spec File 3).
+        Scalar / structured metadata first; ``generated_code`` (the only large,
+        non-recoverable blob) comes last. The prompt text is intentionally NOT
+        stored — it is identical across all iterations and recoverable from the
+        rules-map (``run_config.json[args].rules_map``) keyed by ``test_case_id``.
         """
         if not self.config.output_dir:
             return None
@@ -1258,8 +1285,7 @@ class HillClimber:
             "llm_calls_so_far": self._total_llm_calls,
             "input_tokens_so_far": self._total_input_tokens,
             "output_tokens_so_far": self._total_output_tokens,
-            # Large text blobs last (spec File 3 field order).
-            "prompt": result.prompt.prompt,
+            # generated_code last (large, and the only field not recoverable elsewhere).
             "generated_code": result.generated_code,
         }
 
