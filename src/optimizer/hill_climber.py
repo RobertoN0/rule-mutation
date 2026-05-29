@@ -105,9 +105,6 @@ class HillClimbConfig:
     mutation_max_retries: int = 2
     """Maximum validation retries per mutation (only effective for non-deterministic mutators)."""
 
-    max_mutation_depth: int = 4
-    """Max compounding mutations per rule before saturation (Hyun et al. 2025)."""
-
     # ----- (1+1) EA + Pareto archive (optimizer="ea") ------------------
     optimizer: str = "ea"
     """Optimizer family. One of:
@@ -122,7 +119,11 @@ class HillClimbConfig:
     """EA only: consecutive non-inserts before stagnation restart. Sweep-tunable."""
 
     max_depth_ea: int = 4
-    """EA / random_baseline: per-entry depth cap (mutations from original)."""
+    """EA: per-entry depth cap (mutations from original)."""
+
+    max_mutations_per_iter: int = 4
+    """random_baseline: max chain length K. Each iteration samples
+    n in [1, K] distinct mutators and applies them to the original rule."""
 
     enable_eval_cache: bool = True
     """Reuse cached (code, Semgrep result) for prompts whose assembled rule
@@ -413,8 +414,9 @@ class HillClimber:
         """Dump the full archive state for a single EA iteration.
 
         Written under <output_dir>/archive_snapshots/iter{N}.json with inline
-        rule_text per §9.1 Q3 (self-contained, data-loss-resistant). Called
-        every 20 iters by run_ea.
+        rule_text (self-contained, data-loss-resistant). The per-rule config
+        (cap/restart_h/max_depth/n_mutators, identical across rules) is hoisted
+        into one top-level ``config`` block. Called every 20 iters by run_ea.
         """
         output_dir = self.config.output_dir
         if not output_dir:
@@ -423,9 +425,20 @@ class HillClimber:
         snap_dir = Path(output_dir) / "archive_snapshots"
         snap_dir.mkdir(parents=True, exist_ok=True)
         snap_path = snap_dir / f"iter{iteration:04d}.json"
+
+        config: dict[str, Any] = {}
+        archives: dict[str, dict] = {}
+        for rid, rec in archives_snapshot.items():
+            rec = dict(rec)
+            for key in ("cap", "restart_h", "max_depth", "n_mutators"):
+                if key in rec:
+                    config[key] = rec.pop(key)
+            archives[rid] = rec
+
         payload = {
-            "iteration": iteration,
-            "archives": archives_snapshot,
+            "iter": iteration,
+            "config": config,
+            "archives": archives,
         }
         with open(snap_path, "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2)
@@ -541,6 +554,7 @@ class HillClimber:
         phase: str = "baseline",
         selected_mutator: Mutator | None = None,
         parent_text_override: str | None = None,
+        mutation_chain: list[str] | None = None,
     ) -> tuple[AggregatedFitness, list[EvaluationResult]]:
         """Evaluate prompts where each has its own rules.
 
@@ -698,7 +712,7 @@ class HillClimber:
                         mutation_changes=pre_mutation_changes,
                         validation_metadata=pre_validation_metadata,
                         parent_text=parent_text_override,
-                        mutator_name=iter_mutator.name if iter_mutator is not None else None,
+                        mutation_chain=mutation_chain,
                     )
 
             test_prompt = TestPrompt(
@@ -809,7 +823,7 @@ class HillClimber:
             )
             results.append(eval_result)
 
-            record = self._save_intermediate_result(
+            record = self._build_intermediate_record(
                 eval_result, idx, phase, mutated_rule_file, rule_ids, target_rule_id,
                 eval_cache_hit=cache_hit_flags[idx],
             )
@@ -1004,20 +1018,19 @@ class HillClimber:
             mutator: Mutator,
             iteration: int,
             phase: str,
+            mutation_chain: list[str],
         ) -> tuple[AggregatedFitness, list[EvaluationResult], list[str], dict[str, Any], "str | None"]:
             """Closure: invokes the per-prompt eval pipeline with EA parent text."""
-            try:
-                return self._evaluate_with_per_prompt_rules(  # type: ignore[return-value]
-                    prompts_with_rules,
-                    target_rule_id=target_rule_id,
-                    mutator_fn=lambda _t, _m=mutator: _m.mutate(_t).mutated,
-                    iteration=iteration,
-                    phase=phase,
-                    selected_mutator=mutator,
-                    parent_text_override=parent_text,
-                )
-            except Exception:
-                raise
+            return self._evaluate_with_per_prompt_rules(  # type: ignore[return-value]
+                prompts_with_rules,
+                target_rule_id=target_rule_id,
+                mutator_fn=lambda _t, _m=mutator: _m.mutate(_t).mutated,
+                iteration=iteration,
+                phase=phase,
+                selected_mutator=mutator,
+                parent_text_override=parent_text,
+                mutation_chain=mutation_chain,
+            )
 
         seed = self.pool.seed  # share seed with mutator pool for full-run reproducibility
 
@@ -1055,7 +1068,7 @@ class HillClimber:
                     iteration_result_factory=IterationResult,
                     per_rule_result_factory=PerRuleResult,
                     max_iterations=self.config.max_iterations,
-                    max_depth=self.config.max_depth_ea,
+                    max_mutations_per_iter=self.config.max_mutations_per_iter,
                     seed=seed,
                     log=self._log,
                     iter_record_fn=self._append_iteration_record,
@@ -1099,7 +1112,12 @@ class HillClimber:
             pool_arm_stats={
                 "strategy": self.config.optimizer,
                 "mutator_stats": ea_result.mutator_stats,
-                "restart_reason_counts": ea_result.restart_reason_counts,
+                # restart_reason_counts is an EA-only concept (no restarts in
+                # the random baseline) — omit it for random_baseline.
+                **(
+                    {"restart_reason_counts": ea_result.restart_reason_counts}
+                    if self.config.optimizer == "ea" else {}
+                ),
             },
             compounding_state=ea_result.archives_snapshot,  # archives keyed by rule_id
             eval_cache_stats={
@@ -1126,7 +1144,7 @@ class HillClimber:
         mutation_changes: list[str] | None = None,
         validation_metadata: dict | None = None,
         parent_text: str | None = None,
-        mutator_name: str | None = None,
+        mutation_chain: list[str] | None = None,
     ) -> str:
         """Save the mutated rule to an iteration subdirectory and return its path.
 
@@ -1168,17 +1186,18 @@ class HillClimber:
         if not rule_file.exists():
             rule_file.write_text(mutated_text, encoding="utf-8")
 
-            # bd-3wa: mutation_identity = True iff the mutator returned text
-            # byte-identical to its parent (post-6ac526b try_add rejects this,
-            # but the event is still observable for analysis).
+            # bd-3wa: mutation_identity = True iff the mutated text is
+            # byte-identical to its parent (the EA's try_add rejects this, but
+            # the event is still observable for analysis).
             mutation_identity = (
                 parent_text is not None and mutated_text == parent_text
             )
             meta = {
                 "iteration": iteration,
-                "mutator": mutator_name,
+                "mutation_chain": mutation_chain or [],
                 "target_rule_id": target_rule_id,
                 "mutation_identity": mutation_identity,
+                "mutation_changes": mutation_changes or [],
             }
             (iter_dir / "meta.json").write_text(
                 json.dumps(meta, indent=2), encoding="utf-8"
@@ -1186,41 +1205,31 @@ class HillClimber:
 
         return rel_path
     
-    def _save_intermediate_result(
+    def _build_intermediate_record(
         self,
         result: EvaluationResult,
         index: int,
-        phase: str,
+        iter_id: str,
         mutated_rule_file: str | None,
         original_rule_ids: list[str],
         target_rule_id: str | None = None,
         eval_cache_hit: bool | None = None,
     ) -> dict | None:
-        """Save individual prompt result immediately after evaluation.
+        """Build one per-prompt evaluation record for intermediate/{iter_id}.jsonl.
 
-        This ensures we don't lose data if rate limits are hit mid-evaluation.
-        Also returns the record dict so callers can pack a JSONL per iter for
-        bd-3wa's new intermediate/ layout (Phase 1: dual write).
+        Scalar / structured metadata first; the two large text blobs (``prompt``
+        and ``generated_code``) come last so the informative fields are visible
+        before them when a record is opened (output-schema spec File 3).
         """
-        output_dir = self.config.output_dir
-        if not output_dir:
+        if not self.config.output_dir:
             return None
-        
-        # Create intermediate_results subdirectory
-        intermediate_dir = output_dir / "intermediate_results"
-        intermediate_dir.mkdir(parents=True, exist_ok=True)
-        
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        
-        # Save individual result
-        result_data = {
-            "timestamp": timestamp,
+
+        return {
+            "iter_id": iter_id,
             "index": index,
-            "phase": phase,
             "test_case_id": result.prompt.metadata.get('test_case_id', f'case_{index}'),
             "language": result.prompt.language,
             "cwe_id": result.prompt.cwe_id,
-            "prompt": result.prompt.prompt,
             "rules_used": {
                 "original_rule_ids": original_rule_ids,
                 "target_rule_id": target_rule_id,
@@ -1229,7 +1238,6 @@ class HillClimber:
                 ),
                 "mutated_rule_file": mutated_rule_file,
             },
-            "generated_code": result.generated_code,
             "fitness": {
                 "raw_count": result.fitness.raw_count,
                 "weighted_score": result.fitness.weighted_score,
@@ -1249,12 +1257,10 @@ class HillClimber:
             "llm_calls_so_far": self._total_llm_calls,
             "input_tokens_so_far": self._total_input_tokens,
             "output_tokens_so_far": self._total_output_tokens,
+            # Large text blobs last (spec File 3 field order).
+            "prompt": result.prompt.prompt,
+            "generated_code": result.generated_code,
         }
-        
-        result_path = intermediate_dir / f"{phase}_{index:03d}_{timestamp}.json"
-        with open(result_path, "w") as f:
-            json.dump(result_data, f, indent=2)
-        return result_data
 
     def _save_results(self, result: HillClimbResult) -> None:
         """Save results to output directory."""
@@ -1285,60 +1291,16 @@ class HillClimber:
             summary["pool_arm_stats"] = result.pool_arm_stats
         if result.eval_cache_stats:
             summary["eval_cache_stats"] = result.eval_cache_stats
-        summary["config"] = {
-            "archive_cap": self.config.archive_cap,
-            "restart_h": self.config.restart_h,
-            "max_depth_ea": self.config.max_depth_ea,
-            "n_cases": self.config.n_cases if hasattr(self.config, "n_cases") else None,
-            "n_iterations": self.config.max_iterations,
-            "selection": self.config.selection if hasattr(self.config, "selection") else None,
-            "validation_enabled": self.config.enable_validation,
-            "perplexity_enabled": self.config.enable_perplexity if hasattr(self.config, "enable_perplexity") else False,
-        }
-        
+        # Full run configuration lives in run_config.json (no duplication here).
+        summary["run_config_ref"] = "see run_config.json"
+
         summary_path = output_dir / f"hillclimb_summary_{timestamp}.json"
         with open(summary_path, "w") as f:
             json.dump(summary, f, indent=2)
 
-        # Per-rule summary (only written for optimize_per_prompt_rules runs)
-        if result.per_rule_results:
-            # Build aggregated view per rule
-            per_rule_data: dict[str, Any] = {}
-            for pr in result.per_rule_results:
-                entry = per_rule_data.setdefault(pr.rule_id, {
-                    "iterations_targeted": 0,
-                    "best_fitness_delta": 0.0,
-                    "best_mean_code_divergence": 0.0,
-                    "num_prompts_affected": pr.num_prompts_affected,
-                    "results": [],
-                })
-                entry["iterations_targeted"] += 1
-                entry["best_fitness_delta"] = max(
-                    entry["best_fitness_delta"], pr.fitness_delta
-                )
-                entry["best_mean_code_divergence"] = result.per_rule_best_code_divergence.get(
-                    pr.rule_id, 0.0
-                )
-                entry["results"].append({
-                    "iteration": pr.iteration,
-                    "fitness_delta": pr.fitness_delta,
-                    "total_fitness": pr.aggregated_fitness.total_fitness,
-                    "num_vulnerable": pr.aggregated_fitness.num_vulnerable,
-                    "mean_code_divergence": pr.aggregated_fitness.mean_code_divergence,
-                    "is_improvement": pr.is_improvement,
-                    "mutation_changes": pr.mutation_changes[:5],
-                })
-
-            per_rule_summary = {
-                "timestamp": timestamp,
-                "original_fitness": result.original_fitness.total_fitness,
-                "best_fitness": result.best_fitness.total_fitness,
-                "all_rules_tested": sorted(per_rule_data.keys()),
-                "per_rule": per_rule_data,
-            }
-            per_rule_path = output_dir / f"hillclimb_per_rule_{timestamp}.json"
-            with open(per_rule_path, "w") as f:
-                json.dump(per_rule_summary, f, indent=2)
-            self._log(f"📊 Per-rule summary saved to {per_rule_path.name}")
+        # The per-rule view (hillclimb_per_rule_*.json) and per_prompt_rules_results
+        # are intentionally NOT written — both are fully derivable from
+        # iterations.jsonl + archive_snapshots/ + intermediate/ by the analysis
+        # layer (output-schema spec Files 7/8).
 
         self._log(f"📁 Results saved to {output_dir}")

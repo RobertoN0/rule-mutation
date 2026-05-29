@@ -10,7 +10,7 @@ import pytest
 from src.evaluation.fitness import AggregatedFitness
 from src.evaluation.rule_mapping import PromptWithRules
 from src.mutation.base import Mutator, MutationResult
-from src.optimizer.ea_optimizer import run_ea, run_random_baseline
+from src.optimizer.ea_optimizer import run_ea
 from src.optimizer.hill_climber import IterationResult, PerRuleResult
 
 
@@ -91,7 +91,7 @@ class TestRunEA:
         # Counter for monotonically improving fitness — every offspring strictly
         # dominates its parent on f1, ensuring archive inserts happen.
         counter = {"i": 0}
-        def stub_eval(target_rid, parent_text, mutator, iteration, phase):
+        def stub_eval(target_rid, parent_text, mutator, iteration, phase, mutation_chain):
             counter["i"] += 1
             f = float(counter["i"])
             return (
@@ -141,7 +141,7 @@ class TestRunEA:
             rule_originals={"r1": "ORIGINAL[r1]"},
             baseline_fitness=_fit(0, 0, 0),
             mutators=mutators,
-            evaluate_fn=lambda rid, pt, m, it, ph: (
+            evaluate_fn=lambda rid, pt, m, it, ph, mc: (
                 _fit(0.0, 0.0, 0.0),  # never improves → never inserts → stagnation
                 [], [], {}, f"{pt}|{m.name}",
             ),
@@ -162,71 +162,5 @@ class TestRunEA:
             assert h["reason"] in {"stagnation", "depth_saturated", "mutator_exhausted", "fully_exhausted"}
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# Random baseline
-# ═══════════════════════════════════════════════════════════════════════════════
-
-class TestRandomBaseline:
-
-    def test_logs_every_candidate(self):
-        prompts = _make_prompts([["r1"]])
-        mutators = [FakeMutator("m0"), FakeMutator("m1"), FakeMutator("m2")]
-        counter = {"i": 0}
-        def stub_eval(target_rid, parent_text, mutator, iteration, phase):
-            counter["i"] += 1
-            return (
-                _fit(f1=float(counter["i"]), f2=0.5, f3=0.3),
-                [], [], {}, f"{parent_text}|{mutator.name}",
-            )
-
-        result = run_random_baseline(
-            prompts_with_rules=prompts,
-            all_rule_ids=["r1"],
-            rule_originals={"r1": "ORIGINAL[r1]"},
-            mutators=mutators,
-            evaluate_fn=stub_eval,
-            iteration_result_factory=IterationResult,
-            per_rule_result_factory=PerRuleResult,
-            max_iterations=10,
-            max_depth=4,
-            seed=0,
-            log=_silent_log,
-        )
-        assert len(result.iterations) == 10
-        r1_snap = result.archives_snapshot["r1"]
-        assert r1_snap["mode"] == "random_baseline"
-        # All 10 candidates logged
-        assert len(r1_snap["all_candidates"]) == 10
-        # Every candidate's f1 is positive (stub increments monotonically)
-        f1_values = [c["f1"] for c in r1_snap["all_candidates"]]
-        assert all(v > 0 for v in f1_values)
-
-    def test_depth_cap_restart(self):
-        prompts = _make_prompts([["r1"]])
-        # Enough mutators that mutator-exhaustion won't pre-empt depth-cap
-        mutators = [FakeMutator(f"m{i}") for i in range(10)]
-        def stub_eval(target_rid, parent_text, mutator, iteration, phase):
-            return (
-                _fit(f1=1.0, f2=0.5, f3=0.3),
-                [], [], {}, f"{parent_text}|{mutator.name}",
-            )
-
-        result = run_random_baseline(
-            prompts_with_rules=prompts,
-            all_rule_ids=["r1"],
-            rule_originals={"r1": "ORIGINAL[r1]"},
-            mutators=mutators,
-            evaluate_fn=stub_eval,
-            iteration_result_factory=IterationResult,
-            per_rule_result_factory=PerRuleResult,
-            max_iterations=20,
-            max_depth=3,  # short — depth_cap should fire
-            seed=0,
-            log=_silent_log,
-        )
-        r1_snap = result.archives_snapshot["r1"]
-        depth_restarts = [h for h in r1_snap["restart_history"] if h["reason"] == "depth_cap"]
-        assert len(depth_restarts) >= 1
-        # Each depth_cap restart should record depth_at_reset == max_depth
-        for h in depth_restarts:
-            assert h["depth_at_reset"] == 3
+# The redesigned random baseline (stateless per-iteration multi-mutation
+# sampler) is covered by tests/unit/test_random_baseline.py.

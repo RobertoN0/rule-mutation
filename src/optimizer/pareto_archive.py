@@ -99,7 +99,7 @@ class ArchiveEntry:
             "depth": self.depth,
             "attempted_children": sorted(self.attempted_children),
             "iteration_added": self.iteration_added,
-            "mutation_path": list(self.mutation_path),
+            "mutation_chain": list(self.mutation_path),
             "rule_text": self.rule_text,
             "rule_text_length": len(self.rule_text),
         }
@@ -345,16 +345,17 @@ class ParetoArchive:
         return len(self.entries)
 
     def snapshot(self) -> dict[str, Any]:
-        """Full serialisable state for hillclimb_per_rule_*.json."""
+        """Full serialisable per-rule archive state.
+
+        ``cap``/``restart_h``/``max_depth``/``n_mutators`` are repeated here for
+        in-memory convenience; the archive_snapshots/*.json writer hoists them
+        into one top-level ``config`` block and drops them from each per-rule
+        record (output-schema spec File 2)."""
         return {
             "cap": self.cap,
             "restart_h": self.restart_h,
             "max_depth": self.max_depth,
             "n_mutators": self.n_mutators,
-            # JSON key kept as "iterations_since_insert" for backward compat with
-            # historical hillclimb_per_rule_*.json consumers. The semantic name
-            # is "attempts since insert" — see ParetoArchive docstring.
-            "iterations_since_insert": self._attempts_since_insert,
             "attempts_since_insert": self._attempts_since_insert,
             "n_inserts": self.n_inserts,
             "n_rejected": self.n_rejected,

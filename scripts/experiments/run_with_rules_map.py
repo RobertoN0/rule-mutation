@@ -114,6 +114,11 @@ from src.evaluation.semgrep_runner import (
 # CONFIGURATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# Output schema version written to run_config.json. Bumped to 2 for the
+# post-redesign schema (unified mutation_chain, stateless random baseline).
+# Distinguishes new run trees from the old (schema_version absent ⇒ legacy).
+SCHEMA_VERSION = 2
+
 # Default paths (relative to project root)
 DEFAULT_RULES_MAP = (
     PROJECT_ROOT / "pipeline_breakdown" / "rule_retrieval_output" / 
@@ -348,12 +353,6 @@ def main():
             "Single value works for backward compat."
         ),
     )
-    parser.add_argument(
-        "--max-mutation-depth",
-        type=int,
-        default=4,
-        help="Max compounding mutations per rule before saturation (default: 4).",
-    )
     # ----- (1+1) EA + Pareto archive flags -----------------------------------
     parser.add_argument(
         "--optimizer",
@@ -385,8 +384,17 @@ def main():
         type=int,
         default=4,
         help=(
-            "EA / random_baseline: per-entry depth cap (mutations from original; default: 4). "
+            "EA only: per-entry depth cap (mutations from original; default: 4). "
             "When all archive entries hit this, the rule's archive is reset."
+        ),
+    )
+    parser.add_argument(
+        "--max-mutations-per-iter",
+        type=int,
+        default=4,
+        help=(
+            "random_baseline only: max chain length K (default: 4). Each iteration "
+            "samples n in [1, K] distinct mutators and applies them to the original rule."
         ),
     )
     parser.add_argument(
@@ -670,12 +678,12 @@ def main():
         verbose=True,
         enable_validation=args.enable_validation,
         mutation_max_retries=args.mutation_max_retries,
-        max_mutation_depth=args.max_mutation_depth,
         enable_eval_cache=not args.no_eval_cache,
         optimizer=args.optimizer,
         archive_cap=args.archive_cap,
         restart_h=args.restart_h,
         max_depth_ea=args.max_depth_ea,
+        max_mutations_per_iter=args.max_mutations_per_iter,
     )
 
     print(f"\n⚙️  Hill Climbing Configuration:")
@@ -754,100 +762,13 @@ def main():
         args.output_dir.mkdir(parents=True, exist_ok=True)
         from datetime import datetime
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        results_file = args.output_dir / f"per_prompt_rules_results_{timestamp}.json"
-        
-        # Serialize results - COMPLETE DATA (no truncation)
-        serializable = {
-            "metadata": {
-                "timestamp": timestamp,
-                "backend": args.backend,
-                "model": args.model,
-                "quantization": args.quantization if args.backend == "delftblue" else None,
-                "num_cases": len(prompts_with_rules),
-                "num_iterations": len(result.iterations),
-                "seed": args.seed,
-                "mutators": args.mutators,
-                "max_mutation_depth": args.max_mutation_depth,
-                "optimizer": args.optimizer,
-                "archive_cap": args.archive_cap,
-                "restart_h": args.restart_h,
-                "max_depth_ea": args.max_depth_ea,
-                "enable_validation": args.enable_validation,
-                "selection": args.selection,
-                "languages_filter": args.languages,
-                "semgrep_config": str(semgrep_config["rule_config"]),
-                "semgrep_timeout_seconds": semgrep_config["subprocess_timeout_seconds"],
-                "semgrep_jobs": semgrep_config["jobs"],
-                "rules_map_file": str(args.rules_map),
-            },
-            "summary": {
-                "original_fitness": result.original_fitness.total_fitness,
-                "best_fitness": result.best_fitness.total_fitness,
-                "fitness_increase": result.fitness_increase,
-                "improvement_ratio": result.improvement_ratio,
-                "total_time_seconds": result.total_time_seconds,
-                "total_llm_calls": result.total_llm_calls,
-                "total_input_tokens": result.total_input_tokens,
-                "total_output_tokens": result.total_output_tokens,
-                "original_vulnerable": result.original_fitness.num_vulnerable,
-                "best_vulnerable": result.best_fitness.num_vulnerable,
-            },
-            "prompts": [
-                {
-                    "index": idx,
-                    "prompt": pwr.prompt,  # FULL prompt, no truncation
-                    "language": pwr.language,
-                    "cwe_id": pwr.cwe_id,
-                    "rule_ids": pwr.rule_ids,
-                    "num_rules": pwr.num_rules,
-                    "combined_rules": pwr.combined_rules,  # FULL rules text
-                    "metadata": pwr.metadata,
-                }
-                for idx, pwr in enumerate(prompts_with_rules)
-            ],
-            "iterations": [
-                {
-                    "iteration": it.iteration,
-                    "is_improvement": it.is_improvement,
-                    "mutation_changes": it.mutation_changes,
-                    "validation_metadata": it.validation_metadata,
-                    "aggregated_fitness": {
-                        "total_fitness": it.aggregated_fitness.total_fitness,
-                        "mean_fitness": it.aggregated_fitness.mean_fitness,
-                        "num_vulnerable": it.aggregated_fitness.num_vulnerable,
-                        "num_prompts": it.aggregated_fitness.num_prompts,
-                    },
-                    "individual_results": [
-                        {
-                            "prompt": ir.prompt.prompt,  # FULL prompt
-                            "language": ir.prompt.language,
-                            "cwe_id": ir.prompt.cwe_id,
-                            "generated_code": ir.generated_code,  # FULL generated code
-                            "fitness": {
-                                "raw_count": ir.fitness.raw_count,
-                                "weighted_score": ir.fitness.weighted_score,
-                                "unique_rules": ir.fitness.unique_rules,
-                                "error_count": ir.fitness.error_count,
-                                "warning_count": ir.fitness.warning_count,
-                                "check_ids": ir.fitness.details.get("check_ids", []),
-                            },
-                            "generation_latency_ms": ir.generation_latency_ms,
-                            "analysis_latency_ms": ir.analysis_latency_ms,
-                        }
-                        for ir in it.individual_results
-                    ],
-                }
-                for it in result.iterations
-            ],
-        }
-        
-        with open(results_file, "w") as f:
-            json.dump(serializable, f, indent=2)
-        
-        print(f"\n📁 Complete results saved to: {results_file}")
-        print(f"   • Full prompts: {len(prompts_with_rules)}")
-        print(f"   • Full iterations: {len(result.iterations)}")
-        print(f"   • Generated code samples: {sum(len(it.individual_results) for it in result.iterations)}")
+
+        # The per-prompt trajectory (intermediate/{iter_id}.jsonl), per-iteration
+        # records (iterations.jsonl), archive snapshots (archive_snapshots/), mutated
+        # rules (mutated_rules/), and the run summary (hillclimb_summary_*.json) are
+        # all written during the run by HillClimber. There is intentionally NO
+        # consolidated per_prompt_rules_results dump — it was fully derivable from
+        # those files (output-schema spec File 8).
 
         # ── Rerun artefacts ──────────────────────────────────────────────────
         # run_config.json — every CLI arg + derived runtime values
@@ -862,6 +783,7 @@ def main():
             _git_sha = None
 
         run_config = {
+            "schema_version": SCHEMA_VERSION,
             "argv": _sys.argv,
             "args": {
                 "backend":                args.backend,
@@ -874,11 +796,11 @@ def main():
                 "selection":              args.selection,
                 "languages":              args.languages,
                 "mutators":               args.mutators,
-                "max_mutation_depth":     args.max_mutation_depth,
                 "optimizer":              args.optimizer,
                 "archive_cap":            args.archive_cap,
                 "restart_h":              args.restart_h,
                 "max_depth_ea":           args.max_depth_ea,
+                "max_mutations_per_iter": args.max_mutations_per_iter,
                 "enable_validation":      args.enable_validation,
                 "enable_perplexity":      getattr(args, "enable_perplexity", False),
                 "enable_eval_cache":     not args.no_eval_cache,
@@ -930,7 +852,11 @@ def main():
             f"    --seed {args.seed} \\",
             f"    --selection {shlex.quote(args.selection)} \\",
             f"    --mutators {' '.join(shlex.quote(m) for m in args.mutators)} \\",
-            f"    --max-mutation-depth {args.max_mutation_depth} \\",
+            f"    --optimizer {shlex.quote(args.optimizer)} \\",
+            f"    --archive-cap {args.archive_cap} \\",
+            f"    --restart-h {args.restart_h} \\",
+            f"    --max-depth-ea {args.max_depth_ea} \\",
+            f"    --max-mutations-per-iter {args.max_mutations_per_iter} \\",
             f"    --semgrep-config {shlex.quote(str(semgrep_config['rule_config']))} \\",
             f"    --semgrep-timeout-seconds {semgrep_config['subprocess_timeout_seconds']} \\",
             f"    --semgrep-jobs {semgrep_config['jobs']} \\",

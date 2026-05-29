@@ -68,9 +68,10 @@ set -e
 
 # ─────── Optimizer (new) ────────────────────────────────────────────────────
 OPTIMIZER=${OPTIMIZER:-ea}                # "ea" | "random_baseline"
-ARCHIVE_CAP=${ARCHIVE_CAP:-6}             # Pareto archive size per rule
-RESTART_H=${RESTART_H:-8}                 # stagnation threshold
-MAX_DEPTH_EA=${MAX_DEPTH_EA:-4}           # per-entry depth cap
+ARCHIVE_CAP=${ARCHIVE_CAP:-6}             # Pareto archive size per rule (EA)
+RESTART_H=${RESTART_H:-8}                 # stagnation threshold (EA)
+MAX_DEPTH_EA=${MAX_DEPTH_EA:-4}           # per-entry depth cap (EA)
+MAX_MUTATIONS_PER_ITER=${MAX_MUTATIONS_PER_ITER:-4}  # chain length K (random_baseline)
 
 # ─────── Standard config (unchanged) ────────────────────────────────────────
 N_CASES=${N_CASES:-16}
@@ -112,8 +113,10 @@ echo "  Optimizer:       $OPTIMIZER"
 if [ "$OPTIMIZER" = "ea" ]; then
     echo "  Archive cap:     $ARCHIVE_CAP"
     echo "  Restart h:       $RESTART_H"
+    echo "  Max depth (EA):  $MAX_DEPTH_EA"
+else
+    echo "  Max chain K:     $MAX_MUTATIONS_PER_ITER"
 fi
-echo "  Max depth (EA):  $MAX_DEPTH_EA"
 echo ""
 echo "Run configuration:"
 echo "  Model:           $MODEL_ID"
@@ -226,6 +229,7 @@ python scripts/experiments/run_with_rules_map.py \
     --archive-cap "$ARCHIVE_CAP" \
     --restart-h "$RESTART_H" \
     --max-depth-ea "$MAX_DEPTH_EA" \
+    --max-mutations-per-iter "$MAX_MUTATIONS_PER_ITER" \
     $VALIDATION_FLAG \
     $NO_EVAL_CACHE_FLAG \
     --semgrep-config "$SEMGREP_RULESET" \

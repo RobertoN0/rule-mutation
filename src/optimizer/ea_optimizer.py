@@ -9,7 +9,7 @@ mutator dedup) doesn't fit the pool's blind ``select()`` API.
 Top-level entry points
 ----------------------
 * :func:`run_ea`             — (1+1) EA over per-rule :class:`ParetoArchive`
-* :func:`run_random_baseline` — uniform random walk with depth-cap restart
+* :func:`run_random_baseline` — stateless per-iteration multi-mutation sampler
 """
 
 from __future__ import annotations
@@ -21,16 +21,20 @@ from typing import Any, Callable, TYPE_CHECKING
 
 from ..evaluation.fitness import AggregatedFitness
 from ..mutation import Mutator
+from ..mutation.base import MutationResult
 from .pareto_archive import ArchiveEntry, ParetoArchive
 
 if TYPE_CHECKING:
     from .hill_climber import IterationResult, PerRuleResult
 
 
-# evaluate_fn signature contract — mirrors the 5-tuple from
+# evaluate_fn signature contract — mirrors the eval seam from
 # HillClimber._evaluate_with_per_prompt_rules so callers can plug it in directly.
+# mutation_chain is the full ordered list of mutator names that produced the
+# candidate (EA: parent lineage + this mutator; random: the sampled chain). It is
+# threaded through so mutated_rules/*/meta.json can record it.
 EvaluateFn = Callable[
-    [str, str, Mutator, int, str],   # (target_rule_id, parent_text, mutator, iteration, phase)
+    [str, str, Mutator, int, str, "list[str]"],   # (target_rule_id, parent_text, mutator, iteration, phase, mutation_chain)
     tuple[AggregatedFitness, list[Any], list[str], dict[str, Any], "str | None"],
 ]
 
@@ -46,8 +50,8 @@ class EARunResult:
     iterations: list["IterationResult"]
     per_rule_results: list["PerRuleResult"]
     archives_snapshot: dict[str, dict[str, Any]] = field(default_factory=dict)
-    """Per-rule archive state. Keyed by rule_id. Written into
-    HillClimbResult.compounding_state for hillclimb_per_rule_*.json output."""
+    """Per-rule archive state, keyed by rule_id (EA only). Stored on
+    HillClimbResult.compounding_state. Empty for random_baseline (no archive)."""
 
     rate_limit_hit: bool = False
     """True iff a rate-limit exception aborted the loop early."""
@@ -62,20 +66,22 @@ class EARunResult:
     per_rule_best_code_divergence: dict[str, float] = field(default_factory=dict)
 
     mutator_stats: dict[str, dict[str, int]] = field(default_factory=dict)
-    """Per-mutator counters: {name: {"attempts": N, "archive_adds": M, "archive_adds_f1": K}}.
+    """Per-mutator counters. Shape differs by strategy (reporting plan RQ2):
 
-    - ``attempts``         : number of times this mutator was invoked.
-    - ``archive_adds``     : EA → true archive insertions (passes Pareto check);
-                             random_baseline → "produced a logged candidate"
-                             (mutation succeeded).
-    - ``archive_adds_f1``  : subset of ``archive_adds`` where the candidate's
-                             ``total_semgrep_delta`` was strictly greater than its
-                             parent's f1. Lets you distinguish mutators that move
-                             the primary fitness signal from mutators that only
-                             advance the f2/f3 (divergence) trade-off axes."""
+    EA (last-mutator credit):
+      - ``attempts``        : times this mutator was applied to a parent.
+      - ``archive_adds``    : true archive insertions (passed the Pareto check).
+      - ``archive_adds_f1`` : subset where the candidate's ``total_semgrep_delta``
+                              strictly exceeded its parent's f1.
+
+    random_baseline (whole-chain credit):
+      - ``applications``               : times this mutator appeared in a chain.
+      - ``applications_f1_advancing``  : of those, how many were in a chain whose
+                                         final candidate had f1 > baseline."""
 
     restart_reason_counts: dict[str, int] = field(default_factory=dict)
-    """Total restart events bucketed by reason across all rules."""
+    """Total restart events bucketed by reason across all rules (EA only;
+    empty for random_baseline, which has no restarts)."""
 
 
 # ============================================================================
@@ -214,11 +220,14 @@ def run_ea(
             f"archive_size={len(archive)} {num_affected}/{len(prompts_with_rules)} prompts")
 
         # ---- 3. Evaluate via the supplied closure (wraps HillClimber's pipeline)
+        # mutation_chain = parent lineage + this iteration's mutator (last element).
+        mutation_chain = parent.mutation_path + [mutator_name]
         try:
             (candidate_fitness, candidate_results, mutation_changes,
              val_metadata, iter_mutated_text) = evaluate_fn(
                 rule_id, parent.rule_text, mutator, i + 1,
-                f"ea_iter{i+1}_{rule_id.replace('codeguard-', 'cg-')}",
+                f"ea_iter{i+1:04d}",
+                mutation_chain,
             )
         except Exception as e:
             if "rate_limit" in str(e).lower() or "429" in str(e) or "413" in str(e):
@@ -237,29 +246,30 @@ def run_ea(
                 iter_record_fn({
                     "iter": i + 1,
                     "timestamp": _dt.utcnow().isoformat() + "Z",
+                    "strategy": "ea",
                     "rule_id": rule_id,
-                    "mutator": mutator_name,
-                    "parent_depth": parent.depth,
-                    "candidate_depth": None,
+                    "mutation_chain": mutation_chain,
+                    "chain_length": len(mutation_chain),
                     "mutation_identity": None,
                     "validation_passed": False,
                     "f1": None, "f2": None, "f3": None,
-                    "accepted": False,
                     "f1_advance": False,
+                    "accepted": False,
                     "num_prompts_affected": num_affected,
                     "llm_calls_total": None,
                     "input_tokens_total": None,
                     "output_tokens_total": None,
+                    "validation_metadata": val_metadata or {},
                     "selection_meta": {
                         "parent_iter": parent.iteration_added,
                         "parent_f1": parent.f1,
+                        "parent_depth": parent.depth,
                         "archive_size_before": len(archive),
                         "archive_size_after": len(archive),
                         "attempts_since_insert": archive._attempts_since_insert,
                         "n_eligible_rules": len(eligible_rids),
                         "restarts_this_iter": restarts_this_iter,
                     },
-                    "validation_metadata": val_metadata or {},
                 })
             continue
 
@@ -352,31 +362,32 @@ def run_ea(
             iter_record_fn({
                 "iter": i + 1,
                 "timestamp": _dt.utcnow().isoformat() + "Z",
+                "strategy": "ea",
                 "rule_id": rule_id,
-                "mutator": mutator_name,
-                "parent_depth": parent.depth,
-                "candidate_depth": parent.depth + 1,
+                "mutation_chain": mutation_chain,
+                "chain_length": len(mutation_chain),
                 "mutation_identity": mutation_identity,
                 "validation_passed": True,
                 "f1": candidate_fitness.total_semgrep_delta,
                 "f2": candidate_fitness.proportion_divergent,
                 "f3": candidate_fitness.conditional_mean_divergence,
-                "accepted": accepted,
                 "f1_advance": accepted and (candidate_fitness.total_semgrep_delta > parent.f1),
+                "accepted": accepted,
                 "num_prompts_affected": num_affected,
                 "llm_calls_total": None,    # populated by hill_climber from its counters if needed
                 "input_tokens_total": None,
                 "output_tokens_total": None,
+                "validation_metadata": val_metadata or {},
                 "selection_meta": {
                     "parent_iter": parent.iteration_added,
                     "parent_f1": parent.f1,
+                    "parent_depth": parent.depth,
                     "archive_size_before": archive_size_before,
                     "archive_size_after": len(archive),
                     "attempts_since_insert": archive._attempts_since_insert,
                     "n_eligible_rules": len(eligible_rids),
                     "restarts_this_iter": restarts_this_iter,
                 },
-                "validation_metadata": val_metadata or {},
             })
 
     # ---- Final archive snapshot (unconditional — covers the last iterations
@@ -435,21 +446,45 @@ def _global_best_entry(
 
 
 # ============================================================================
-# Pure random walk baseline (no archive, no acceptance test)
+# Stateless random baseline (per-iteration multi-mutation sampler)
 # ============================================================================
 
-@dataclass
-class _RandomWalkRuleState:
-    """Per-rule state for the random-walk baseline."""
+class _ChainMutator(Mutator):
+    """Applies a fixed ordered chain of mutators as one mutation.
 
-    current_text: str
-    current_f1: float = 0.0
-    """f1 (= total_semgrep_delta) of ``current_text``. Baseline is 0 by
-    construction. Used to credit ``archive_adds_f1`` when a step advances f1."""
-    depth: int = 0
-    tried_for_current: set[str] = field(default_factory=set)
-    restart_history: list[dict[str, Any]] = field(default_factory=list)
-    all_candidates: list[dict[str, Any]] = field(default_factory=list)
+    ``mutate(text)`` runs each mutator in turn, feeding the previous output
+    forward (cumulative). Identity outcomes still count toward the chain. The
+    chain is always applied in full. Exposes ``mutator_names`` so the runner can
+    record which mutators ran.
+    """
+
+    def __init__(self, mutators: list[Mutator]):
+        super().__init__(seed=None)
+        self._mutators = list(mutators)
+        self._name = "+".join(m.name for m in self._mutators)
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def mutator_names(self) -> list[str]:
+        return [m.name for m in self._mutators]
+
+    def mutate(self, text: str) -> MutationResult:
+        original = text
+        current = text
+        changes: list[str] = []
+        for m in self._mutators:
+            res = m.mutate(current)
+            current = res.mutated
+            changes.extend(res.changes)
+        return MutationResult(
+            original=original,
+            mutated=current,
+            mutation_type=self._name,
+            changes=changes,
+        )
 
 
 def run_random_baseline(
@@ -462,32 +497,30 @@ def run_random_baseline(
     iteration_result_factory: Callable[..., "IterationResult"],
     per_rule_result_factory: Callable[..., "PerRuleResult"],
     max_iterations: int,
-    max_depth: int,
+    max_mutations_per_iter: int,
     seed: int | None,
     log: Callable[[str], None],
     iter_record_fn: Callable[[dict], None] | None = None,
 ) -> EARunResult:
-    """Random walk with depth-cap restart, no archive, no acceptance.
+    """Stateless per-iteration multi-mutation sampler (no archive, no state).
 
-    Each iteration: pick a random rule, pick a random untried mutator for that
-    rule's current_text, apply, replace current_text with offspring, increment
-    depth, log the candidate. If depth hits ``max_depth`` (or all mutators have
-    been tried on current_text), reset to the original. Log every candidate's
-    3-vector for post-hoc EA-vs-random distribution analysis.
+    Each iteration is independent:
+      1. pick a rule uniformly at random,
+      2. sample n in [1, max_mutations_per_iter] inclusive,
+      3. sample n DISTINCT mutators (rng.sample -- no repeats within the chain),
+      4. apply the chain cumulatively to the ORIGINAL rule text,
+      5. validate (observational) + evaluate the FINAL candidate,
+      6. log the record.
 
-    bd-3wa Phase 1: ``iter_record_fn`` is invoked once per iteration with a
-    strategy-agnostic record (selection_meta.strategy="random_baseline").
+    No acceptance test, no restart, no cross-iteration state. Same iteration
+    budget T as the EA -> one code-generation call per iteration (LLM-call
+    parity). mutator_stats use whole-chain credit (reporting plan RQ2).
     """
     from datetime import datetime as _dt
     rng = random.Random(seed)
     n_mutators = len(mutators)
-    mutator_names = [m.name for m in mutators]
-    mutator_by_name: dict[str, Mutator] = {m.name: m for m in mutators}
-
-    states: dict[str, _RandomWalkRuleState] = {
-        rid: _RandomWalkRuleState(current_text=rule_originals[rid])
-        for rid in all_rule_ids
-    }
+    # n is drawn from [1, K]; K cannot exceed the pool size (sample needs n distinct).
+    k = max(1, min(max_mutations_per_iter, n_mutators))
 
     iterations: list["IterationResult"] = []
     per_rule_results: list["PerRuleResult"] = []
@@ -499,58 +532,31 @@ def run_random_baseline(
     best_fitness: AggregatedFitness | None = None
     best_rule_text: str = ""
 
-    # Per-mutator stats and per-reason restart counts (parallel to run_ea shape).
-    # archive_adds_f1 = "produced a candidate whose f1 > the walk's current f1"
-    # (since random_baseline always advances, this measures strict f1 gains).
+    # Whole-chain credit: every mutator in a chain whose final candidate had
+    # f1 > baseline is credited.
     mutator_stats: dict[str, dict[str, int]] = {
-        m.name: {"attempts": 0, "archive_adds": 0, "archive_adds_f1": 0} for m in mutators
+        m.name: {"applications": 0, "applications_f1_advancing": 0} for m in mutators
     }
-    restart_reason_counts: dict[str, int] = {"depth_cap": 0, "mutator_exhausted": 0}
 
     for i in range(max_iterations):
         rule_id = rng.choice(all_rule_ids)
-        state = states[rule_id]
-
-        restart_triggered: str | None = None
-        # Restart triggers BEFORE picking a mutator
-        if state.depth >= max_depth:
-            state.restart_history.append({
-                "iteration": i, "reason": "depth_cap", "depth_at_reset": state.depth,
-            })
-            state.current_text = rule_originals[rule_id]
-            state.current_f1 = 0.0
-            state.depth = 0
-            state.tried_for_current = set()
-            restart_reason_counts["depth_cap"] += 1
-            restart_triggered = "depth_cap"
-            log(f"   ↻ rule={rule_id.replace('codeguard-', 'cg-')} restart: depth_cap")
-        elif len(state.tried_for_current) >= n_mutators:
-            state.restart_history.append({
-                "iteration": i, "reason": "mutator_exhausted", "depth_at_reset": state.depth,
-            })
-            state.current_text = rule_originals[rule_id]
-            state.current_f1 = 0.0
-            state.depth = 0
-            state.tried_for_current = set()
-            restart_reason_counts["mutator_exhausted"] += 1
-            restart_triggered = "mutator_exhausted"
-            log(f"   ↻ rule={rule_id.replace('codeguard-', 'cg-')} restart: mutator_exhausted")
-
-        available = [m for m in mutator_names if m not in state.tried_for_current]
-        mutator_name = rng.choice(available)
-        mutator = mutator_by_name[mutator_name]
+        n = rng.randint(1, k)
+        chain = rng.sample(mutators, n)          # n distinct mutators, in order
+        chain_names = [m.name for m in chain]
+        chain_mutator = _ChainMutator(chain)
 
         num_affected = sum(1 for pwr in prompts_with_rules if rule_id in pwr.rule_ids)
-        log(f"\n🎲 Iteration {i+1}/{max_iterations} "
-            f"— rule={rule_id.replace('codeguard-', 'cg-')} "
-            f"depth={state.depth} mutator={mutator_name} "
+        log(f"\n\U0001f3b2 Iteration {i+1}/{max_iterations} "
+            f"-- rule={rule_id.replace('codeguard-', 'cg-')} "
+            f"n={n} chain={'+'.join(chain_names)} "
             f"{num_affected}/{len(prompts_with_rules)} prompts")
 
         try:
             (candidate_fitness, candidate_results, mutation_changes,
              val_metadata, iter_mutated_text) = evaluate_fn(
-                rule_id, state.current_text, mutator, i + 1,
-                f"rand_iter{i+1}_{rule_id.replace('codeguard-', 'cg-')}",
+                rule_id, rule_originals[rule_id], chain_mutator, i + 1,
+                f"rand_iter{i+1:04d}",
+                chain_names,
             )
         except Exception as e:
             if "rate_limit" in str(e).lower() or "429" in str(e) or "413" in str(e):
@@ -559,141 +565,75 @@ def run_random_baseline(
                 break
             raise
 
-        # Mark mutator tried even if validation produced no text — avoids retrying
-        state.tried_for_current.add(mutator_name)
-        mutator_stats[mutator_name]["attempts"] += 1
-        walk_depth_before = state.depth
+        has_text = iter_mutated_text is not None
+        f1 = candidate_fitness.total_semgrep_delta
+        f1_advance = has_text and f1 > 0.0
+        mutation_identity = (iter_mutated_text == rule_originals[rule_id]) if has_text else None
 
-        if iter_mutated_text is None:
-            log(f"   ⚠️ No mutated text; marked {mutator_name} tried for this version")
-            if iter_record_fn is not None:
-                iter_record_fn({
-                    "iter": i + 1,
-                    "timestamp": _dt.utcnow().isoformat() + "Z",
-                    "rule_id": rule_id,
-                    "mutator": mutator_name,
-                    "parent_depth": walk_depth_before,
-                    "candidate_depth": None,
-                    "mutation_identity": None,
-                    "validation_passed": False,
-                    "f1": None, "f2": None, "f3": None,
-                    "accepted": False,
-                    "f1_advance": False,
-                    "num_prompts_affected": num_affected,
-                    "selection_meta": {
-                        "strategy": "random_baseline",
-                        "walk_depth_before": walk_depth_before,
-                        "walk_depth_after": walk_depth_before,
-                        "restart_triggered": restart_triggered,
-                        "parent_f1": state.current_f1,
-                    },
-                    "validation_metadata": val_metadata or {},
-                })
-            continue
+        # whole-chain credit: every mutator in the chain gets an application; the
+        # f1-advancing tally is credited only when the final candidate beat baseline.
+        for name in chain_names:
+            mutator_stats[name]["applications"] += 1
+            if f1_advance:
+                mutator_stats[name]["applications_f1_advancing"] += 1
 
-        # bd-3wa: capture mutation_identity BEFORE advancing the walk
-        mutation_identity = (iter_mutated_text == state.current_text)
-
-        # No acceptance test — always advance the walk
-        parent_f1 = state.current_f1
-        state.current_text = iter_mutated_text
-        state.current_f1 = candidate_fitness.total_semgrep_delta
-        state.depth += 1
-        state.tried_for_current = set()  # new version → fresh slate
-        mutator_stats[mutator_name]["archive_adds"] += 1  # "produced a candidate"
-        if candidate_fitness.total_semgrep_delta > parent_f1:
-            mutator_stats[mutator_name]["archive_adds_f1"] += 1
-
-        # Log candidate's 3-vector for post-hoc analysis
-        state.all_candidates.append({
-            "iteration": i,
-            "f1": candidate_fitness.total_semgrep_delta,
-            "f2": candidate_fitness.proportion_divergent,
-            "f3": candidate_fitness.conditional_mean_divergence,
-            "mutator": mutator_name,
-            "depth_after": state.depth,
-        })
-
-        # Track per-rule + global best
-        fitness_delta = candidate_fitness.total_semgrep_delta
-        if fitness_delta > per_rule_best_delta[rule_id]:
-            per_rule_best_delta[rule_id] = fitness_delta
+        if f1 > per_rule_best_delta[rule_id]:
+            per_rule_best_delta[rule_id] = f1
         if candidate_fitness.mean_code_divergence > per_rule_best_div[rule_id]:
             per_rule_best_div[rule_id] = candidate_fitness.mean_code_divergence
-
-        if best_fitness is None or candidate_fitness.total_semgrep_delta > best_fitness.total_semgrep_delta:
+        if best_fitness is None or f1 > best_fitness.total_semgrep_delta:
             best_fitness = candidate_fitness
             best_rule_id = rule_id
-            best_rule_text = iter_mutated_text
+            best_rule_text = iter_mutated_text or rule_originals[rule_id]
 
         iterations.append(iteration_result_factory(
             iteration=i,
             rule_text=f"[random: {rule_id}@iter{i+1}]",
             aggregated_fitness=candidate_fitness,
             individual_results=candidate_results,
-            is_improvement=True,  # walk always advances
+            is_improvement=True,            # random always "accepts"
             mutation_changes=mutation_changes,
             validation_metadata=val_metadata,
         ))
         per_rule_results.append(per_rule_result_factory(
             rule_id=rule_id,
             iteration=i,
-            fitness_delta=fitness_delta,
+            fitness_delta=f1,
             aggregated_fitness=candidate_fitness,
             mutation_changes=mutation_changes,
             is_improvement=True,
             num_prompts_affected=num_affected,
         ))
 
-        # bd-3wa: emit per-iter record into iterations.jsonl
         if iter_record_fn is not None:
             iter_record_fn({
                 "iter": i + 1,
                 "timestamp": _dt.utcnow().isoformat() + "Z",
+                "strategy": "random_baseline",
                 "rule_id": rule_id,
-                "mutator": mutator_name,
-                "parent_depth": walk_depth_before,
-                "candidate_depth": state.depth,
+                "mutation_chain": chain_names,
+                "chain_length": n,
                 "mutation_identity": mutation_identity,
-                "validation_passed": True,
-                "f1": candidate_fitness.total_semgrep_delta,
-                "f2": candidate_fitness.proportion_divergent,
-                "f3": candidate_fitness.conditional_mean_divergence,
-                "accepted": True,  # random_baseline always advances
-                "f1_advance": candidate_fitness.total_semgrep_delta > parent_f1,
+                "validation_passed": has_text,
+                "f1": f1 if has_text else None,
+                "f2": candidate_fitness.proportion_divergent if has_text else None,
+                "f3": candidate_fitness.conditional_mean_divergence if has_text else None,
+                "f1_advance": f1_advance,
+                "accepted": True,           # random_baseline always accepts
                 "num_prompts_affected": num_affected,
-                "selection_meta": {
-                    "strategy": "random_baseline",
-                    "walk_depth_before": walk_depth_before,
-                    "walk_depth_after": state.depth,
-                    "restart_triggered": restart_triggered,
-                    "parent_f1": parent_f1,
-                },
+                "llm_calls_total": None,
+                "input_tokens_total": None,
+                "output_tokens_total": None,
                 "validation_metadata": val_metadata or {},
+                "selection_meta": {},
             })
-
-    # Build snapshot dict mirroring archive snapshot shape (consistent JSON)
-    snapshot = {
-        rid: {
-            "mode": "random_baseline",
-            "current_text": s.current_text,
-            "current_depth": s.depth,
-            "current_tried_mutators": sorted(s.tried_for_current),
-            "restart_history": s.restart_history,
-            "all_candidates": s.all_candidates,
-            "n_candidates_logged": len(s.all_candidates),
-            "n_restarts": len(s.restart_history),
-        }
-        for rid, s in states.items()
-    }
 
     _log_random_summary(
         log=log,
         all_rule_ids=all_rule_ids,
-        states=states,
-        mutator_stats=mutator_stats,
-        restart_reason_counts=restart_reason_counts,
+        per_rule_results=per_rule_results,
         per_rule_best_delta=per_rule_best_delta,
+        mutator_stats=mutator_stats,
         best_rule_id=best_rule_id,
         best_fitness=best_fitness,
     )
@@ -701,7 +641,7 @@ def run_random_baseline(
     return EARunResult(
         iterations=iterations,
         per_rule_results=per_rule_results,
-        archives_snapshot=snapshot,
+        archives_snapshot={},                # random baseline keeps no archive
         rate_limit_hit=rate_limit_hit,
         best_rule_id=best_rule_id,
         best_rule_text=best_rule_text,
@@ -709,7 +649,7 @@ def run_random_baseline(
         per_rule_best_delta=per_rule_best_delta,
         per_rule_best_code_divergence=per_rule_best_div,
         mutator_stats=mutator_stats,
-        restart_reason_counts=restart_reason_counts,
+        restart_reason_counts={},            # random baseline has no restarts
     )
 
 
@@ -821,44 +761,39 @@ def _log_random_summary(
     *,
     log: Callable[[str], None],
     all_rule_ids: list[str],
-    states: dict[str, _RandomWalkRuleState],
-    mutator_stats: dict[str, dict[str, int]],
-    restart_reason_counts: dict[str, int],
+    per_rule_results: list["PerRuleResult"],
     per_rule_best_delta: dict[str, float],
+    mutator_stats: dict[str, dict[str, int]],
     best_rule_id: str | None,
     best_fitness: AggregatedFitness | None,
 ) -> None:
-    """Print the per-rule / per-mutator / restart summary for random_baseline."""
+    """Print the per-rule / per-mutator summary for the random baseline."""
     sep = "═" * 80
     line = "─" * 80
 
     log(f"\n{sep}")
     log("📊  Random-baseline per-rule summary")
     log(sep)
-    log(f"{'Rule':<40} {'candidates':>10} {'restarts':>9} {'bestF1':>10}")
+    log(f"{'Rule':<40} {'iters':>10} {'bestF1':>10}")
     log(line)
     for rid in all_rule_ids:
-        s = states[rid]
-        log(f"{_short_rid(rid):<40} {len(s.all_candidates):>10} "
-            f"{len(s.restart_history):>9} {per_rule_best_delta.get(rid, 0.0):>+10.2f}")
+        iters = sum(1 for r in per_rule_results if r.rule_id == rid)
+        log(f"{_short_rid(rid):<40} {iters:>10} "
+            f"{per_rule_best_delta.get(rid, 0.0):>+10.2f}")
     log(line)
 
-    log("\n↻  Restart breakdown (totals across all rules):")
-    for reason, count in restart_reason_counts.items():
-        log(f"    {reason:<20} {count}")
-
-    log("\n🎲  Mutator attempt counts (random_baseline walk):")
-    log(f"{'mutator':<30} {'attempts':>10} {'produced':>10} {'f1_gain':>10} {'f1%':>8}")
-    log("─" * 75)
+    log("\n🎲  Mutator application counts (whole-chain credit):")
+    log(f"{'mutator':<30} {'applications':>13} {'f1_advancing':>13} {'f1%':>8}")
+    log("─" * 70)
     for name, stats in sorted(
         mutator_stats.items(),
-        key=lambda kv: (-kv[1].get("archive_adds_f1", 0), -kv[1]["attempts"], kv[0]),
+        key=lambda kv: (-kv[1].get("applications_f1_advancing", 0),
+                        -kv[1].get("applications", 0), kv[0]),
     ):
-        att = stats["attempts"]
-        prod = stats["archive_adds"]
-        f1_gain = stats.get("archive_adds_f1", 0)
-        rate_f1 = (100.0 * f1_gain / att) if att > 0 else 0.0
-        log(f"{name:<30} {att:>10} {prod:>10} {f1_gain:>10} {rate_f1:>7.1f}%")
+        apps = stats.get("applications", 0)
+        adv = stats.get("applications_f1_advancing", 0)
+        rate = (100.0 * adv / apps) if apps > 0 else 0.0
+        log(f"{name:<30} {apps:>13} {adv:>13} {rate:>7.1f}%")
 
     if best_fitness is not None:
         log(f"\n🏆 Global best candidate: rule={_short_rid(best_rule_id or '?')} "
