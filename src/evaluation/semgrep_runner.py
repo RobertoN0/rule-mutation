@@ -463,6 +463,24 @@ def run_semgrep_batch_dir(
             code = strip_markdown_fences(code)
         codes_cleaned.append(code if code.strip() else None)
 
+    # proc/cmd are filled in once the subprocess runs; they stay None on the
+    # error paths that never reach it (config missing, semgrep not installed).
+    proc: "subprocess.CompletedProcess | None" = None
+    cmd: list[str] | None = None
+
+    def _debug_all(results: list["SemgrepResult"]) -> None:
+        """Write one debug record per sample — covers the success path AND every
+        error path, so a failed/aborted scan always leaves a trace (a record
+        with a non-null ``error``) that is distinguishable from a clean scan
+        with zero findings (``error`` null, ``findings_count`` 0)."""
+        for i, sem_result in enumerate(results):
+            code_raw, lang = code_samples[i]
+            cleaned = codes_cleaned[i] if i < len(codes_cleaned) else None
+            _write_semgrep_debug(
+                code_raw, cleaned or "", lang, resolved_rule_config,
+                cleaned != code_raw, proc, sem_result, cmd,
+            )
+
     tmpdir = tempfile.mkdtemp()
     try:
         # Write non-empty samples to named temp files
@@ -478,7 +496,9 @@ def run_semgrep_batch_dir(
             idx_to_path[idx] = filepath
 
         if not idx_to_path:
-            return [SemgrepResult(error="Empty code content") for _ in code_samples]
+            results = [SemgrepResult(error="Empty code content") for _ in code_samples]
+            _debug_all(results)
+            return results
 
         base_config = _resolve_rule_config(rule_config)
         if (
@@ -486,7 +506,9 @@ def run_semgrep_batch_dir(
             and not Path(base_config).exists()
         ):
             err = SemgrepResult(error=f"Local Semgrep config not found: {base_config}")
-            return [err] * len(code_samples)
+            results = [err] * len(code_samples)
+            _debug_all(results)
+            return results
 
         config_flags: list[str] = []
         for c in config_args:
@@ -506,10 +528,12 @@ def run_semgrep_batch_dir(
 
         if not proc.stdout.strip():
             err = SemgrepResult(error=proc.stderr or "Semgrep returned no output")
-            return [
+            results = [
                 err if i in idx_to_path else SemgrepResult(error="Empty code content")
                 for i in range(len(code_samples))
             ]
+            _debug_all(results)
+            return results
 
         data = json.loads(proc.stdout)
 
@@ -540,32 +564,28 @@ def run_semgrep_batch_dir(
             for i in range(len(code_samples))
         ]
 
-        for i, sem_result in enumerate(results):
-            code_raw, lang = code_samples[i]
-            _write_semgrep_debug(
-                code_raw,
-                codes_cleaned[i] or "",
-                lang,
-                resolved_rule_config,
-                codes_cleaned[i] != code_raw,
-                proc,
-                sem_result,
-                cmd,
-            )
-
+        _debug_all(results)
         return results
 
     except subprocess.TimeoutExpired:
         err = SemgrepResult(error=f"Semgrep batch timed out ({timeout}s)")
-        return [err] * len(code_samples)
+        results = [err] * len(code_samples)
+        _debug_all(results)
+        return results
     except json.JSONDecodeError as e:
         err = SemgrepResult(error=f"Failed to parse Semgrep output: {e}")
-        return [err] * len(code_samples)
+        results = [err] * len(code_samples)
+        _debug_all(results)
+        return results
     except FileNotFoundError:
         err = SemgrepResult(error="Semgrep not installed or not in PATH")
-        return [err] * len(code_samples)
+        results = [err] * len(code_samples)
+        _debug_all(results)
+        return results
     except Exception as e:
         err = SemgrepResult(error=f"Unexpected error: {e}")
-        return [err] * len(code_samples)
+        results = [err] * len(code_samples)
+        _debug_all(results)
+        return results
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
