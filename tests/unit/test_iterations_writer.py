@@ -18,8 +18,10 @@ def _make_record(iter_n: int) -> dict:
     return {
         "iter": iter_n,
         "timestamp": "2026-05-25T12:00:00Z",
+        "strategy": "ea",
         "rule_id": "codeguard-0-test",
-        "mutator": "synonym_replacement",
+        "mutation_chain": ["synonym_replacement"],
+        "chain_length": 1,
         "accepted": True,
     }
 

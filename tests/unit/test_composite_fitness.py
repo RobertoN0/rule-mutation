@@ -172,3 +172,60 @@ class TestComponents:
         assert isinstance(r, CompositeFitnessResult)
         assert isinstance(r.semgrep_delta, float)
         assert isinstance(r.code_divergence, float)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# bd-03k.2 — per-call language override (mixed-language runs)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestPerCallLangOverride:
+    """One evaluator (constructed for python) must score a java case with the
+    java CodeBLEU grammar when the per-call lang override is supplied."""
+
+    def _patched_calc(self):
+        """Patch codebleu.calc_codebleu to record the lang it was called with."""
+        calls: list[str] = []
+
+        def _fake(refs, hyps, lang):
+            calls.append(lang)
+            return {"codebleu": 0.5}
+
+        return calls, patch("codebleu.calc_codebleu", side_effect=_fake)
+
+    def test_per_call_lang_overrides_constructor_default(self):
+        ev = _ev(reference_codes={"j0": "class A {}"}, lang="python")
+        calls, p = self._patched_calc()
+        with p:
+            r = ev.evaluate(semgrep_score=1.0, baseline_score=0.0,
+                            generated_code="class B {}", test_case_id="j0",
+                            lang="java")
+        assert calls == ["java"], calls
+        assert r.components["lang"] == "java"
+
+    def test_default_lang_used_when_no_override(self):
+        ev = _ev(reference_codes={"p0": "x = 1"}, lang="python")
+        calls, p = self._patched_calc()
+        with p:
+            r = ev.evaluate(semgrep_score=1.0, baseline_score=0.0,
+                            generated_code="x = 2", test_case_id="p0")
+        assert calls == ["python"], calls
+        assert r.components["lang"] == "python"
+
+    def test_unknown_override_falls_back_to_constructor_default(self):
+        ev = _ev(reference_codes={"p0": "x = 1"}, lang="python")
+        calls, p = self._patched_calc()
+        with p:
+            r = ev.evaluate(semgrep_score=1.0, baseline_score=0.0,
+                            generated_code="x = 2", test_case_id="p0",
+                            lang="cobol")
+        assert calls == ["python"], calls
+        assert r.components["lang"] == "python"
+
+    def test_mixed_run_two_cases_use_their_own_grammar(self):
+        """Single evaluator, two cases scored back-to-back with distinct langs."""
+        ev = _ev(reference_codes={"p0": "x = 1", "j0": "class A {}"}, lang="python")
+        calls, p = self._patched_calc()
+        with p:
+            ev.evaluate(1.0, 0.0, "x = 2", "p0", lang="python")
+            ev.evaluate(1.0, 0.0, "class B {}", "j0", lang="java")
+        assert calls == ["python", "java"], calls
