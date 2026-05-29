@@ -764,7 +764,7 @@ def main():
 
         # ── Rerun artefacts ──────────────────────────────────────────────────
         # run_config.json — every CLI arg + derived runtime values
-        import shlex, subprocess as _subprocess, sys as _sys
+        import subprocess as _subprocess, sys as _sys
         try:
             _git_sha = _subprocess.check_output(
                 ["git", "rev-parse", "HEAD"],
@@ -811,50 +811,23 @@ def main():
         with open(config_file, "w") as f:
             json.dump(run_config, f, indent=2)
 
-        # rerun.sh — executable script that reproduces the Python command exactly
-        lang_arg = f"--languages {shlex.quote(' '.join(args.languages))}" if args.languages else ""
-        validation_flag = (
-            f"--enable-validation --mutation-max-retries {args.mutation_max_retries}"
-            if args.enable_validation else ""
-        )
-        quant_arg = (
-            f"--quantization {shlex.quote(args.quantization)}"
-            if getattr(args, "quantization", None) else ""
-        )
+        # rerun.sh — thin wrapper that reproduces this run from run_config.json.
+        # The mapping logic lives in scripts/experiments/rerun_from_config.py and
+        # dispatches by backend: API → python entrypoint; delftblue → sbatch the
+        # SLURM wrapper. Run it from the repo root.
         rerun_lines = [
             "#!/bin/bash",
-            "# Auto-generated rerun script — reproduces this experiment exactly.",
+            "# Auto-generated. Reproduces this run from its run_config.json.",
             f"# Original job: {run_config['slurm_job_id'] or 'local'}  host: {run_config['hostname']}",
             f"# Timestamp: {timestamp}",
             "#",
             "# Usage (from repo root):",
-            f"#   bash {args.output_dir}/rerun.sh",
-            "#   # or override output dir:",
-            f"#   OUTPUT_DIR=experiments/results/rerun_{timestamp} bash {args.output_dir}/rerun.sh",
+            f"#   bash {args.output_dir}/rerun.sh            # reproduce as originally run",
+            f"#   bash {args.output_dir}/rerun.sh --print    # show the command only",
+            f"#   bash {args.output_dir}/rerun.sh --as delftblue   # force sbatch on DelftBlue",
             "",
-            f'OUTPUT_DIR="${{OUTPUT_DIR:-{shlex.quote(str(args.output_dir))}}}"',
-            "",
-            "python scripts/experiments/run_with_rules_map.py \\",
-            f"    --backend {shlex.quote(args.backend)} \\",
-            f"    --model {shlex.quote(args.model)} \\",
-            *([ f"    {quant_arg} \\" ] if quant_arg else []),
-            f"    --rules-map {shlex.quote(str(args.rules_map))} \\",
-            f"    --n-cases {args.n_cases} \\",
-            f"    --iterations {args.iterations} \\",
-            f"    --seed {args.seed} \\",
-            f"    --selection {shlex.quote(args.selection)} \\",
-            f"    --mutators {' '.join(shlex.quote(m) for m in args.mutators)} \\",
-            f"    --optimizer {shlex.quote(args.optimizer)} \\",
-            f"    --archive-cap {args.archive_cap} \\",
-            f"    --restart-h {args.restart_h} \\",
-            f"    --max-depth-ea {args.max_depth_ea} \\",
-            f"    --max-mutations-per-iter {args.max_mutations_per_iter} \\",
-            f"    --semgrep-config {shlex.quote(str(semgrep_config['rule_config']))} \\",
-            f"    --semgrep-timeout-seconds {semgrep_config['subprocess_timeout_seconds']} \\",
-            f"    --semgrep-jobs {semgrep_config['jobs']} \\",
-            *([ f"    {lang_arg} \\" ] if lang_arg else []),
-            *([ f"    {validation_flag} \\" ] if validation_flag else []),
-            '    --output-dir "$OUTPUT_DIR"',
+            'CONFIG="$(cd "$(dirname "$0")" && pwd)/run_config.json"',
+            f'exec python scripts/experiments/rerun_from_config.py "$CONFIG" "$@"',
         ]
         rerun_file = args.output_dir / "rerun.sh"
         rerun_file.write_text("\n".join(rerun_lines) + "\n", encoding="utf-8")
