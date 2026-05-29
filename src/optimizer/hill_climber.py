@@ -805,6 +805,7 @@ class HillClimber:
                     baseline_score=baseline_score,
                     generated_code=code,
                     test_case_id=tc_id,
+                    lang=test_prompt.language,   # bd-03k.2: per-case CodeBLEU grammar
                 )
                 fitness.composite_score = composite_result.semgrep_delta
                 fitness.code_divergence = composite_result.code_divergence

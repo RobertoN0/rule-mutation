@@ -84,6 +84,7 @@ class CompositeFitnessEvaluator:
         baseline_score: float,
         generated_code: str,
         test_case_id: str | int,
+        lang: str | None = None,
     ) -> CompositeFitnessResult:
         """Compute fitness signals for one generated code sample.
 
@@ -97,12 +98,23 @@ class CompositeFitnessEvaluator:
             LLM-generated code for this test case under the mutated rule.
         test_case_id : str | int
             Used to look up reference code in ``self.reference_codes``.
+        lang : str | None
+            Per-call language override (bd-03k.2). When set, CodeBLEU uses this
+            case's language instead of the constructor default — required for
+            mixed-language runs where one evaluator scores both Python and Java
+            cases. Unknown values fall back to the constructor default.
         """
         raw_semgrep_delta = semgrep_score - baseline_score
 
+        effective_lang = (
+            _LANG_MAP.get(lang.lower(), self._lang) if lang else self._lang
+        )
+
         ref_code = self.reference_codes.get(str(test_case_id))
         if ref_code and generated_code:
-            raw_code_divergence = self._code_divergence(generated_code, ref_code)
+            raw_code_divergence = self._code_divergence(
+                generated_code, ref_code, lang=effective_lang
+            )
         else:
             raw_code_divergence = 0.0
 
@@ -113,7 +125,7 @@ class CompositeFitnessEvaluator:
                 "raw_semgrep_delta": raw_semgrep_delta,
                 "raw_code_divergence": raw_code_divergence,
                 "has_reference_code": ref_code is not None,
-                "lang": self._lang,
+                "lang": effective_lang,
             },
         )
 
@@ -121,13 +133,19 @@ class CompositeFitnessEvaluator:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _code_divergence(self, generated: str, reference: str) -> float:
-        """1 - CodeBLEU(generated, reference); falls back to token-BLEU."""
+    def _code_divergence(
+        self, generated: str, reference: str, lang: str | None = None
+    ) -> float:
+        """1 - CodeBLEU(generated, reference); falls back to token-BLEU.
+
+        ``lang`` overrides the constructor default for this call (bd-03k.2).
+        """
+        codebleu_lang = lang or self._lang
         try:
             from codebleu import calc_codebleu  # type: ignore
 
             result = calc_codebleu(
-                [reference], [generated], lang=self._lang
+                [reference], [generated], lang=codebleu_lang
             )
             score = float(result["codebleu"])
             return round(max(0.0, 1.0 - score), 4)
