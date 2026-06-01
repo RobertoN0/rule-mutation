@@ -131,7 +131,7 @@ def run_ea(
     runner usable without an output directory.
     """
     import time as _time
-    from datetime import datetime as _dt
+    from datetime import datetime as _dt, timezone as _tz
     rng = random.Random(seed)
     n_mutators = len(mutators)
     mutator_names = [m.name for m in mutators]
@@ -245,7 +245,7 @@ def run_ea(
             if iter_record_fn is not None:
                 iter_record_fn({
                     "iter": i + 1,
-                    "timestamp": _dt.utcnow().isoformat() + "Z",
+                    "timestamp": _dt.now(_tz.utc).isoformat(timespec='microseconds').replace("+00:00", "Z"),
                     "strategy": "ea",
                     "rule_id": rule_id,
                     "mutation_chain": mutation_chain,
@@ -361,7 +361,7 @@ def run_ea(
         if iter_record_fn is not None:
             iter_record_fn({
                 "iter": i + 1,
-                "timestamp": _dt.utcnow().isoformat() + "Z",
+                "timestamp": _dt.now(_tz.utc).isoformat(timespec='microseconds').replace("+00:00", "Z"),
                 "strategy": "ea",
                 "rule_id": rule_id,
                 "mutation_chain": mutation_chain,
@@ -516,7 +516,7 @@ def run_random_baseline(
     budget T as the EA -> one code-generation call per iteration (LLM-call
     parity). mutator_stats use whole-chain credit (reporting plan RQ2).
     """
-    from datetime import datetime as _dt
+    from datetime import datetime as _dt, timezone as _tz
     rng = random.Random(seed)
     n_mutators = len(mutators)
     # n is drawn from [1, K]; K cannot exceed the pool size (sample needs n distinct).
@@ -608,7 +608,7 @@ def run_random_baseline(
         if iter_record_fn is not None:
             iter_record_fn({
                 "iter": i + 1,
-                "timestamp": _dt.utcnow().isoformat() + "Z",
+                "timestamp": _dt.now(_tz.utc).isoformat(timespec='microseconds').replace("+00:00", "Z"),
                 "strategy": "random_baseline",
                 "rule_id": rule_id,
                 "mutation_chain": chain_names,
