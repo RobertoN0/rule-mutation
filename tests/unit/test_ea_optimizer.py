@@ -131,6 +131,87 @@ class TestRunEA:
         assert result.best_fitness is not None
         assert result.best_fitness.total_semgrep_delta > 0
 
+    def test_graceful_stop_breaks_loop_and_labels_final_snapshot(self):
+        # should_stop_fn flips True after 3 iterations; the loop must break before
+        # iteration 4, run only 3 iterations, and label the final archive snapshot
+        # with the actual completed count (3), not max_iterations (10).
+        prompts = _make_prompts([["r1", "r2"], ["r1"]])
+        all_rids = sorted({rid for p in prompts for rid in p.rule_ids})
+        mutators = [FakeMutator("m0"), FakeMutator("m1"), FakeMutator("m2")]
+        rule_originals = {rid: f"ORIGINAL[{rid}]" for rid in all_rids}
+
+        counter = {"i": 0}
+        def stub_eval(target_rid, parent_text, mutator, iteration, phase, mutation_chain):
+            counter["i"] += 1
+            f = float(counter["i"])
+            return (
+                _fit(f1=f, f2=min(0.1 * f, 1.0), f3=min(0.05 * f, 1.0)),
+                [], [f"stub change for {mutator.name}"], {}, f"{parent_text}|{mutator.name}",
+            )
+
+        records: list[dict] = []
+        snapshots: list[int] = []  # iteration labels passed to archive_snapshot_fn
+
+        def stop_after_three() -> bool:
+            # len(records) == number of completed iterations so far
+            return len(records) >= 3
+
+        result = run_ea(
+            prompts_with_rules=prompts,
+            all_rule_ids=all_rids,
+            rule_originals=rule_originals,
+            baseline_fitness=_fit(0, 0, 0),
+            mutators=mutators,
+            evaluate_fn=stub_eval,
+            iteration_result_factory=IterationResult,
+            per_rule_result_factory=PerRuleResult,
+            max_iterations=10,
+            archive_cap=3,
+            restart_h=8,
+            max_depth=4,
+            seed=42,
+            log=_silent_log,
+            iter_record_fn=records.append,
+            archive_snapshot_fn=lambda it, snap: snapshots.append(it),
+            snapshot_every=20,  # periodic never fires; only the final snapshot does
+            should_stop_fn=stop_after_three,
+        )
+
+        # Exactly 3 iterations ran (broke at the top of iteration 4)
+        assert len(result.iterations) == 3
+        assert len(records) == 3
+        # The final snapshot is labelled with the real stop point, not max_iterations
+        assert snapshots == [3]
+
+    def test_no_stop_fn_runs_to_completion(self):
+        # Regression: omitting should_stop_fn (default None) must not change behaviour.
+        prompts = _make_prompts([["r1"]])
+        mutators = [FakeMutator("m0"), FakeMutator("m1")]
+        snapshots: list[int] = []
+        result = run_ea(
+            prompts_with_rules=prompts,
+            all_rule_ids=["r1"],
+            rule_originals={"r1": "ORIGINAL[r1]"},
+            baseline_fitness=_fit(0, 0, 0),
+            mutators=mutators,
+            evaluate_fn=lambda rid, pt, m, it, ph, mc: (
+                _fit(float(it), 0.0, 0.0), [], [], {}, f"{pt}|{m.name}",
+            ),
+            iteration_result_factory=IterationResult,
+            per_rule_result_factory=PerRuleResult,
+            max_iterations=5,
+            archive_cap=3,
+            restart_h=8,
+            max_depth=4,
+            seed=1,
+            log=_silent_log,
+            archive_snapshot_fn=lambda it, snap: snapshots.append(it),
+            snapshot_every=20,
+        )
+        assert len(result.iterations) == 5
+        # Final snapshot labelled with the full run length
+        assert snapshots == [5]
+
     def test_archive_dedup_eventually_restarts(self):
         prompts = _make_prompts([["r1"]])
         mutators = [FakeMutator("m0"), FakeMutator("m1")]

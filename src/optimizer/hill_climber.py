@@ -919,18 +919,24 @@ class HillClimber:
     def optimize_per_prompt_rules(
         self,
         prompts_with_rules: list["PromptWithRules"], # type: ignore
+        should_stop_fn: "Callable[[], bool] | None" = None,
     ) -> HillClimbResult:
         """Run hill climbing where each prompt has its own rules.
-        
+
         Each prompt will use its own set of rules,
         and mutations are applied to each prompt's rules independently.
-        
+
         Args:
             prompts_with_rules: Prompts with their associated rules.
-            
+            should_stop_fn: Optional graceful-stop predicate checked at the top
+                of each optimizer iteration. Returns True when a SLURM
+                pre-timeout SIGUSR1 has been received, so the run breaks cleanly
+                and finalization (summary, final snapshot) still happens.
+
         Returns:
             HillClimbResult with optimization results.
         """
+        self._should_stop_fn = should_stop_fn
         start_time = time.perf_counter()
         self._total_llm_calls = 0
         self._total_input_tokens = 0
@@ -1088,6 +1094,7 @@ class HillClimber:
                     log=self._log,
                     iter_record_fn=self._append_iteration_record,
                     archive_snapshot_fn=self._save_archive_snapshot,
+                    should_stop_fn=getattr(self, "_should_stop_fn", None),
                 )
             else:  # "random_baseline"
                 ea_result = run_random_baseline(
@@ -1103,6 +1110,7 @@ class HillClimber:
                     seed=seed,
                     log=self._log,
                     iter_record_fn=self._append_iteration_record,
+                    should_stop_fn=getattr(self, "_should_stop_fn", None),
                 )
         finally:
             self._close_iterations_writer()

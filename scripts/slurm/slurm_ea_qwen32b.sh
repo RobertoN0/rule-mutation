@@ -9,6 +9,10 @@
 #SBATCH --mem-per-cpu=8000M
 #SBATCH --output=/home/rnegro/thesis/rule-mutation/logs/%j_%x.out
 #SBATCH --error=/home/rnegro/thesis/rule-mutation/logs/%j_%x.err
+# Graceful pre-timeout: deliver SIGUSR1 to the batch shell (B:) 300s before the
+# wall-time SIGKILL so the run can save final results. Override per-job for
+# long-iteration (full-population) runs, e.g.:  sbatch --signal=B:USR1@700 ...
+#SBATCH --signal=B:USR1@300
 
 #############################################################################
 # SBST Experiment: (1+1) EA + Pareto archive OR random_baseline.
@@ -214,6 +218,10 @@ if [ "$ENABLE_EVAL_CACHE" = "0" ]; then
     NO_EVAL_CACHE_FLAG="--no-eval-cache"
 fi
 
+# Run in the background so the batch shell stays responsive to SIGUSR1. The
+# trap forwards SLURM's pre-timeout signal to Python, which breaks the optimizer
+# loop and saves final results before the wall-time SIGKILL. The while-loop
+# re-issues `wait` because `wait` returns early when interrupted by the trap.
 python scripts/experiments/run_with_rules_map.py \
     --rules-map "$RULES_MAP" \
     --n-cases "$N_CASES" \
@@ -235,7 +243,23 @@ python scripts/experiments/run_with_rules_map.py \
     --semgrep-config "$SEMGREP_RULESET" \
     --semgrep-timeout-seconds "$SEMGREP_TIMEOUT_SECONDS" \
     --semgrep-jobs "$SEMGREP_JOBS" \
-    --output-dir "$OUTPUT_DIR"
+    --output-dir "$OUTPUT_DIR" &
+PYTHON_PID=$!
+trap 'echo "↪ Forwarding SLURM pre-timeout SIGUSR1 to Python (PID $PYTHON_PID)"; kill -USR1 "$PYTHON_PID" 2>/dev/null' USR1
+# `set -e` (line 71) would abort the script the moment `wait` returns non-zero —
+# which happens every time the USR1 trap interrupts it. Disable errexit around
+# the wait so we can re-wait for Python's *real* exit after forwarding the signal.
+set +e
+wait "$PYTHON_PID"
+EXIT_CODE=$?
+# wait returns 128+signum (>128) when interrupted by the trap rather than by the
+# child exiting — re-wait until Python actually finishes saving and exits.
+while [ "$EXIT_CODE" -gt 128 ]; do
+    wait "$PYTHON_PID"
+    EXIT_CODE=$?
+done
+set -e
+trap - USR1
 
 echo ""
 echo "=========================================================================="
@@ -243,3 +267,5 @@ echo "Experiment Complete"
 echo "=========================================================================="
 echo "Output directory: $OUTPUT_DIR"
 echo "End: $(date)"
+
+exit ${EXIT_CODE:-0}

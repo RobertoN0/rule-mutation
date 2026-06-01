@@ -481,7 +481,26 @@ def main():
     print("=" * 70)
     print("🚀 SBST: Hill Climbing with Per-Prompt Rule Mapping")
     print("=" * 70)
-    
+
+    # ── Graceful pre-timeout shutdown ────────────────────────────────────────
+    # SLURM (--signal=B:USR1@<lead>) forwards SIGUSR1 a configurable number of
+    # seconds before the wall-time SIGKILL. We flip a flag; the optimizer checks
+    # it at the top of each iteration and breaks cleanly, so the run still writes
+    # its final archive snapshot, hillclimb_summary, run_config.json and rerun.sh
+    # instead of being killed mid-iteration with those artefacts unwritten.
+    import signal as _signal
+    _stop_requested = {"flag": False}
+    def _on_sigusr1(_signum, _frame):
+        if not _stop_requested["flag"]:
+            _stop_requested["flag"] = True
+            print("\n⏱️  SIGUSR1 received (SLURM pre-timeout) — finishing the current "
+                  "iteration then saving final results.", flush=True)
+    try:
+        _signal.signal(_signal.SIGUSR1, _on_sigusr1)
+    except (ValueError, OSError):
+        pass  # not on main thread / unsupported platform — degrade silently
+    _should_stop = lambda: _stop_requested["flag"]
+
     # Validate input files
     if not args.rules_map.exists():
         print(f"❌ Error: Rules map file not found: {args.rules_map}")
@@ -716,7 +735,10 @@ def main():
     print("=" * 70)
     
     try:
-        result = climber.optimize_per_prompt_rules(prompts_with_rules=prompts_with_rules)
+        result = climber.optimize_per_prompt_rules(
+            prompts_with_rules=prompts_with_rules,
+            should_stop_fn=_should_stop,
+        )
     except LLMError as e:
         print(f"\n❌ LLM Error: {e}")
         sys.exit(1)

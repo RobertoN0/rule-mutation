@@ -107,6 +107,7 @@ def run_ea(
     iter_record_fn: Callable[[dict], None] | None = None,
     archive_snapshot_fn: Callable[[int, dict[str, dict]], None] | None = None,
     snapshot_every: int = 20,
+    should_stop_fn: Callable[[], bool] | None = None,
 ) -> EARunResult:
     """Run the (1+1) EA + Pareto archive optimization.
 
@@ -129,6 +130,13 @@ def run_ea(
     ``snapshot_every`` iterations with the current per-rule archive snapshot
     dict (inline rule_text per §9.1 Q3). Both are no-ops when None — keeps the
     runner usable without an output directory.
+
+    ``should_stop_fn`` (graceful pre-timeout shutdown): checked at the top of
+    every iteration. When it returns True (SLURM SIGUSR1 handler set the flag
+    before the wall-time SIGKILL), the loop breaks cleanly so the caller's
+    finalization (final snapshot, summary, run_config) still runs. No-op when
+    None. The final snapshot is labelled with the actual last completed
+    iteration, not ``max_iterations``, so an early stop is unambiguous.
     """
     import time as _time
     from datetime import datetime as _dt
@@ -172,7 +180,15 @@ def run_ea(
         "mutator_exhausted": 0, "fully_exhausted": 0,
     }
 
+    last_completed = 0  # actual iterations finished (for graceful-stop snapshot label)
     for i in range(max_iterations):
+        # ---- Graceful pre-timeout stop: SLURM sent SIGUSR1; break before the
+        # next iteration's LLM work so the caller's finalization still runs.
+        if should_stop_fn is not None and should_stop_fn():
+            log(f"\n⏹️  Graceful stop requested (SLURM pre-timeout) — "
+                f"stopping after {last_completed}/{max_iterations} iterations")
+            break
+
         # Track per-iter selection_meta state for the iterations.jsonl record.
         restarts_this_iter: list[dict[str, Any]] = []
 
@@ -390,11 +406,14 @@ def run_ea(
                 },
             })
 
+        last_completed = i + 1  # this iteration's work is fully done
+
     # ---- Final archive snapshot (unconditional — covers the last iterations
-    # when max_iterations is not a multiple of snapshot_every) ----------------
-    if archive_snapshot_fn is not None and max_iterations > 0:
+    # when the stop point is not a multiple of snapshot_every, including a
+    # graceful pre-timeout stop) ----------------------------------------------
+    if archive_snapshot_fn is not None and last_completed > 0:
         archive_snapshot_fn(
-            max_iterations,
+            last_completed,
             {rid: arc.snapshot() for rid, arc in archives.items()},
         )
 
@@ -501,6 +520,7 @@ def run_random_baseline(
     seed: int | None,
     log: Callable[[str], None],
     iter_record_fn: Callable[[dict], None] | None = None,
+    should_stop_fn: Callable[[], bool] | None = None,
 ) -> EARunResult:
     """Stateless per-iteration multi-mutation sampler (no archive, no state).
 
@@ -539,6 +559,13 @@ def run_random_baseline(
     }
 
     for i in range(max_iterations):
+        # Graceful pre-timeout stop (SLURM SIGUSR1) — break before the next
+        # iteration's LLM work so the caller's finalization still runs.
+        if should_stop_fn is not None and should_stop_fn():
+            log(f"\n⏹️  Graceful stop requested (SLURM pre-timeout) — "
+                f"stopping after {len(iterations)}/{max_iterations} iterations")
+            break
+
         rule_id = rng.choice(all_rule_ids)
         n = rng.randint(1, k)
         chain = rng.sample(mutators, n)          # n distinct mutators, in order
