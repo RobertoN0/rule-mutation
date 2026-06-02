@@ -32,11 +32,11 @@ Key sources: LLMORPH (Cho et al., ASE 2025), AUGMENT (Chataigner et al., 2025), 
 
 1. **Select** test prompts from CyberSecEval
 2. **Map** relevant CodeGuard rules to each prompt via AI-based retrieval
-3. **Mutate** the rules with one of 9 adversarial strategies
-4. **Validate** mutation quality (SBERT semantic similarity, instruction adherence, security keyword retention)
-5. **Generate** code with Qwen2.5-Coder-32B-Instruct on original vs. mutated rules
-6. **Score** vulnerability count via Semgrep (`SEVERITY_WEIGHTED`: ERROR×3 + WARNING×1)
-7. **Optimize** via hill climbing — keep mutations that increase the vulnerability score
+3. **Mutate** the rules with one of 8 adversarial strategies
+4. **Validate** mutation quality (SBERT semantic similarity, instruction adherence, security keyword retention) — observational soft gate, recorded but not enforcing
+5. **Generate** code with the configured backend on original vs. mutated rules — Qwen2.5-Coder-32B-Instruct on DelftBlue, or Claude / OpenAI for local replication
+6. **Score** vulnerability count via Semgrep + code-divergence via CodeBLEU
+7. **Optimize** via two interchangeable search strategies: the **(1+1) EA with per-rule Pareto archive** (3 objectives: total Semgrep delta, proportion of divergent prompts, mean conditional divergence) or a **stateless random baseline** (per-iteration multi-mutation sampler) — selected via `--optimizer {ea, random_baseline}`
 
 ---
 
@@ -46,7 +46,6 @@ Key sources: LLMORPH (Cho et al., ASE 2025), AUGMENT (Chataigner et al., 2025), 
 
 | Mutator | What it does |
 |---------|-------------|
-| `fluff` | Prepends bureaucratic prefix, appends noise suffix, weakens imperative verbs |
 | `verb_weakening` | Replaces MUST/NEVER/ALWAYS with weaker synonyms throughout prose |
 | `synonym_replacement` | Substitutes nouns and verbs with WordNet synonyms |
 | `add_random_word` | Inserts security-domain adjectives/adverbs before nouns and verbs |
@@ -84,12 +83,15 @@ uv sync                  # core
 uv sync --extra dev      # + pytest for development
 
 # 4. Verify
-uv run pytest tests/unit/ -q     # should report 176/176 passing
+uv run pytest tests/unit/ -q     # should report 179/179 passing
 ```
 
 ### Optional extras
 
-- `--extra gpu` — adds `accelerate` + `bitsandbytes` for quantized inference on CUDA hosts (DelftBlue A100, etc.). Skip on CPU-only machines.
+- `--extra gpu` — `accelerate` + `bitsandbytes` for quantized inference on CUDA hosts (DelftBlue A100, etc.). Skip on CPU-only machines.
+- `--extra retrieval` — `langchain` + `langgraph` for re-running the rule-retrieval pipeline (pre-computed maps in `pipeline_breakdown/rule_retrieval_output/` let replicators skip this step).
+- `--extra analysis` — `matplotlib` + `scipy` for the report-figure scripts under `scripts/analyze/`. Run locally on downloaded results; not needed at experiment time.
+- `--extra dev` — `pytest` + `ruff` for development.
 
 ### DelftBlue notes
 
@@ -104,31 +106,85 @@ DelftBlue's Python documentation [explicitly recommends](https://doc.dhpc.tudelf
 
 ---
 
-## Running Experiments (DelftBlue HPC)
+## Reproducing locally (API backends — no GPU required)
 
-Experiments run on DelftBlue A100 GPU nodes with Qwen2.5-Coder-32B-Instruct loaded locally (`HF_HUB_OFFLINE=1`).
+The framework supports Anthropic Claude and OpenAI as drop-in code-generation backends, so the full pipeline (mutation → code-gen → Semgrep → CodeBLEU → optional validation) reproduces on any CPU machine. Set the relevant API key in `.env` (see `.env.example`):
 
 ```bash
-# Validation run — single mutator, 4 C-language cases, 5 iterations
-N_CASES=4 N_ITERATIONS=5 MUTATOR=paraphrase LANGUAGES=c ENABLE_VALIDATION=1 \
-  sbatch --job-name="paraphrase_val" \
-         --output="logs/paraphrase_%j.out" \
-         --error="logs/paraphrase_%j.err" \
-         scripts/slurm/slurm_bandit_qwen32b.sh
+cp .env.example .env
+# edit .env to add ANTHROPIC_API_KEY or OPENAI_API_KEY
 
-# Scale-up — all 9 mutators, all languages, 16 cases, 10 iterations
-for MUTATOR in fluff verb_weakening synonym_replacement add_random_word \
-               section_reorder_shuffle section_reorder_degrade \
-               negation_injection voice_change paraphrase; do
-  N_CASES=16 N_ITERATIONS=10 ENABLE_VALIDATION=1 MUTATOR=$MUTATOR \
-    sbatch --time=02:30:00 --job-name="${MUTATOR}_su" \
-           --output="logs/${MUTATOR}_scaleup_%j.out" \
-           --error="logs/${MUTATOR}_scaleup_%j.err" \
-           scripts/slurm/slurm_bandit_qwen32b.sh
-done
+# Tiny smoke (≈ $0.05 with claude-haiku-4-5) — 2 cases × 5 iterations
+PATH="$PWD/.venv/bin:$PATH" python scripts/experiments/run_with_rules_map.py \
+  --backend claude --optimizer random_baseline \
+  --n-cases 2 --iterations 5 --max-mutations-per-iter 4 \
+  --mutators synonym_replacement add_random_word verb_weakening section_reorder_shuffle section_reorder_degrade \
+  --seed 42 --languages python \
+  --output-dir experiments/results/local_smoke
+
+# Inspect the run
+ls experiments/results/local_smoke/
+# run_config.json, hillclimb_summary_*.json, iterations.jsonl,
+# intermediate/baseline.jsonl, intermediate/rand_iter000N.jsonl,
+# mutated_rules/iterNNN/, semgrep_debug/, run.log, rerun.sh
+
+# Reproduce the same run from its config
+bash experiments/results/local_smoke/rerun.sh --print   # show the command
+bash experiments/results/local_smoke/rerun.sh           # actually re-run
 ```
 
-Output directories are named `experiments/results/job{SLURM_ID}_{mutator}_{MMDD}/`, sorted by submission order. Each contains `run_config.json` (full CLI args + git SHA), `rerun.sh` (exact reproduction script), and `mutated_rules/iter{N}/`.
+The `PATH=$PWD/.venv/bin:$PATH` prefix ensures the `semgrep` binary installed in the venv is on PATH (subprocess inherits the parent's PATH; calling `.venv/bin/python` alone is not enough). Equivalently: `source .venv/bin/activate` first.
+
+After a run, generate the report figures + tables with the `[analysis]` extra:
+
+```bash
+uv sync --extra analysis        # one-time
+python scripts/analyze/analyze_run.py experiments/results/local_smoke      # per-run RQ1/RQ2 + cost/hygiene
+python scripts/analyze/compare_runs.py experiments/results/                # multi-run RQ3 + multi-seed
+python scripts/analyze/validation_audit.py <run_dir>                       # only for --enable-validation runs
+python scripts/analyze/migrate_legacy_run.py <pre-schema-2_dir>            # bridge old runs into the new toolkit
+```
+
+---
+
+## Running Experiments (DelftBlue HPC)
+
+Experiments run on DelftBlue A100 GPU nodes with Qwen2.5-Coder-32B-Instruct loaded locally (`HF_HUB_OFFLINE=1`). The SLURM wrapper `scripts/slurm/slurm_ea_qwen32b.sh` reads env-var overrides (defaults are conservative — see the script header for the full list).
+
+```bash
+# Smoke (mandatory before any big batch) — 2 cases × 10 iters, ~30 min
+N_CASES=2 N_ITERATIONS=10 LANGUAGES=python OPTIMIZER=ea \
+  sbatch --time=0:45:00 --job-name="ea_smoke" scripts/slurm/slurm_ea_qwen32b.sh
+
+# Multi-seed RQ3 batch — 200 iters, 25 cases, paired EA vs random across 3 seeds
+for SEED in 1 7 123; do
+  for OPT in ea random_baseline; do
+    for LANG in python java; do
+      SEED=$SEED OPTIMIZER=$OPT N_CASES=25 N_ITERATIONS=200 LANGUAGES=$LANG SELECTION=random \
+        sbatch --time=12:00:00 --job-name="${OPT}_${LANG}_s${SEED}" \
+               scripts/slurm/slurm_ea_qwen32b.sh
+    done
+  done
+done
+
+# Validation ablation (one job) — populates validation_metadata for the audit script
+SEED=42 OPTIMIZER=ea N_CASES=25 N_ITERATIONS=200 LANGUAGES=python SELECTION=random \
+  ENABLE_VALIDATION=1 MUTATION_MAX_RETRIES=2 \
+  sbatch --time=15:00:00 --job-name="ea_val" scripts/slurm/slurm_ea_qwen32b.sh
+```
+
+**Reproducer**: every output dir contains a thin `rerun.sh` that delegates to `scripts/experiments/rerun_from_config.py`. Backend-aware: API runs re-invoke the python entrypoint; DelftBlue runs map the recorded args back to env vars and `sbatch` the wrapper (`bash <run_dir>/rerun.sh --as delftblue --print` to dry-run the sbatch line).
+
+Output directories are named `experiments/results/job{SLURM_ID}_{optimizer}_{N_CASES}_{MMDD}/`. Each contains:
+
+- `run_config.json` — every CLI arg + git SHA + `schema_version: 2`
+- `hillclimb_summary_*.json` — run-level totals, mutator stats, cache hygiene
+- `iterations.jsonl` — one record per search iteration (the trajectory)
+- `archive_snapshots/iter{N:04d}.json` — EA only, per-rule Pareto archive every 20 iters + final
+- `intermediate/{baseline,ea_iter0001,…}.jsonl` — per-prompt evaluation records
+- `mutated_rules/iter{N:03d}/` — mutated rule text + meta.json
+- `semgrep_debug/semgrep_debug.jsonl` — per-scan trace (distinguishes failure from zero-findings)
+- `run.log`, `rerun.sh`
 
 See [WORKFLOW.md](WORKFLOW.md) for full setup, environment activation, and result interpretation.
 
@@ -138,16 +194,17 @@ See [WORKFLOW.md](WORKFLOW.md) for full setup, environment activation, and resul
 
 ```
 ├── src/
-│   ├── mutation/          # 9 mutators + MutationQualityValidator + ParsedRule
-│   ├── optimizer/         # Hill climbing algorithm
-│   ├── evaluation/        # Fitness, Semgrep runner, rule/dataset loading
-│   └── llm_backends/      # DelftBlue local backend (Groq legacy)
+│   ├── mutation/          # 8 mutators + MutatorPool + MutationQualityValidator + ParsedRule
+│   ├── optimizer/         # (1+1) EA + Pareto archive + stateless random baseline
+│   ├── evaluation/        # Fitness, Semgrep runner, CodeBLEU code-divergence, rule/dataset loading
+│   └── llm_backends/      # Claude / OpenAI / DelftBlue-local backends
 ├── scripts/
-│   ├── experiments/       # run_with_rules_map.py — main experiment entry point
-│   └── slurm/             # slurm_bandit_qwen32b.sh (lex/D-UCB) + slurm_ea_qwen32b.sh (EA / random_baseline)
+│   ├── experiments/       # run_with_rules_map.py — entrypoint; rerun_from_config.py — backend-aware reproducer
+│   ├── slurm/             # slurm_ea_qwen32b.sh (EA / random_baseline) + slurm_rule_retrieval_local.sh (retrieval pipeline)
+│   └── analyze/           # loaders, stats, analyze_run, compare_runs, validation_audit, migrate_legacy_run
 ├── project-codeguard/     # 23 CodeGuard security rules (git submodule)
 ├── literature_review/     # Paper PDFs + INDEX_AND_LINKS.md + analysis docs
-├── pipeline_breakdown/    # Pre-computed interesting cases + rule retrieval map
+├── pipeline_breakdown/    # Pre-computed rule retrieval maps
 ├── experiments/results/   # Experiment outputs (gitignored)
 ├── ARCHITECTURE.md        # Full technical reference
 └── WORKFLOW.md            # Running experiments, environment setup
