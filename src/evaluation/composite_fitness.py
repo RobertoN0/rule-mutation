@@ -27,6 +27,34 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
+
+# CodeBLEU emits a bare ``logging.warning`` on the root logger for every
+# evaluation whose *reference* code yields no tree-sitter data-flow edges
+# ("...no reference data-flows extracted ... the data-flow match score
+# degenerates to 0..."). This is a known CodeBLEU/DFG_python limitation: its
+# Python data-flow extractor raises a KeyError on attribute-target assignments
+# to bare string literals (e.g. ``self.api_key = 'X'``), which the library
+# swallows into an empty DFG. It is harmless here — data-flow is one of four
+# CodeBLEU sub-scores and only floors to 0 for that one sample — but at scale it
+# floods run logs (one line per affected prompt per iteration). Drop just that
+# message, leaving every other warning untouched.
+class _DropCodeBleuDataflowWarning(logging.Filter):
+    _NEEDLE = "no reference data-flows extracted"
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return self._NEEDLE not in record.getMessage()
+
+
+def _install_codebleu_warning_filter() -> None:
+    """Attach the data-flow-warning filter to the root logger exactly once."""
+    root = logging.getLogger()
+    if not any(isinstance(f, _DropCodeBleuDataflowWarning) for f in root.filters):
+        root.addFilter(_DropCodeBleuDataflowWarning())
+
+
+_install_codebleu_warning_filter()
+
+
 # CodeBLEU language aliases — map our internal language names to codebleu lang strings
 _LANG_MAP: dict[str, str] = {
     "python": "python",
