@@ -1,47 +1,47 @@
 # Replication Package
 
-This document is the reviewer-facing entry point for reproducing the
-experiments from the thesis **without DelftBlue access**.
+This is the reviewer-facing guide to reproducing the experiments **without
+DelftBlue access**, using an LLM provider API. For project orientation start at
+[README.md](README.md); for internals see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 The framework supports two execution paths:
 
-| Path | Where it runs | What it uses | Reproducible? |
+| Path | Where it runs | Code generation | Reproducible here |
 |---|---|---|---|
-| **A. API-based** (this doc) | Any laptop / VM | OpenAI / Anthropic / Groq API | ✅ Yes |
-| **B. Local GPU**            | DelftBlue A100 nodes | HuggingFace + transformers + bitsandbytes | ❌ Cluster-only |
+| **A. API-based** (this doc) | Any laptop / VM, CPU only | Anthropic / OpenAI API | ✅ Yes |
+| **B. Local GPU** | DelftBlue A100 nodes | HuggingFace + transformers | ❌ Cluster-only |
 
-All reproducibility claims in this document refer to **Path A**.
+Both paths run the *same* mutation → generate → Semgrep → CodeBLEU → search
+pipeline and write the *same* output schema. Only the
+code-generation backend differs. Everything below refers to **Path A**.
 
 ---
 
 ## Prerequisites
 
-You need:
-
-1. **Git** (≥ 2.30) — to clone the repository and initialise submodules.
+1. **Git** ≥ 2.30 — to clone the repository and initialise the `project-codeguard` submodule.
 2. **One of**:
-   - [`uv`](https://docs.astral.sh/uv/) ≥ 0.5 — the recommended Python manager
-     (one-line install: `curl -LsSf https://astral.sh/uv/install.sh | sh`), or
+   - [`uv`](https://docs.astral.sh/uv/) ≥ 0.5 (recommended). Install:
+     `curl -LsSf https://astral.sh/uv/install.sh | sh` (Linux/macOS),
+     `brew install uv` (macOS), or the PowerShell one-liner on Windows.
    - **Docker** ≥ 24 — if you prefer a sealed image.
 3. **An LLM API key** for at least one provider:
-   - **Anthropic Claude** (recommended) — `claude-haiku-4-5` is cheapest and is
-     used by the default smoke test.
+   - **Anthropic Claude** (recommended) — `claude-haiku-4-5` is the cheapest and is the default for the smoke test.
    - **OpenAI** — e.g. `gpt-4o-mini`.
-   - **Groq** — free tier available at https://console.groq.com.
 
-No GPU, no DelftBlue account, no HuggingFace authentication is required for
-the default replication path. The CyberSecEval dataset is fetched
-automatically from the HuggingFace Hub at runtime.
+No GPU, no DelftBlue account, and no HuggingFace authentication are required.
+The CyberSecEval dataset is fetched from the HuggingFace Hub at runtime, and the
+CodeGuard rules ship in the `project-codeguard/` submodule.
 
 ---
 
 ## 1. Clone the repository
 
 ```bash
-git clone https://github.com/<your-org>/Thesis-rules-codeguard.git
-cd Thesis-rules-codeguard
+git clone --recurse-submodules https://github.com/RobertoN0/rule-mutation.git
+cd rule-mutation
 
-# project-codeguard contains the security rule library and is a submodule
+# If you forgot --recurse-submodules:
 git submodule update --init --recursive
 ```
 
@@ -49,152 +49,166 @@ git submodule update --init --recursive
 
 ```bash
 cp .env.example .env
-$EDITOR .env   # fill in at least one of ANTHROPIC_API_KEY / OPENAI_API_KEY / GROQ_API_KEY
+$EDITOR .env       # fill in ANTHROPIC_API_KEY (or OPENAI_API_KEY)
 ```
 
-The `.env` file is git-ignored. Never commit API keys.
+`.env` is git-ignored. Never commit API keys.
 
-## 3. Pick a path
+## 3. Install + smoke test
 
 ### Path A1 — uv (recommended)
 
 ```bash
-# Install all API-only dependencies into a project-local .venv
-uv sync
-
-# Smoke test (one Claude Haiku call, ~256 tokens, well under a cent)
-uv run python scripts/validation/validate_claude.py
+uv sync                                              # API-only deps into .venv/
+uv run python scripts/validation/validate_claude.py  # one ~$0.0001 Claude call
 ```
 
 Expected output ends with `🎉 Claude backend is wired up correctly.`
-
-For a tiny end-to-end pipeline run (1 case, 1 iteration), see §5.
 
 ### Path A2 — Docker
 
 ```bash
 docker build -t codeguard-sbst:replication .
 
-# Smoke test inside the container
+# Default CMD = the validate_claude.py smoke test
 docker run --rm --env-file .env codeguard-sbst:replication
-
-# Run a tiny experiment, persisting results back to the host
-docker run --rm \
-    --env-file .env \
-    -v "$(pwd)/results:/app/results" \
-    codeguard-sbst:replication \
-    python scripts/experiments/run_with_rules_map.py \
-        --interesting-cases pipeline_breakdown/generation_results/interesting_cases_96_sonnet_4_6.json \
-        --rules-map        pipeline_breakdown/rule_retrieval_output/retrieval_map_96_sonnet_4_6.json \
-        --backend claude --model claude-haiku-4-5 \
-        --n-cases 1 --iterations 1 \
-        --output-dir results/docker_smoke
 ```
 
 ---
 
-## 4. What gets installed
+## 4. Tiny end-to-end run
 
-`pyproject.toml` declares two dependency surfaces:
-
-- **Default (`uv sync`)** — API-only path. Pulls in `anthropic`, `openai`,
-  `semgrep`, `datasets`, `pandas`, and the rule-retrieval agent framework.
-  Total install ≈ 500 MB.
-- **`[gpu]` extras (`uv sync --extra gpu`)** — pulls in `torch`,
-  `transformers`, `accelerate`, `bitsandbytes`. **Only needed on DelftBlue.**
-  Total install ≈ 4 GB.
-
-Exact versions are pinned in `uv.lock` (committed). The same lockfile is
-consumed by the Dockerfile (`uv sync --frozen --no-dev`).
-
----
-
-## 5. Tiny end-to-end run
-
-Once the smoke test passes you can reproduce one prompt's worth of pipeline:
+Once the smoke test passes, reproduce a short search run (the default rules map
+covers Python + Java; `--languages python` keeps it small and cheap):
 
 ```bash
-uv run python scripts/experiments/run_with_rules_map.py \
-    --interesting-cases pipeline_breakdown/generation_results/interesting_cases_96_sonnet_4_6.json \
-    --rules-map        pipeline_breakdown/rule_retrieval_output/retrieval_map_96_sonnet_4_6.json \
-    --backend claude --model claude-haiku-4-5 \
-    --n-cases 1 --iterations 1 \
-    --output-dir results/replication_smoke \
-    --seed 42
+# uv:           prefix with `uv run`
+# activated venv:  source .venv/bin/activate first
+python scripts/experiments/run_with_rules_map.py \
+  --backend claude --optimizer ea \
+  --rules-map pipeline_breakdown/rule_retrieval_output/map_qwen32b_python_java.json \
+  --n-cases 2 --iterations 5 \
+  --archive-cap 6 --restart-h 8 --max-depth-ea 4 \
+  --mutators synonym_replacement add_random_word verb_weakening \
+             section_reorder_shuffle section_reorder_degrade \
+  --languages python --seed 42 \
+  --output-dir experiments/results/replication_smoke
 ```
 
-This makes ≤ 2 API calls (1 baseline + 1 mutation) and writes
-`results/replication_smoke/intermediate_results/*.json` containing the
-generated code, Semgrep findings, and fitness score.
+This makes ~6 API calls (a baseline pass + 5 iterations, minus eval-cache hits)
+and writes a complete run directory (see §6). To run the random-baseline
+ablation instead, swap `--optimizer random_baseline` and replace the EA knobs
+with `--max-mutations-per-iter 4`.
 
-> **Note:** the `--backend claude` flag requires the Claude backend to be
-> registered in `scripts/experiments/run_with_rules_map.py`. That wiring is
-> tracked in [bd-4l1](../) and is done in a separate commit — see
-> "Pipeline integration status" below.
+To also record the (observational) quality-validation metadata — SBERT
+similarity, instruction adherence, keyword retention, etc. — add
+`--enable-validation --mutation-max-retries 2`. Nothing is rejected; the metadata
+is written into `iterations.jsonl` and can be summarised with
+`scripts/analyze/validation_audit.py` (see §5).
 
----
+Reproduce that exact run from its recorded config:
 
-## 6. Pipeline integration status
+```bash
+bash experiments/results/replication_smoke/rerun.sh --print   # show the command
+bash experiments/results/replication_smoke/rerun.sh           # actually re-run
+```
 
-The replication package (this commit) ships:
-
-- ✅ `pyproject.toml` + `uv.lock` + `.python-version` (deterministic install)
-- ✅ `Dockerfile` + `.dockerignore` (sealed alternative)
-- ✅ `.env.example` (secret template)
-- ✅ `src/llm_backends/claude_backend.py` (Anthropic backend implementation)
-- ✅ `scripts/validation/validate_claude.py` (smoke test, runnable standalone)
-
-The following follow-up wiring lives in a separate commit so the replication
-package can be reviewed independently of pipeline changes:
-
-- ⏳ Register `ClaudeBackend` in `src/llm_backends/__init__.py`.
-- ⏳ Add `--backend claude` / `--backend openai` choices to
-  `scripts/experiments/run_with_rules_map.py`.
-- ⏳ Optional: an `OpenAIBackend` mirroring the Claude backend.
-
-Until the follow-up commit lands, `validate_claude.py` is sufficient to
-verify the API-only execution environment.
+> **PATH note:** the pipeline shells out to `semgrep`. Either `source
+> .venv/bin/activate` (recommended) or run via `uv run …`. If you invoke
+> `.venv/bin/python` directly, prefix with `PATH="$PWD/.venv/bin:$PATH"` so the
+> subprocess can find `semgrep`; otherwise scans fail with "Semgrep not
+> installed" (the run still completes, but every finding count is 0). The
+> `semgrep_debug/semgrep_debug.jsonl` trace distinguishes a failed scan
+> (`error != null`) from a genuinely clean scan (`error: null`).
 
 ---
 
-## 7. Reproducibility guarantees and limitations
+## 5. Generate report figures
 
-**Guaranteed deterministic** given the same seed:
+```bash
+uv sync --extra analysis     # matplotlib + scipy (run on top of the base install)
+uv run python scripts/analyze/analyze_run.py experiments/results/replication_smoke
+```
 
-- Mutator behaviour (`--seed N`).
-- Test-case selection order (`--selection first` or `--selection random
-  --seed N`).
-- Semgrep findings on the same generated source (Semgrep is deterministic).
+Outputs land in `experiments/results/replication_smoke/analysis/` as a
+`summary.md`, CSV tables, and PNG figures. See
+[README.md → Analyze results](README.md#analyze-results) for the other scripts
+(`compare_runs.py` for cross-run comparison, `validation_audit.py` for
+`--enable-validation` runs).
 
-**Not guaranteed bit-identical**:
-
-- LLM outputs across runs. Even at `temperature=0` providers reserve the
-  right to change weights, batching, or sampling internals; intermediate
-  results are stored verbatim per run so analyses can be repeated on saved
-  artifacts.
-- Generated code byte-equality across LLM provider versions.
-
-**Provider drift mitigations**:
-
-- `intermediate_results/*.json` saves the exact generated code and Semgrep
-  findings, so downstream analyses do not need to re-call the LLM.
-- `--seed` is recorded in the experiment summary.
+> `uv sync --extra analysis` replaces the resolved set, so it removes the `dev`
+> extras (pytest/ruff) if they were installed. To keep everything, sync all the
+> extras you want at once: `uv sync --extra dev --extra analysis`.
 
 ---
 
-## 8. Troubleshooting
+## 6. What a run directory contains
+
+```
+experiments/results/<name>/
+├── run_config.json                  # every CLI arg + git SHA + schema_version: 2
+├── hillclimb_summary_*.json         # run-level totals, mutator stats, cache hygiene
+├── iterations.jsonl                 # one record per search iteration (the trajectory)
+├── archive_snapshots/iterNNNN.json  # EA only — per-rule Pareto archive every 20 iters + final
+├── intermediate/                    # per-prompt evaluation records
+│   ├── baseline.jsonl
+│   └── {ea_iter0001,rand_iter0001,…}.jsonl
+├── mutated_rules/iterNNN/           # mutated rule text (.md) + meta.json (mutation_chain, changes)
+├── semgrep_debug/semgrep_debug.jsonl  # per-scan trace (failure vs zero-findings)
+├── run.log                          # stdout/stderr tee
+└── rerun.sh                         # backend-aware reproducer (delegates to rerun_from_config.py)
+```
+
+The full field-level schema is documented in
+[IMPLEMENTATION.md → Output schema](IMPLEMENTATION.md#output-schema).
+
+---
+
+## 7. What gets installed
+
+`pyproject.toml` declares the base dependencies plus optional extras:
+
+- **Default (`uv sync`)** — the API path: `anthropic`, `openai`, `semgrep`,
+  `codebleu` + tree-sitter grammars, `sentence-transformers` (for the optional
+  validator), `datasets`, `pandas`. Pinned exactly in `uv.lock` (committed); the
+  Dockerfile consumes the same lockfile via `uv sync --frozen --no-dev`.
+- **`--extra gpu`** — `accelerate`, `bitsandbytes` (+ a CUDA torch reinstall on
+  DelftBlue). **Only needed for Path B.**
+- **`--extra analysis`** — `matplotlib`, `scipy` for the report scripts.
+- **`--extra dev`** — `pytest`, `ruff`.
+
+---
+
+## 8. Reproducibility guarantees and limitations
+
+**Deterministic given the same `--seed`:**
+
+- Mutator behaviour and the search trajectory (rule/mutator draws).
+- Test-case selection order (`--selection first`, or `--selection random --seed N`).
+- Semgrep findings on identical generated source (Semgrep is deterministic).
+- The eval cache: identical assembled rule text → reused code + findings.
+
+**Not bit-identical across runs:**
+
+- LLM outputs. Even at `temperature=0`, providers may change weights, batching,
+  or sampling internals between calls. The generated code, Semgrep findings, and
+  fitness are therefore **saved verbatim per prompt** in `intermediate/*.jsonl`,
+  so all downstream analysis re-runs on the saved artifacts without re-calling
+  the model.
+- Byte-equality of generated code across provider/model versions.
+
+`--seed`, the model, and the git SHA are recorded in `run_config.json`.
+
+---
+
+## 9. Troubleshooting
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `ANTHROPIC_API_KEY is not set` | `.env` missing or unfilled | `cp .env.example .env`, fill in the key |
-| `Rate-limited / overloaded` | Anthropic 429 or 529 | Wait a few seconds and retry; for Haiku this is rare under replication load |
-| `semgrep: command not found` | `uv sync` not run, or running outside the venv | `uv run …` instead of bare `python …`, or `source .venv/bin/activate` |
-| `FileNotFoundError: project-codeguard/...` | Submodule not initialised | `git submodule update --init --recursive` |
-| Docker build fails on `COPY project-codeguard` | Same — submodule empty | Initialise the submodule before `docker build` |
-
----
-
-## 9. Citation
-
-If you use this replication package, please cite the thesis (citation block
-TBD — to be added on submission).
+| `ANTHROPIC_API_KEY is not set` | `.env` missing or unfilled | `cp .env.example .env`, add the key |
+| `Semgrep not installed or not in PATH` (and findings all 0) | venv not active when calling `.venv/bin/python` directly | `source .venv/bin/activate`, or run via `uv run …`, or prefix `PATH="$PWD/.venv/bin:$PATH"` |
+| `pytest` missing after `uv sync --extra analysis` | uv pruned the `dev` extra | `uv sync --extra dev --extra analysis` (combine extras) |
+| `FileNotFoundError: project-codeguard/...` | submodule not initialised | `git submodule update --init --recursive` |
+| Docker build fails on `COPY project-codeguard` | same — submodule empty | initialise the submodule before `docker build` |
+| Rate-limited (429 / 529) | provider throttling | wait and retry; the run saves all completed iterations and exits gracefully |
+| `WARNING: There is no reference data-flows extracted…` (only visible in old logs) | CodeBLEU's data-flow extractor can't parse a few prompts | harmless and **silenced by default** (a root-logger filter in `composite_fitness.py`); that prompt's code-divergence simply omits the data-flow sub-score. Semgrep findings are unaffected. |

@@ -20,10 +20,11 @@
 #     -v "$(pwd)/results:/app/results" \
 #     codeguard-sbst:replication \
 #     python scripts/experiments/run_with_rules_map.py \
-#       --interesting-cases pipeline_breakdown/generation_results/<cases>.json \
-#       --rules-map        pipeline_breakdown/rule_retrieval_output/<map>.json \
-#       --n-cases 1 --iterations 1 \
-#       --output-dir results/docker_smoke
+#       --backend claude --optimizer random_baseline \
+#       --rules-map pipeline_breakdown/rule_retrieval_output/map_qwen32b_python_java.json \
+#       --n-cases 2 --iterations 3 --languages python --seed 42 \
+#       --mutators synonym_replacement add_random_word verb_weakening \
+#       --output-dir /app/results/docker_smoke
 # =============================================================================
 
 FROM python:3.12-slim AS base

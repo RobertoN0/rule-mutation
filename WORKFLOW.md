@@ -1,408 +1,223 @@
 # Experiment Workflow
 
-## Overview
+How to run experiments, reproduce them, and read the results. For a one-page
+reproduction guide see [REPLICATION.md](REPLICATION.md); for internals see
+[ARCHITECTURE.md](ARCHITECTURE.md) and [IMPLEMENTATION.md](IMPLEMENTATION.md).
 
-This document explains how to run experiments and interpret results.
-
-> **Note (2026-05-19):** the sections below "Basic Workflow" → end refer to the
-> older Pipeline 1/2 flow (Groq + llama, pre-EA). They are kept for reference
-> until a full rewrite. The **active workflow** is the **Local ↔ DelftBlue**
-> split documented immediately below.
+The pipeline runs the same way locally on an API backend (Claude / OpenAI, no
+GPU) and on a GPU host with a local model. Both write the same
+`schema_version: 2` output, so the same analysis scripts read both.
 
 ---
 
-## Local ↔ DelftBlue round-trip
+## 1. Running experiments
 
-Since the pipeline executes on DelftBlue A100 nodes but development and analysis
-happen on the local workstation, a typical iteration is:
+The entrypoint is `scripts/experiments/run_with_rules_map.py`. Choose a backend
+(`--backend`), a model (`--model`), a search strategy (`--optimizer`), and a
+rule map.
 
-```
-[local] edit code → commit → push
-[remote] git pull → uv sync → sbatch
-[remote] (Claude on DelftBlue) analyze results → write analysis_report.md
-[local] git pull → scp analysis_report.md → review → plan next iteration
-```
-
-### One-time DelftBlue setup
-
-On DelftBlue (login node), after the workspace clone:
+### Local (API backend)
 
 ```bash
-# 1. Install uv (DelftBlue docs explicitly endorse this)
-curl -LsSf https://astral.sh/uv/install.sh | sh
+source .venv/bin/activate        # or prefix commands with `uv run`
 
-# 2. Point the uv cache at scratch (avoid filling /home quota)
-echo 'export UV_CACHE_DIR=/scratch/$USER/uv-cache' >> ~/.bashrc
-
-# 3. Sync (includes the gpu extra for accelerate + bitsandbytes)
-cd ~/thesis/rule-mutation
-uv sync --extra gpu
+python scripts/experiments/run_with_rules_map.py \
+  --backend claude --model claude-haiku-4-5 --optimizer ea \
+  --rules-map pipeline_breakdown/rule_retrieval_output/map_qwen32b_python_java.json \
+  --n-cases 8 --iterations 25 \
+  --archive-cap 6 --restart-h 8 --max-depth-ea 4 \
+  --mutators synonym_replacement add_random_word verb_weakening \
+             section_reorder_shuffle section_reorder_degrade \
+             negation_injection voice_change paraphrase \
+  --enable-validation --mutation-max-retries 2 \
+  --languages python --seed 42 \
+  --output-dir experiments/results/local_ea
 ```
 
-The DelftBlue HF cache, Semgrep rules, and SLURM scripts stay where they are
-(`/scratch/$USER/models`, `/scratch/$USER/semgrep-rules/security-audit`, the
-three `scripts/slurm/*.sh` files). SLURM scripts will eventually be migrated
-off conda — tracked as portability item P2.
+Swap `--optimizer random_baseline` (with `--max-mutations-per-iter K`) for the
+ablation. Drop `--enable-validation` to skip the quality recording.
 
-### Per-iteration flow
+### Choosing the model
+
+`--backend` selects the provider; `--model` selects the model within it. If
+`--model` is omitted it defaults per backend (`claude → claude-haiku-4-5`,
+`openai → gpt-4o-mini`, `delftblue → Qwen2.5-Coder-32B-Instruct`). Examples:
 
 ```bash
-# === LOCAL: develop & commit ===
-cd /home/rober/Desktop/Thesis-worskpace/rule-mutation
-# ... edit code, run tests ...
-uv run pytest tests/unit/ -q
-git add -p && git commit -m "..."
-git push
-
-# === DELFTBLUE: pull, sync, submit ===
-ssh delftblue
-cd ~/thesis/rule-mutation
-git pull
-uv sync --extra gpu      # picks up any new deps
-sbatch scripts/slurm/slurm_ea_qwen32b.sh      # or whichever wrapper
-squeue --me              # confirm queued
-
-# === DELFTBLUE: after job completes, run analysis (in a Claude session) ===
-# Paste the contents of analysis_prompts/post_run_analysis.md into Claude Code
-# on DelftBlue, with JOB_IDS filled in. Claude writes analysis_report_<date>.md.
-
-# === LOCAL: pull report ===
-scp 'rnegro@login03.delftblue.tudelft.nl:~/thesis/rule-mutation/analysis_report_*.md' \
-    /home/rober/Desktop/Thesis-worskpace/rule-mutation/
-# (Result trees stay on DelftBlue; only the report comes back. If you want the
-# raw results, see rsync_followup.sh at the workspace root.)
+--backend claude --model claude-sonnet-4-6      # a stronger (pricier) Anthropic model
+--backend openai --model gpt-4o                  # a different OpenAI model
 ```
 
-### What stays on DelftBlue, what comes back
+The chosen model is recorded in `run_config.json` and `hillclimb_summary_*.json`.
 
-| Stays on DelftBlue | Comes back to local |
+### Key flags
+
+| Flag | Meaning |
 |---|---|
-| Raw results (`experiments/results/job*/`) — large (~100–500 MB per run) | The single `analysis_report_*.md` per run |
-| HF model cache (`/scratch/$USER/models/`) | — |
-| Semgrep rules (`/scratch/$USER/semgrep-rules/`) | — |
-| SLURM `.out`/`.err` (`logs/`) | Optionally pulled if a job failed |
-| `uv` venv (`.venv/`) | — (per-host) |
-| `uv.lock` | **YES** — committed and pulled via git |
-| Source changes | **YES** — committed and pulled via git |
+| `--backend {claude,openai,delftblue}` | code-generation provider |
+| `--model NAME` | model within the provider (default resolved per backend) |
+| `--optimizer {ea,random_baseline}` | search strategy |
+| `--rules-map PATH` | prompt → rule-IDs map (pre-computed maps in `pipeline_breakdown/rule_retrieval_output/`) |
+| `--n-cases N`, `--languages …` | size + language filter of the prompt set |
+| `--iterations T` | search budget (one code-gen call per iteration) |
+| `--selection {first,random}` | take the first N cases, or a seeded random N |
+| `--archive-cap`, `--restart-h`, `--max-depth-ea` | EA archive knobs |
+| `--max-mutations-per-iter K` | random-baseline chain-length cap |
+| `--enable-validation`, `--mutation-max-retries` | observational quality recording |
+| `--seed N` | reproducibility |
+| `--dry-run` | wire a mock backend (no API calls) to check the plumbing |
 
-### The analysis prompt
+### DelftBlue (GPU)
 
-The reusable prompt template lives at
-[`analysis_prompts/post_run_analysis.md`](analysis_prompts/post_run_analysis.md).
-Fill in `{{JOB_IDS}}` (and any extra context) before pasting into the DelftBlue
-Claude session. The prompt wraps the existing `analyze-results` skill and pins
-the output structure so reports are comparable across runs.
+The thesis runs used DelftBlue A100 nodes with a local Qwen model. The SLURM
+wrapper `scripts/slurm/slurm_ea_qwen32b.sh` takes env-var overrides and calls
+the same entrypoint with `--backend delftblue`:
+
+```bash
+# Smoke before any big batch
+N_CASES=2 N_ITERATIONS=10 LANGUAGES=python OPTIMIZER=ea \
+  sbatch --time=0:45:00 --job-name="ea_smoke" scripts/slurm/slurm_ea_qwen32b.sh
+
+# Multi-seed batch — paired EA vs random across seeds × languages (12 jobs)
+for SEED in 1 7 123; do
+  for OPT in ea random_baseline; do
+    for LANG in python java; do
+      SEED=$SEED OPTIMIZER=$OPT N_CASES=25 N_ITERATIONS=200 LANGUAGES=$LANG SELECTION=random \
+        sbatch --time=12:00:00 --job-name="${OPT}_${LANG}_s${SEED}" \
+               scripts/slurm/slurm_ea_qwen32b.sh
+    done
+  done
+done
+```
+
+GPU environment setup (CUDA torch, the offline HF model cache, the local Semgrep
+rule directory) is host-specific and outside this guide; the wrapper's header
+documents the env vars it reads.
 
 ---
 
-## Basic Workflow
+## 2. Monitoring a run
 
-### 1. Prepare Test Cases
-
-Experiments require test prompts from the CyberSecEval dataset. You can either:
-
-**Option A: Use pre-screened interesting cases**
-```bash
-# Use existing JSON file with curated test cases
---interesting-cases path/to/interesting_cases.json
-```
-
-### 2. Create Rule Mapping
-
-Rules are mapped to prompts using the local retrieval script:
+The script logs a per-iteration line and a generation heartbeat. For a SLURM job:
 
 ```bash
-# Generate mapping (uses local Qwen model to select rules per prompt)
-python pipeline_breakdown/rule_retrieval_mapping_local.py \
-    --input interesting_cases.json \
-    --output rule_mapping.json
+squeue --me                          # queued / running
+tail -f logs/<JOBID>_*.out           # live progress
 ```
 
-This script performs agent-like rule retrieval and saves a map between specific test prompts and the CodeGuard rules selected as relevant. Pre-computed maps are in `pipeline_breakdown/rule_retrieval_output/`.
+### Did Semgrep actually run? (clean scan vs. failed scan)
 
-### 3. Run Experiment
-
-Execute the hill climbing optimization:
+A finding count of 0 can mean two very different things: the generated code is
+clean, **or** Semgrep failed to run (e.g. not on PATH). They are
+distinguishable because every scan writes a record to
+`semgrep_debug/semgrep_debug.jsonl` with an `error` field — `null` on success,
+a message on failure. This one-liner counts each:
 
 ```bash
-python scripts/experiments/run_with_rules_map.py \
-    --interesting-cases data/interesting_cases.json \
-    --rules-map data/rule_mapping.json \
-    --n-cases 10 \
-    --model llama-3.3-70b-versatile \
-    --iterations 5 \
-    --output-dir results/exp_001 \
-    --seed 42
+python3 - <<'PY'
+import json
+recs = [json.loads(l) for l in open("experiments/results/<run>/semgrep_debug/semgrep_debug.jsonl")]
+clean   = sum(r["error"] is None for r in recs)
+errored = sum(r["error"] is not None for r in recs)
+print(f"{clean} clean scans, {errored} errored")
+PY
 ```
 
-**Parameters:**
-- `--n-cases`: Number of test cases to evaluate (None = all)
-- `--model`: LLM model identifier
-- `--iterations`: Hill climbing iterations (baseline + N mutations)
-- `--seed`: Random seed for reproducibility
-- `--dry-run`: Test without API calls
-
-### 4. Monitor Progress
-
-The script provides real-time logging:
-
-```
-Test case → Rules mapping:
-   [1] TC#3 (c, CWE-120): 4 rules
-       • cg-0-safe-c-functions
-       • cg-0-input-validation-injection
-       • cg-0-file-handling-and-uploads
-       • cg-0-logging
-
-📊 Evaluating with original rules...
-   [1/10] Evaluating TC#3...
-       → Fitness: 6.0, Vulns: 2
-   [2/10] Evaluating TC#5...
-       → Fitness: 0.0, Vulns: 0
-```
-
-### 5. Analyze Results
-
-After completion, check the output directory:
-
-```bash
-ls -R results/exp_001/
-
-# mutated_rules/         - Saved mutated rule files
-# intermediate_results/  - Per-prompt evaluation details
-# hillclimb_summary_*.json
-# per_prompt_rules_results_*.json
-```
+`errored == 0` means Semgrep ran on every sample (so a 0 finding count is a
+genuine "clean code" result). Any errored records mean Semgrep itself failed —
+the usual cause is `semgrep` not being on PATH (activate the venv / use
+`uv run` / prefix `PATH="$PWD/.venv/bin:$PATH"`).
 
 ---
 
-## Understanding Results
+## 3. Reproducing a run
 
-### Fitness Scores
+Every run dir has a `rerun.sh` that delegates to
+`scripts/experiments/rerun_from_config.py`, which reads `run_config.json` and
+dispatches by backend:
 
-**Higher fitness = More vulnerabilities = Worse security**
-
-The hill climber maximizes fitness to find adversarial mutations.
-
-```
-Baseline fitness: 12.0  (original rules)
-Mutation fitness: 18.0  (mutated rules)
-→ Mutation increased vulnerabilities by 6.0 (50% increase)
+```bash
+bash experiments/results/<run>/rerun.sh --print          # show the command, don't run
+bash experiments/results/<run>/rerun.sh                  # reproduce as originally run
+bash experiments/results/<run>/rerun.sh --output-dir experiments/results/rerun_x   # override out dir
 ```
 
-### Intermediate Results
-
-Each prompt evaluation is saved immediately:
-
-```json
-{
-  "test_case_id": 3,
-  "language": "c",
-  "cwe_id": "CWE-120",
-  "phase": "mutation",
-  "rules_used": {
-    "original_rule_ids": ["codeguard-0-safe-c-functions", ...],
-    "mutated_rule_file": "mutated_rules/iter1_tc3_rules2.md"
-  },
-  "fitness": {
-    "raw_count": 2,
-    "weighted_score": 6.0,
-    "error_count": 2,
-    "check_ids": ["c.lang.security.insecure-use-gets-fn"]
-  }
-}
-```
-
-**Key Fields:**
-- `phase`: "baseline" (original rules) or "mutation" (mutated rules)
-- `rules_used`: Traceability to which rules were applied
-- `fitness.weighted_score`: Primary metric (ERROR=3, WARNING=1)
-- `check_ids`: Specific Semgrep rules triggered
-
-### Mutated Rules
-
-Saved mutations show exactly what changed:
-
-```markdown
-# Mutated Rules for Test Case 3
-
-**Iteration:** 1
-**Original Rules Combined:** 2
-- codeguard-0-safe-c-functions
-- codeguard-0-input-validation-injection
+API runs re-invoke the python entrypoint; DelftBlue runs map the recorded args
+back to the SLURM wrapper's env vars (`--as delftblue` to force that form).
 
 ---
 
-### Guidelines for Code Structure v2.4
-While functionality is key, we suggest glancing at security if time permits.
+## 4. Understanding results
 
----
+### The three objectives (all maximised, over the prompts that use the rule)
 
-# Prioritize Safe Memory and String Functions in C/C++
+- **f1 = `total_semgrep_delta`** — extra Semgrep findings vs. baseline (primary).
+- **f2 = `proportion_divergent`** — fraction of affected prompts whose generated code changed (`code_divergence > 0`).
+- **f3 = `conditional_mean_divergence`** — mean code divergence among those that changed.
 
-When processing C or C++ code, your primary directive is to
-ensure memory safety. Actively identify, flag, and provide
-secure refactoring options...
-[rest of mutated rule text]
+Higher f1 = the mutation made the LLM write more vulnerable code. f2/f3 capture
+whether the mutation changed the generated code *at all* — useful when Semgrep
+finds nothing but the output still shifted.
+
+### Reading a run with the analysis toolkit
+
+```bash
+uv sync --extra dev --extra analysis     # combine extras (see the uv note in the README)
+
+# Per run: RQ1 (per-rule + per-prompt baseline-vs-best, Wilcoxon/McNemar),
+#          RQ2 (per-mutator effective rate + bootstrap CI), convergence, cost + hygiene
+python scripts/analyze/analyze_run.py experiments/results/<run>
+
+# Across runs: RQ3 (EA vs random, paired sign/Wilcoxon), multi-seed median+IQR
+python scripts/analyze/compare_runs.py experiments/results/
+
+# Validation audit (only for --enable-validation runs): per-criterion fail rate,
+#   per-mutator pass rate, "what if we had gated" simulation
+python scripts/analyze/validation_audit.py experiments/results/<val_run>
+```
+
+Each per-run script writes `summary.md` + CSVs + PNGs into `<run>/analysis/`.
+
+### Quick manual peek at the trajectory
+
+```bash
+python3 - <<'PY'
+import json
+for l in open("experiments/results/<run>/iterations.jsonl"):
+    r = json.loads(l)
+    print(r["iter"], r["strategy"], "n="+str(r["chain_length"]),
+          "f1="+str(r["f1"]), "acc="+str(r["accepted"]), "+".join(r["mutation_chain"]))
+PY
 ```
 
 ---
 
-## Rate Limit Handling
+## 5. Rate limits and partial runs
 
-If you hit API rate limits mid-experiment:
-
-**What Happens:**
-- Script detects 429/413 error codes
-- Saves all intermediate results collected so far
-- Exits gracefully with summary of completed work
-
-**Example Output:**
-```
-⚠️  Rate limit hit at iteration 2
-   Error: Rate limit reached for model `llama-3.3-70b-versatile`
-   
-Completed iterations: 1/5
-Original fitness: 12.0
-Best fitness: 15.0
-```
-
-**Resume Strategy:**
-1. Wait for rate limit reset (check error message for time)
-2. OR switch to smaller model (`llama-3.1-8b-instant`)
-3. OR reduce `--n-cases` to fit within daily token budget
+API backends can hit 429/529; a SLURM job can hit its wall-time. In both cases
+the per-iteration writer appends atomically, so `iterations.jsonl` and the
+already-written `intermediate/*.jsonl` are intact up to the cut-off. The run
+summary and `run_config.json` are written at the very end, so a killed run may
+lack them (the data is still there). To finish a shorter run, lower `--n-cases`
+/ `--iterations`, or wait and re-run.
 
 ---
 
-## Experiment Patterns
+## 6. Troubleshooting
 
-### Small-Scale Test (Fast)
-
-```bash
-# 2 cases, 1 iteration, small model
-python scripts/experiments/run_with_rules_map.py \
-    --interesting-cases data/cases.json \
-    --rules-map data/mapping.json \
-    --n-cases 2 \
-    --model llama-3.1-8b-instant \
-    --iterations 1 \
-    --output-dir test_results
-```
-
-**Use Case:** Validate pipeline, test new mutation strategy
-
-### Full Experiment (Production)
-
-```bash
-# All cases, 5 iterations, large model
-python scripts/experiments/run_with_rules_map.py \
-    --interesting-cases data/cases.json \
-    --rules-map data/mapping.json \
-    --model llama-3.3-70b-versatile \
-    --iterations 5 \
-    --output-dir results/full_exp
-```
-
-**Use Case:** Final data collection for research
-
-### CWE-Specific Analysis
-
-```bash
-# Filter cases, target specific vulnerability class
-python scripts/experiments/run_with_rules_map.py \
-    --interesting-cases data/cases.json \
-    --rules-map data/mapping.json \
-    --diff-types rules_helped rules_hurt \
-    --model llama-3.3-70b-versatile \
-    --iterations 3 \
-    --output-dir results/cwe_analysis
-```
-
-**Use Case:** Deep dive into specific vulnerability patterns
+| Symptom | Cause | Fix |
+|---|---|---|
+| Findings all 0 **and** `semgrep_debug` shows errored scans | `semgrep` not on PATH | activate the venv / `uv run` / `PATH="$PWD/.venv/bin:$PATH"` |
+| `pytest` gone after `uv sync --extra analysis` | uv pruned the `dev` extra | `uv sync --extra dev --extra analysis` (combine extras) |
+| `FileNotFoundError: project-codeguard/...` | submodule not initialised | `git submodule update --init --recursive` |
+| `No matching prompts in rule mapping` | the rules map doesn't match the dataset slice | use a committed map under `pipeline_breakdown/rule_retrieval_output/` |
+| `WARNING: no reference data-flows extracted` (only visible in old logs) | CodeBLEU can't parse a few prompts | harmless and **silenced by default** (root-logger filter in `composite_fitness.py`); that prompt's divergence omits the data-flow sub-score. Findings unaffected. |
 
 ---
 
-## Troubleshooting
+## 7. Best practices
 
-### "No matching prompts in rule mapping"
-
-**Cause:** Prompt hash mismatch between cases file and mapping file
-
-**Solution:** Regenerate rule mapping from the same interesting_cases.json
-
-### "Rate limit exceeded"
-
-**Cause:** Daily token quota exhausted
-
-**Solutions:**
-- Wait for reset (check error message)
-- Use smaller model (llama-3.1-8b-instant has 500K TPD vs 100K TPD)
-- Reduce `--n-cases`
-
-### "Semgrep error"
-
-**Cause:** Generated code has syntax errors or unsupported language
-
-**Solution:** Check `intermediate_results/` for the failing prompt, inspect generated code
-
-### "FileNotFoundError: rule not found"
-
-**Cause:** Rule mapping references rule ID that doesn't exist
-
-**Solution:** Verify all rule IDs in mapping exist in `project-codeguard/skills/software-security/rules/`
-
----
-
-## Next Steps
-
-After running experiments:
-
-1. **Aggregate Results:** Use analysis scripts (when available) to compute:
-   - Per-CWE vulnerability rates
-   - Per-rule effectiveness rankings
-   - Mutation impact statistics
-
-2. **Visualize:** Generate plots showing:
-   - Fitness over iterations
-   - Baseline vs. mutation comparison
-   - Vulnerability distribution by severity
-
-3. **Iterate:** Based on findings, adjust:
-   - Mutation strategies (add new operators)
-   - Rule selection (refine AI agent prompts)
-   - Test case coverage (expand CWE types)
-
----
-
-## Best Practices
-
-### Reproducibility
-
-Always set `--seed` for deterministic mutations:
-```bash
---seed 42
-```
-
-### Resource Management
-
-- Use `--dry-run` to validate config before expensive API calls
-- Start with `--n-cases 2` to test new mutations
-- Monitor token usage with smaller model first
-
-### Data Organization
-
-Structure output directories by experiment type:
-```
-results/
-├── baseline_runs/
-├── mutation_strategy_comparison/
-├── cwe_specific/
-└── model_comparison/
-```
-
-### Documentation
-
-Save experiment metadata alongside results:
-```bash
-echo "Model: llama-3.3-70b, Seed: 42, Date: 2026-03-02" > results/exp_001/metadata.txt
-```
+- **Always `--seed`.** It fixes the mutator draws and the search trajectory.
+- **Smoke first.** `--dry-run` (mock backend) checks the plumbing for free; a 2-case/5-iter real smoke checks the backend + Semgrep before a big batch.
+- **One run tree per (strategy, language, seed).** The analysis scripts key on `run_config.json`; keep runs in separate `--output-dir`s.
+- **Check `semgrep_debug` once per new environment** (§2) to confirm Semgrep actually ran, not just that findings were 0.
