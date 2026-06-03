@@ -120,4 +120,6 @@ target-version = "py311"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
-addopts = "-q --tb=short"
+# No -q here: a bare `pytest` (or `pytest -q`) keeps the "N passed in Xs" summary.
+# Adding -q on the CLI on top of a -q here would stack to -qq, which suppresses it.
+addopts = "--tb=short"
