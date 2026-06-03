@@ -15,19 +15,62 @@ and lets a search strategy decide what to keep.
 
 ```mermaid
 flowchart TD
-    R[CodeGuard rule] --> M[Mutator&#40;s&#41;]
-    M --> V[Quality validator<br/>observational soft gate]
-    V --> MR[mutated rule]
-    MR --> A[assemble into each prompt<br/>that uses the rule]
-    A --> LLM[LLM backend<br/>Claude / OpenAI / local Qwen]
-    LLM --> C[generated code]
-    C --> SG[Semgrep]
-    C --> CB[CodeBLEU vs. baseline code]
-    SG --> F[aggregate fitness<br/>f1, f2, f3]
-    CB --> F
-    F --> S{search strategy}
-    S -->|EA: offer to Pareto archive| M
-    S -->|random: log, restart from original| M
+    %% ===== Inputs =====
+    R[("CodeGuard rules R")]
+    P[("Test prompts P<br/>CyberSecEval")]
+
+    %% ===== Rule parsing / safe-zone contract =====
+    R --> RP[Rule parser]
+    RP -->|YAML frontmatter +<br/>fenced code blocks| SZ[Safe zone<br/>immutable]
+    RP -->|Prose directives| MZ[Mutable prose]
+
+    %% ===== Strategy split: parent selection =====
+    MZ --> STRAT{Search strategy}
+    STRAT -->|EA| ARC[("Per-rule Pareto archive")]
+    STRAT -->|random baseline| ORIG[Original rule text<br/>parent every iteration]
+    ARC -->|sample eligible parent| MUT[Mutator pool<br/>8 operators]
+    ORIG -->|sample n-mutator chain| MUT
+
+    %% ===== Mutator pool =====
+    MUT -->|rule-based| MB[synonym, add_random_word,<br/>section_reorder shuffle/degrade,<br/>verb_weakening]
+    MUT -->|LLM-based| LB[paraphrase, voice_change,<br/>negation_injection]
+    MB --> QV[Quality validation<br/>record 5 criteria]
+    LB --> QV
+    QV --> ASM[Reassemble<br/>safe zone + mutated prose]
+
+    %% ===== Fitness evaluation =====
+    ASM --> LLM[LLM backend<br/>code generation]
+    P --> LLM
+    LLM --> CODE[Generated code<br/>per prompt]
+    CODE --> SG[Semgrep<br/>static analysis]
+    CODE --> CB[CodeBLEU<br/>divergence vs<br/>baseline code]
+    SG --> FIT["Fitness aggregation<br/>f1 semgrep delta<br/>f2 proportion divergent<br/>f3 cond. mean divergence"]
+    CB --> FIT
+
+    %% ===== Acceptance: strategy-dependent =====
+    FIT --> ACC{Search strategy}
+    ACC -->|EA| TA{Identity? Dominated?}
+    ACC -->|random baseline| LOG[Log iteration<br/>record unconditionally]
+    LOG --> ORIG
+    TA -->|non-dominated| INS[Insert<br/>evict dominated members]
+    TA -->|identity OR dominated| REJ[Reject<br/>increment stagnation counter]
+    INS --> ARC
+    REJ --> ARC
+
+    %% ===== Restart triggers (EA only) =====
+    ARC -->|stagnation / depth /<br/>mutator exhausted| RST[Snapshot to restart_history<br/>Reseed with original rule]
+    RST --> ARC
+
+    %% ===== Styling =====
+    classDef input fill:#e1f5fe,stroke:#0277bd,color:#000
+    classDef archive fill:#fff3e0,stroke:#ef6c00,color:#000
+    classDef llm fill:#f3e5f5,stroke:#7b1fa2,color:#000
+    classDef metric fill:#e8f5e9,stroke:#2e7d32,color:#000
+
+    class R,P input
+    class ARC archive
+    class LLM llm
+    class FIT,SG,CB metric
 ```
 
 The mutator(s), validator, backend, and scorers are fixed; only the **search
@@ -38,8 +81,8 @@ strategy** differs between the two configurations
 
 1. **Select** prompts from CyberSecEval (a language / count filter, seeded).
 2. **Map** each prompt to the CodeGuard rules relevant to it (pre-computed retrieval maps under `pipeline_breakdown/rule_retrieval_output/`).
-3. **Mutate** the target rule with one or more of the 8 mutators, respecting the *safe-zone contract* (frontmatter, fenced code, and inline code are never touched).
-4. **Validate** the mutation against five quality criteria — *observational*: the metadata is recorded, but no candidate is ever rejected.
+3. **Mutate** the target rule with one of the 8 mutators, respecting the *safe-zone contract* (frontmatter, fenced code, and inline code are never touched).
+4. **Validate** the mutation against five quality criteria — *observational*: the metadata is recorded for post-run analysis.
 5. **Generate** code for every prompt that uses the rule, under the original rule (baseline, once) and under the mutated rule.
 6. **Score** each prompt: Semgrep severity-weighted finding count, and code divergence `1 − CodeBLEU(generated, baseline-generated)`.
 7. **Search**: aggregate the per-prompt scores into three objectives and let the strategy drive the next mutation.
