@@ -127,7 +127,14 @@ class SynonymReplacementMutator(Mutator):
     def _get_aug(self):
         if self._aug is None:
             try:
-                import nlpaug.augmenter.word as naw  # type: ignore
+                # nlpaug 1.1.x ships regex string literals with unescaped \s
+                # (context_word_embs.py), which Python 3.12 flags as
+                # SyntaxWarning at import. We only use the WordNet SynonymAug,
+                # never ContextualWordEmbsAug — suppress the noise.
+                import warnings
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", SyntaxWarning)
+                    import nlpaug.augmenter.word as naw  # type: ignore
                 self._aug = naw.SynonymAug(aug_src="wordnet", aug_p=self.aug_p)
             except ImportError as exc:
                 raise ImportError(
