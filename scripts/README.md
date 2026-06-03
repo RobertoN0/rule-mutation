@@ -1,46 +1,48 @@
 # Scripts layout (rule-mutation)
 
-This folder is now grouped by script type.
+This folder is grouped by script type.
 
 ## experiments/
 - run_with_rules_map.py: Main experiment runner (current production path).
-- run_batched_experiment.py: Batch-oriented runner (useful for broader sweeps; currently secondary).
-- run_mvp.py: Early MVP runner based on Groq flow (keep for regression/baseline checks).
 
 Run as:
 - `python scripts/experiments/run_with_rules_map.py`
-- `python scripts/experiments/run_batched_experiment.py`
-- `python scripts/experiments/run_mvp.py`
 
 Why needed:
-- Keeps core experiment entry points separate from validation and ops utilities.
+- Keeps core experiment entry point separate from validation and ops utilities.
+
+## experiments/ (reproduction)
+- rerun_from_config.py: reproduce a run from its `run_config.json` (API backend →
+  re-invoke the python entrypoint; delftblue → `sbatch` the SLURM wrapper). Each
+  run also writes a thin `rerun.sh` wrapper around this.
 
 ## slurm/
-- slurm_rules_map_qwen32b.sh: Main SBATCH launcher for local DelftBlue execution.
+- slurm_ea_qwen32b.sh: SBATCH launcher for the (1+1) EA and random_baseline optimizers.
+- slurm_rule_retrieval_local.sh: SBATCH launcher for the rule-retrieval pipeline.
+
+Run as:
+- `sbatch scripts/slurm/slurm_ea_qwen32b.sh`
 
 Why needed:
 - Encapsulates cluster resource config and reproducible runtime setup.
+
+## analyze/ (report figures + tables — needs the `analysis` extra)
+- analyze_run.py: single run → RQ1 (per-rule + per-prompt baseline-vs-best,
+  Wilcoxon/McNemar), RQ2 (per-mutator effective rate + bootstrap CI), convergence,
+  cost + cache/search hygiene.
+- compare_runs.py: many runs → RQ3 (per-seed best f1, paired sign test,
+  convergence band), RQ2 EA-vs-random, cost, multi-seed aggregation.
+- validation_audit.py: per-criterion fail rate, per-mutator pass rate, what-if-gated
+  (needs `--enable-validation` runs).
+- migrate_legacy_run.py: bridge a pre-schema-2 run so the above can read it
+  (reconstructs iterations.jsonl + intermediate/; RQ1/RQ3 only).
+- loaders.py / stats.py: shared loaders + scipy stat helpers.
+
+Run as (install once: `uv sync --extra analysis`):
+- `python scripts/analyze/analyze_run.py <run_dir>`
 
 ## setup/
 - download_semgrep_security_audit_rules.sh: One-time/periodic local Semgrep rules bootstrap.
 
 Why needed:
 - Required for offline/consistent Semgrep scans on compute nodes.
-
-## validation/
-- test_components.py: Quick component sanity checks.
-- validate_groq.py: Groq API validation and limits sanity check.
-
-Run as:
-- `python scripts/validation/test_components.py`
-- `python scripts/validation/validate_groq.py`
-
-Why needed / not needed:
-- test_components.py is useful pre-flight after refactors.
-- validate_groq.py is optional if running only local models; keep for API baseline comparisons.
-
-## slurm/
-- slurm_rules_map_qwen32b.sh: SLURM launcher for local DelftBlue runs.
-
-Run as:
-- `sbatch scripts/slurm/slurm_rules_map_qwen32b.sh`

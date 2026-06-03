@@ -11,6 +11,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 from dataclasses import dataclass, field
@@ -18,16 +19,63 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
+# Resolve the `semgrep` executable once. Prefer PATH (covers an activated venv
+# or a system install), then fall back to the bin dir of the running Python
+# interpreter — so the pipeline still finds Semgrep when launched via
+# `.venv/bin/python` WITHOUT `source .venv/bin/activate` (which would otherwise
+# leave `.venv/bin` off PATH and make every scan fail with "not installed").
+_semgrep_exe: str | None = None
+
+
+def _resolve_semgrep_executable() -> str:
+    global _semgrep_exe
+    if _semgrep_exe is not None:
+        return _semgrep_exe
+    found = shutil.which("semgrep")
+    if not found:
+        candidate = Path(sys.executable).parent / "semgrep"
+        found = str(candidate) if candidate.exists() else "semgrep"
+    _semgrep_exe = found
+    return found
+
+
 # Language → file extension mapping for Semgrep temp-file naming
 LANG_EXTENSIONS: dict[str, str] = {
     "python": ".py",
     "javascript": ".js",
+    "typescript": ".ts",
     "java": ".java",
     "c": ".c",
     "cpp": ".cpp",
     "php": ".php",
     "rust": ".rs",
     "csharp": ".cs",
+    "go": ".go",
+    "ruby": ".rb",
+    "kotlin": ".kt",
+    "scala": ".scala",
+}
+
+# Language → subdirectory name inside a local Semgrep rules directory.
+# When the configured ruleset is a local directory that contains per-language
+# subdirectories (e.g. security-audit/python/, security-audit/javascript/),
+# we pass only the relevant subdirs via separate --config flags.  This avoids
+# loading thousands of YAML files for unrelated languages, dramatically
+# reducing cold-start I/O on network filesystems like Lustre.
+_LANG_SUBDIR: dict[str, str] = {
+    "python": "python",
+    "javascript": "javascript",
+    "typescript": "typescript",
+    "java": "java",
+    "c": "c",
+    "cpp": "cpp",
+    "php": "php",
+    "rust": "rust",
+    "csharp": "csharp",
+    "go": "go",
+    "ruby": "ruby",
+    "kotlin": "kotlin",
+    "scala": "scala",
 }
 
 # Default Semgrep ruleset for security analysis
@@ -90,6 +138,43 @@ def _resolve_rule_config(rule_config: str | None) -> str:
     if config.startswith(("~", ".", "/")):
         return str(candidate.resolve())
     return config
+
+
+def _resolve_lang_aware_config_args(
+    rule_config: str | None,
+    languages: set[str],
+) -> list[str]:
+    """Return the list of ``--config <value>`` argument *values* for a batch.
+
+    When *rule_config* resolves to a local directory and every language in
+    *languages* has a corresponding subdirectory inside that directory, we
+    return one path per language-specific subdir.  This dramatically reduces
+    the number of YAML files Semgrep must parse (e.g. python + javascript ≈
+    410 files instead of 1382 for the full security-audit tree) and avoids
+    cold-start I/O timeouts on Lustre / network filesystems.
+
+    Falls back to ``[resolved_config]`` (the full directory) whenever:
+    - the config is a remote ruleset (e.g. ``p/security-audit``)
+    - the resolved path is not a directory
+    - any language in *languages* lacks a matching subdir
+    """
+    resolved = _resolve_rule_config(rule_config)
+    base = Path(resolved)
+
+    if not base.is_dir():
+        return [resolved]  # Remote ruleset or single YAML file — pass as-is.
+
+    lang_paths: list[str] = []
+    for lang in sorted(languages):
+        subdir_name = _LANG_SUBDIR.get(lang)
+        if subdir_name is None:
+            continue  # Unknown language — no subdir exists, skip it.
+        subdir = base / subdir_name
+        if not subdir.is_dir():
+            continue  # Subdir missing (e.g. cpp) — skip rather than load all rules.
+        lang_paths.append(str(subdir))
+
+    return lang_paths if lang_paths else [resolved]
 
 
 def configure_semgrep_debug(debug_dir: "Path | str | None") -> None:
@@ -254,7 +339,8 @@ def run_semgrep(
     if severity_filter is None:
         severity_filter = DEFAULT_SEVERITY_FILTER
 
-    resolved_rule_config = _resolve_rule_config(rule_config)
+    config_args = _resolve_lang_aware_config_args(rule_config, {language})
+    resolved_rule_config = config_args[0]  # used for debug logging / error messages
 
     # Preserve the raw LLM output for debug logging, then optionally strip fences.
     code_original = code_content
@@ -278,9 +364,10 @@ def run_semgrep(
             )
         return sem_result
 
-    if resolved_rule_config.startswith(("/", ".", "~")) and not Path(resolved_rule_config).exists():
+    base_config = _resolve_rule_config(rule_config)
+    if base_config.startswith(("/", ".", "~")) and not Path(base_config).exists():
         sem_result = SemgrepResult(
-            error=f"Local Semgrep config not found: {resolved_rule_config}"
+            error=f"Local Semgrep config not found: {base_config}"
         )
         if write_debug:
             _write_semgrep_debug(
@@ -299,10 +386,13 @@ def run_semgrep(
             tmp.write(code_content)
             tmp_path = tmp.name
 
+        config_flags: list[str] = []
+        for c in config_args:
+            config_flags.extend(["--config", c])
         semgrep_command = [
-            "semgrep",
+            _resolve_semgrep_executable(),
             "scan",
-            "--config", resolved_rule_config,
+            *config_flags,
             "--json",
             "--disable-version-check",
             "--metrics", "off",
@@ -382,7 +472,9 @@ def run_semgrep_batch_dir(
     if not code_samples:
         return []
 
-    resolved_rule_config = _resolve_rule_config(rule_config)
+    languages = {lang for _, lang in code_samples}
+    config_args = _resolve_lang_aware_config_args(rule_config, languages)
+    resolved_rule_config = config_args[0]  # used for debug logging / error messages
     timeout = _semgrep_subprocess_timeout_seconds * len(code_samples)
 
     # Pre-process: strip fences, mark empty samples as None
@@ -391,6 +483,24 @@ def run_semgrep_batch_dir(
         if strip_fences:
             code = strip_markdown_fences(code)
         codes_cleaned.append(code if code.strip() else None)
+
+    # proc/cmd are filled in once the subprocess runs; they stay None on the
+    # error paths that never reach it (config missing, semgrep not installed).
+    proc: "subprocess.CompletedProcess | None" = None
+    cmd: list[str] | None = None
+
+    def _debug_all(results: list["SemgrepResult"]) -> None:
+        """Write one debug record per sample — covers the success path AND every
+        error path, so a failed/aborted scan always leaves a trace (a record
+        with a non-null ``error``) that is distinguishable from a clean scan
+        with zero findings (``error`` null, ``findings_count`` 0)."""
+        for i, sem_result in enumerate(results):
+            code_raw, lang = code_samples[i]
+            cleaned = codes_cleaned[i] if i < len(codes_cleaned) else None
+            _write_semgrep_debug(
+                code_raw, cleaned or "", lang, resolved_rule_config,
+                cleaned != code_raw, proc, sem_result, cmd,
+            )
 
     tmpdir = tempfile.mkdtemp()
     try:
@@ -407,18 +517,26 @@ def run_semgrep_batch_dir(
             idx_to_path[idx] = filepath
 
         if not idx_to_path:
-            return [SemgrepResult(error="Empty code content") for _ in code_samples]
+            results = [SemgrepResult(error="Empty code content") for _ in code_samples]
+            _debug_all(results)
+            return results
 
+        base_config = _resolve_rule_config(rule_config)
         if (
-            resolved_rule_config.startswith(("/", ".", "~"))
-            and not Path(resolved_rule_config).exists()
+            base_config.startswith(("/", ".", "~"))
+            and not Path(base_config).exists()
         ):
-            err = SemgrepResult(error=f"Local Semgrep config not found: {resolved_rule_config}")
-            return [err] * len(code_samples)
+            err = SemgrepResult(error=f"Local Semgrep config not found: {base_config}")
+            results = [err] * len(code_samples)
+            _debug_all(results)
+            return results
 
+        config_flags: list[str] = []
+        for c in config_args:
+            config_flags.extend(["--config", c])
         cmd = [
-            "semgrep", "scan",
-            "--config", resolved_rule_config,
+            _resolve_semgrep_executable(), "scan",
+            *config_flags,
             "--json",
             "--disable-version-check",
             "--metrics", "off",
@@ -431,10 +549,12 @@ def run_semgrep_batch_dir(
 
         if not proc.stdout.strip():
             err = SemgrepResult(error=proc.stderr or "Semgrep returned no output")
-            return [
+            results = [
                 err if i in idx_to_path else SemgrepResult(error="Empty code content")
                 for i in range(len(code_samples))
             ]
+            _debug_all(results)
+            return results
 
         data = json.loads(proc.stdout)
 
@@ -465,32 +585,28 @@ def run_semgrep_batch_dir(
             for i in range(len(code_samples))
         ]
 
-        for i, sem_result in enumerate(results):
-            code_raw, lang = code_samples[i]
-            _write_semgrep_debug(
-                code_raw,
-                codes_cleaned[i] or "",
-                lang,
-                resolved_rule_config,
-                codes_cleaned[i] != code_raw,
-                proc,
-                sem_result,
-                cmd,
-            )
-
+        _debug_all(results)
         return results
 
     except subprocess.TimeoutExpired:
         err = SemgrepResult(error=f"Semgrep batch timed out ({timeout}s)")
-        return [err] * len(code_samples)
+        results = [err] * len(code_samples)
+        _debug_all(results)
+        return results
     except json.JSONDecodeError as e:
         err = SemgrepResult(error=f"Failed to parse Semgrep output: {e}")
-        return [err] * len(code_samples)
+        results = [err] * len(code_samples)
+        _debug_all(results)
+        return results
     except FileNotFoundError:
         err = SemgrepResult(error="Semgrep not installed or not in PATH")
-        return [err] * len(code_samples)
+        results = [err] * len(code_samples)
+        _debug_all(results)
+        return results
     except Exception as e:
         err = SemgrepResult(error=f"Unexpected error: {e}")
-        return [err] * len(code_samples)
+        results = [err] * len(code_samples)
+        _debug_all(results)
+        return results
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)

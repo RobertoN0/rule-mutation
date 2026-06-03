@@ -1,0 +1,125 @@
+[project]
+name = "codeguard-sbst"
+version = "0.1.0"
+description = "Search-Based Software Testing for Security Coding Guidelines (thesis replication package)"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+license = { text = "MIT" }
+authors = [
+    { name = "Roberto Negro", email = "roberto.negro.02@gmail.com" },
+]
+
+dependencies = [
+    # LLM provider SDKs — the replication path uses these directly
+    "openai>=1.50,<2",
+    "anthropic>=0.40,<1",
+
+    # Static analysis
+    # Pinned to 1.85.0 for DelftBlue compatibility: newer wheels (>=1.130) require
+    # manylinux_2_35, but DelftBlue ships glibc 2.28 (manylinux_2_28). 1.85.0 has the
+    # last compatible wheel that still supports all rules we use.
+    "semgrep==1.85.0",
+
+    # Datasets and tabular data
+    "datasets>=3.0,<5",
+    # fsspec pinned to <=2026.2.0 because datasets declares fsspec[http]<=2026.2.0 but uv
+    # resolves the latest release (2026.4.0+). Without this pin, `uv pip check` emits a
+    # conflict. Upper-bound lag in the datasets package — unrelated to our code.
+    "fsspec==2026.2.0",
+    "pandas>=2.0,<3",
+
+    # Config / IO
+    "pyyaml>=6.0,<7",
+    "python-dotenv>=1.0,<2",
+    "pydantic>=2.0,<3",
+
+    # Mutation quality validation (bd-03k)
+    # torch is listed explicitly so [tool.uv.sources] below can pin it to PyTorch's
+    # CPU wheel index. Sources only apply to direct deps, not transitives — without
+    # this line, sentence-transformers pulls the default ~8 GB CUDA wheel on Linux.
+    "torch>=2.0,<3",
+    "sentence-transformers>=2.2",
+    "textstat>=0.7",
+
+    # Function-based mutators (bd-03k)
+    "nlpaug>=1.1.11",
+    "nltk>=3.8",
+
+    # Code divergence metric (bd-03k Change 3) — CodeBLEU + tree-sitter grammars.
+    # IMPORTANT: codebleu==0.7.0 wants tree-sitter <0.23 internally but does NOT pull
+    # in the per-language grammars. Pinning the grammars to <0.22 keeps codebleu's
+    # bundled tree-sitter==0.22.x compatible. Without this, codebleu silently falls
+    # back to token-BLEU with a misleading "codebleu not installed" message.
+    "codebleu==0.7.0",
+    "tree-sitter-c<0.22",
+    "tree-sitter-python<0.22",
+    "tree-sitter-java<0.22",
+]
+
+[project.optional-dependencies]
+
+# DelftBlue / CUDA hosts: GPU-accelerated inference with quantization.
+# After `uv sync --extra gpu`, swap torch to a CUDA wheel manually:
+#     uv pip install --reinstall --index-url https://download.pytorch.org/whl/cu126 torch
+# This avoids encoding a CUDA toolkit version in the lockfile that would force the
+# wheel on every replicator's box.
+gpu = [
+    "accelerate>=0.34,<2",
+    "bitsandbytes>=0.43,<1",
+]
+
+# Rule-retrieval scripts (build retrieval_map JSONs from raw CodeGuard rules).
+# Optional because pre-computed maps in pipeline_breakdown/rule_retrieval_output/ let
+# replicators skip this step entirely.
+retrieval = [
+    "langchain>=0.3,<0.4",
+    "langchain-openai>=0.3,<0.4",
+    "langgraph>=0.2,<0.4",
+    "mcp>=1.0,<2",
+    "nest-asyncio>=1.6,<2",
+]
+
+# Result analysis + report figure generation. Run locally on downloaded results;
+# kept optional so the DelftBlue / GPU experiment runtime stays lean (it never plots).
+analysis = [
+    "matplotlib>=3.7,<4",
+    "scipy>=1.10,<2",
+]
+
+# Development + testing
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+# Pin torch (pulled transitively by sentence-transformers) to PyTorch's CPU wheel
+# index. ~5 GB savings vs the default CUDA wheel on Linux.
+# DelftBlue overrides this after `uv sync --extra gpu` — see REPLICATION.md.
+torch = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+# No -q here: a bare `pytest` (or `pytest -q`) keeps the "N passed in Xs" summary.
+# Adding -q on the CLI on top of a -q here would stack to -qq, which suppresses it.
+addopts = "--tb=short"

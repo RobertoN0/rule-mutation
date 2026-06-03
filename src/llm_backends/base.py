@@ -83,7 +83,7 @@ class LLMBackend(ABC):
     - messages: list[dict] - User/assistant messages
     
     Example usage:
-        backend = GroqBackend(config)
+        backend = DelftBlueLocalBackend(config)
         response = backend.generate(
             system="You are a helpful assistant.",
             messages=[{"role": "user", "content": "Hello!"}]

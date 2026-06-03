@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from difflib import SequenceMatcher
 from typing import Any
 import random
 
@@ -38,20 +39,22 @@ class MutationResult:
     
     @property
     def change_ratio(self) -> float:
-        """Rough measure of how much the text changed (0.0 to 1.0)."""
+        """Fraction of the text that changed (0.0 = identical, 1.0 = completely different).
+
+        Uses word-level sequence matching so that reworded or reordered
+        passages produce meaningful nonzero values.  The previous
+        character-*set* Jaccard was always ≈0 for any two English texts
+        because they share the same ~70 characters.
+        """
         if not self.original:
             return 1.0 if self.mutated else 0.0
-        
-        # Simple character-level difference ratio
-        orig_set = set(self.original)
-        mut_set = set(self.mutated)
-        intersection = orig_set & mut_set
-        union = orig_set | mut_set
-        
-        if not union:
+        if self.original == self.mutated:
             return 0.0
-        
-        return 1.0 - (len(intersection) / len(union))
+
+        orig_words = self.original.split()
+        mut_words = self.mutated.split()
+        similarity = SequenceMatcher(None, orig_words, mut_words).ratio()
+        return round(1.0 - similarity, 6)
 
 
 class Mutator(ABC):
@@ -61,7 +64,7 @@ class Mutator(ABC):
     They should preserve the semantic intent while varying the surface form.
     
     Example:
-        mutator = FluffMutator(seed=42)
+        mutator = SynonymReplacementMutator(seed=42)
         result = mutator.mutate(rule_text)
         print(result.mutated)
     """

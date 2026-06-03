@@ -1,0 +1,60 @@
+# =============================================================================
+# Keep the Docker build context small and free of secrets / local state.
+# =============================================================================
+
+# Virtualenvs and Python build artefacts
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+.pytest_cache
+.ruff_cache
+.mypy_cache
+
+# Secrets and local config
+.env
+.env.local
+*.pem
+*.key
+
+# Git internals
+.git
+.gitmodules
+.github
+
+# IDE / editor scratch
+.vscode
+.idea
+.ipynb_checkpoints
+
+# Beads runtime state (not needed inside the container)
+.beads
+
+# Heavy local artifacts the replication path does NOT need
+results
+experiments/results
+generated_code
+useful_files
+delftblue
+pipeline_breakdown/interesting_generated_files
+pipeline_breakdown/rule_retrieval_output/*progress*.jsonl
+old_security_smells_thesis
+python_notebook_experiment
+literature_review
+
+# OS noise
+.DS_Store
+Thumbs.db
+
+# Logs
+logs
+*.log
+
+# Dolt DB
+.dolt
+*.db
+
+# Cache directories
+.cache
+.uv-cache

@@ -1,259 +1,149 @@
 # Architecture
 
-## System Components
+High-level design of the framework: the pipeline, the two search strategies, the
+fitness model, and the data flow. For the module-by-module code reference, the
+output schema, and extension points see [IMPLEMENTATION.md](IMPLEMENTATION.md);
+for orientation see [README.md](README.md).
 
-### Core Framework (`src/`)
+## System overview
 
-#### 1. Evaluation Module (`src/evaluation/`)
+The framework implements **Search-Based Software Testing (SBST)** over the space
+of rephrasings of a CodeGuard security rule. Each iteration mutates a rule,
+regenerates code for the prompts that use that rule, scores the result with
+Semgrep (security findings) and CodeBLEU (how much the generated code changed),
+and lets a search strategy decide what to keep.
 
-**Rule Mapping System**
-- `rule_mapping.py`: Per-prompt rule retrieval and management
-  - `RuleMappingIndex`: Hash-based O(1) prompt→rules lookup
-  - `RuleLoader`: Caches and combines multiple rule files
-  - `PromptWithRules`: Test prompts enriched with their specific rules
+```mermaid
+flowchart TD
+    %% ===== Inputs =====
+    R[("CodeGuard rules R")]
+    P[("Test prompts P<br/>CyberSecEval")]
 
-**Vulnerability Analysis**
-- `semgrep_runner.py`: Static analysis wrapper for Semgrep
-- `fitness.py`: Fitness calculation from vulnerability findings
-  - Strategies: RAW_COUNT, SEVERITY_WEIGHTED, UNIQUE_RULES
+    %% ===== Rule parsing / safe-zone contract =====
+    R --> RP[Rule parser]
+    RP -->|YAML frontmatter +<br/>fenced code blocks| SZ[Safe zone<br/>immutable]
+    RP -->|Prose directives| MZ[Mutable prose]
 
-**Dataset Integration**
-- `dataset_config.py`: CyberSecEval dataset loader and selector
-- Supports filtering by language, CWE, test case ID
+    %% ===== Strategy split: parent selection =====
+    MZ --> STRAT{Search strategy}
+    STRAT -->|EA| ARC[("Per-rule Pareto archive")]
+    STRAT -->|random baseline| ORIG[Original rule text<br/>parent every iteration]
+    ARC -->|sample eligible parent| MUT[Mutator pool<br/>8 operators]
+    ORIG -->|sample n-mutator chain| MUT
 
-#### 2. Optimization Module (`src/optimizer/`)
+    %% ===== Mutator pool =====
+    MUT -->|rule-based| MB[synonym, add_random_word,<br/>section_reorder shuffle/degrade,<br/>verb_weakening]
+    MUT -->|LLM-based| LB[paraphrase, voice_change,<br/>negation_injection]
+    MB --> QV[Quality validation<br/>record 5 criteria]
+    LB --> QV
+    QV --> ASM[Reassemble<br/>safe zone + mutated prose]
 
-**Hill Climbing Algorithm** (`hill_climber.py`)
-- `HillClimber`: Main optimization loop
-  - `optimize()`: Single-rule optimization
-  - `optimize_per_prompt_rules()`: Per-prompt rule optimization
-- Tracks fitness across iterations
-- Early stopping when no improvement
-- Rate limit error handling with graceful recovery
+    %% ===== Fitness evaluation =====
+    ASM --> LLM[LLM backend<br/>code generation]
+    P --> LLM
+    LLM --> CODE[Generated code<br/>per prompt]
+    CODE --> SG[Semgrep<br/>static analysis]
+    CODE --> CB[CodeBLEU<br/>divergence vs<br/>baseline code]
+    SG --> FIT["Fitness aggregation<br/>f1 semgrep delta<br/>f2 proportion divergent<br/>f3 cond. mean divergence"]
+    CB --> FIT
 
-#### 3. Mutation Module (`src/mutation/`)
+    %% ===== Acceptance: strategy-dependent =====
+    FIT --> ACC{Search strategy}
+    ACC -->|EA| TA{Identity? Dominated?}
+    ACC -->|random baseline| LOG[Log iteration<br/>record unconditionally]
+    LOG --> ORIG
+    TA -->|non-dominated| INS[Insert<br/>evict dominated members]
+    TA -->|identity OR dominated| REJ[Reject<br/>increment stagnation counter]
+    INS --> ARC
+    REJ --> ARC
 
-**Mutation Operators** (`rule_based.py`)
-- `FluffMutator`: Adds bureaucratic noise and weakens imperatives
-  - Random prefix/suffix injection
-  - Verb weakening (MUST → "should ideally")
-- `VerbWeakeningMutator`: Standalone verb weakening
-- `StructuralMutator`: Document restructuring (experimental)
+    %% ===== Restart triggers (EA only) =====
+    ARC -->|stagnation / depth /<br/>mutator exhausted| RST[Snapshot to restart_history<br/>Reseed with original rule]
+    RST --> ARC
 
-**Base Classes** (`base.py`)
-- `Mutator`: Abstract base with RNG seeding
-- `MutationResult`: Tracks original, mutated text, and changes
+    %% ===== Styling =====
+    classDef input fill:#e1f5fe,stroke:#0277bd,color:#000
+    classDef archive fill:#fff3e0,stroke:#ef6c00,color:#000
+    classDef llm fill:#f3e5f5,stroke:#7b1fa2,color:#000
+    classDef metric fill:#e8f5e9,stroke:#2e7d32,color:#000
 
-#### 4. LLM Backend Module (`src/llm_backends/`)
-
-**API Integrations**
-- `groq_backend.py`: Groq API (Llama models)
-- `base.py`: Abstract `LLMBackend` interface
-- Rate limit detection and error propagation
-
----
-
-## Data Flow
-
-```
-┌──────────────────┐
-│  Test Prompts    │ (CyberSecEval Dataset)
-│  + CWE Labels    │
-└────────┬─────────┘
-         │
-         ▼
-┌──────────────────┐
-│  Rule Mapping    │ (AI agent selects relevant rules)
-│  prompt → rules  │ 
-└────────┬─────────┘
-         │
-         ▼
-┌──────────────────┐
-│  Rule Loader     │ (Load and combine rule files)
-│  Combine Rules   │
-└────────┬─────────┘
-         │
-         ▼
-┌──────────────────┐
-│   Mutator        │ (Apply adversarial transformations)
-│   - Fluff        │
-│   - Weakening    │
-└────────┬─────────┘
-         │
-         ▼
-┌──────────────────┐
-│  LLM Backend     │ (Generate code with mutated rules)
-│  System Prompt   │
-└────────┬─────────┘
-         │
-         ▼
-┌──────────────────┐
-│  Semgrep         │ (Static analysis for vulnerabilities)
-│  Security Rules  │
-└────────┬─────────┘
-         │
-         ▼
-┌──────────────────┐
-│  Fitness Calc    │ (Weighted vulnerability count)
-│  Higher = Worse  │
-└────────┬─────────┘
-         │
-         ▼
-┌──────────────────┐
-│  Hill Climber    │ (Keep mutation if fitness increased)
-│  Iterate         │
-└──────────────────┘
+    class R,P input
+    class ARC archive
+    class LLM llm
+    class FIT,SG,CB metric
 ```
 
----
+The mutator(s), validator, backend, and scorers are fixed; only the **search
+strategy** differs between the two configurations
+(see [The two search strategies](#the-two-search-strategies)).
 
-## Configuration System
+## The pipeline, step by step
 
-### Hierarchy
+1. **Select** prompts from CyberSecEval (a language / count filter, seeded).
+2. **Map** each prompt to the CodeGuard rules relevant to it (pre-computed retrieval maps under `pipeline_breakdown/rule_retrieval_output/`).
+3. **Mutate** the target rule with one of the 8 mutators, respecting the *safe-zone contract* (frontmatter, fenced code, and inline code are never touched).
+4. **Validate** the mutation against five quality criteria — *observational*: the metadata is recorded for post-run analysis.
+5. **Generate** code for every prompt that uses the rule, under the original rule (baseline, once) and under the mutated rule.
+6. **Score** each prompt: Semgrep severity-weighted finding count, and code divergence `1 − CodeBLEU(generated, baseline-generated)`.
+7. **Search**: aggregate the per-prompt scores into three objectives and let the strategy drive the next mutation.
 
-1. **Dataset Config** (`DatasetConfig`)
-   - Which dataset backend to use
-   - Default language and CWE filters
+## The three objectives
 
-2. **Selection Criteria** (`SelectionCriteria`)
-   - Test case IDs or JSON file
-   - Language/CWE filters
-   - Limit and shuffling
+All maximised, aggregated over the prompts that actually use the target rule:
 
-3. **Hill Climb Config** (`HillClimbConfig`)
-   - Max iterations
-   - Fitness strategy
-   - Early stopping threshold
-   - Output directory
+| Objective | Definition | Captures |
+|---|---|---|
+| **f1** `total_semgrep_delta` | Σ (mutated − baseline) severity-weighted Semgrep score | the primary signal: did the mutation make the model write *more vulnerable* code |
+| **f2** `proportion_divergent` | fraction of affected prompts whose generated code changed (`code_divergence > 0`) | *breadth* — did the mutation change the output at all, on how many prompts |
+| **f3** `conditional_mean_divergence` | mean code divergence over the prompts that did change | *intensity* — when the output changed, how much |
 
-4. **LLM Config** (implicit in backend)
-   - Model selection
-   - Temperature, max tokens
-   - API credentials
+f2 and f3 matter because many prompts never produce a Semgrep finding even when
+the mutation clearly changed the generated code; they record that the model
+"did something different" due to the mutation, independent of whether Semgrep
+flagged it.
 
-### Example Configuration
+## The two search strategies
 
-```python
-from src.optimizer import HillClimber, HillClimbConfig
-from src.mutation import FluffMutator
-from src.llm_backends import GroqBackend, LLMConfig
-from src.evaluation import FitnessStrategy
+Both run for the same iteration budget `T` (one code-generation call per
+iteration → matched cost), share the same mutators, validator, backend, and
+scorers, and emit the same per-iteration record. They differ only in selection
+and acceptance.
 
-# Configure optimization
-config = HillClimbConfig(
-    max_iterations=10,
-    fitness_strategy=FitnessStrategy.SEVERITY_WEIGHTED,
-    early_stop_no_improvement=3,
-    output_dir="results/experiment_001",
-)
+### `ea` — (1+1) EA with a per-rule Pareto archive
 
-# Initialize components
-llm = GroqBackend(LLMConfig(model="llama-3.3-70b-versatile"))
-mutator = FluffMutator(seed=42, weaken_verbs=True)
-climber = HillClimber(llm, mutator, config)
+Each rule keeps a small **Pareto archive** of non-dominated rule variants over
+(f1, f2, f3). Each iteration: pick a rule, sample a parent from its archive,
+apply one untried mutator, evaluate, and offer the offspring to the archive — it
+is kept iff no existing member dominates it (dominated members are then
+evicted). When a rule's archive stagnates, saturates its depth, or exhausts its
+mutators, it restarts from the original rule (snapshotting the prior state).
+This is a multi-objective hill-climb that simultaneously rewards more findings,
+broader code change, and more intense code change.
+
+### `random_baseline` — stateless multi-mutation sampler
+
+The ablation that isolates the contribution of the archive + acceptance test. It
+has **no archive, no acceptance test, no restart, and no cross-iteration state**:
+each iteration independently picks a rule, samples `n ∈ {1..K}` distinct
+mutators, applies that chain to the **original** rule text, evaluates, and logs
+the result unconditionally. Same budget and same operators as the EA.
+
+## Data flow (per iteration)
+
+```
+rules map ──► select N cases (language filter, seed) ──► prompt + rule-IDs list
+                                                                   │
+                       ┌─────────────── iteration i: target rule R ───────────────┐
+                       │  strategy picks parent text + mutator(s) for R            │
+                       │  validate (observational) → mutated R                     │
+                       │  assemble R into each prompt that uses it                 │
+                       │  LLM: generate code (eval cache skips identical inputs)   │
+                       │  Semgrep batch (one subprocess) + CodeBLEU per prompt     │
+                       │  aggregate → (f1, f2, f3) over the affected prompts       │
+                       │  EA: offer to archive   │   random: log unconditionally   │
+                       └────────────────────────────────────────────────────────────┘
 ```
 
----
-
-## Output Structure
-
-### Directory Layout
-
-```
-output_dir/
-├── mutated_rules/
-│   └── iter{N}_tc{ID}_rules{COUNT}.md
-├── intermediate_results/
-│   └── intermediate_{phase}_{idx}_{timestamp}.json
-├── per_prompt_rules_results_{timestamp}.json
-└── hillclimb_summary_{timestamp}.json
-```
-
-### File Naming Convention
-
-**Mutated Rules:**
-- `iter1_tc3_rules2.md` = Iteration 1, Test Case 3, 2 rules combined
-
-**Intermediate Results:**
-- `intermediate_baseline_000_20260302_115315.json` = Baseline phase, index 0
-- `intermediate_mutation_001_20260302_115442.json` = Mutation phase, index 1
-
----
-
-## Extension Points
-
-### Adding New Mutation Strategies
-
-1. Inherit from `Mutator` base class
-2. Implement `mutate(text: str) -> MutationResult`
-3. Return detailed `changes` list for traceability
-
-```python
-from src.mutation import Mutator, MutationResult
-
-class MyMutator(Mutator):
-    @property
-    def name(self) -> str:
-        return "my_mutation"
-    
-    def mutate(self, text: str) -> MutationResult:
-        # Apply transformation
-        mutated = transform(text)
-        return MutationResult(
-            original=text,
-            mutated=mutated,
-            mutation_type=self.name,
-            changes=["Applied X transformation"],
-        )
-```
-
-### Adding New LLM Backends
-
-1. Inherit from `LLMBackend`
-2. Implement `generate()` and `validate_connection()`
-3. Handle rate limits consistently
-
-```python
-from src.llm_backends import LLMBackend, LLMResponse
-
-class MyBackend(LLMBackend):
-    def generate(self, system: str, messages: list) -> LLMResponse:
-        # API call logic
-        return LLMResponse(
-            content=result,
-            latency_ms=elapsed,
-        )
-```
-
-### Custom Fitness Functions
-
-Fitness strategies are defined in `src/evaluation/fitness.py`:
-
-```python
-class FitnessStrategy(Enum):
-    RAW_COUNT = auto()           # Total finding count
-    SEVERITY_WEIGHTED = auto()    # ERROR=3, WARNING=1
-    UNIQUE_RULES = auto()         # Distinct check_ids triggered
-```
-
-Add new strategies by extending the enum and updating `calculate_fitness()`.
-
----
-
-## Dependencies
-
-### Core Requirements
-- Python 3.10+
-- Semgrep (static analysis)
-- HuggingFace Datasets (CyberSecEval)
-
-### API Keys
-- Groq API: `GROQ_API_KEY` environment variable
-- (Optional) OpenAI or Anthropic API for rule mapping generation
-
-### Python Packages
-See `requirements.txt` for full list. Key dependencies:
-- `datasets`: HuggingFace dataset loading
-- `semgrep`: Security analysis
-- `groq`: LLM API client
-- `pydantic`: Config validation
+Everything written to disk each iteration (the trajectory record, per-prompt
+evaluations, archive snapshots, mutated rule text) is specified in
+[IMPLEMENTATION.md → Output schema](IMPLEMENTATION.md#output-schema).
