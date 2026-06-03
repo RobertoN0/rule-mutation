@@ -629,15 +629,7 @@ class HillClimber:
                         max_retries=self.config.mutation_max_retries,
                     )
                     pre_validation_metadata = mutation_result.metadata.get("quality", {})
-                    # Drop readability_grade_* — no metric uses it (schema spec
-                    # File 1a). Filtered here rather than in quality.py (which
-                    # stays untouched per the validation soft-gate decision).
-                    for _k in (
-                        "readability_grade_original",
-                        "readability_grade_mutated",
-                        "readability_grade_delta",
-                    ):
-                        pre_validation_metadata.pop(_k, None)
+                    
                     # Cumulative drift: SBERT vs the raw on-disk original rule.
                     # The parent (parent_text_override) may already be drifted
                     # (depth>0 in the EA), so sbert_cum is informative even when
