@@ -31,6 +31,10 @@ STATUS.md
 .beads-bundle-backup/
 results/
 
+# Local working docs — kept on disk, not part of the public/main repo
+DEPENDENCIES_AND_FLOW.md
+analysis_prompts/post_run_analysis.md
+
 # Smoke-test convenience: 2-case Anthropic retrieval map. Kept locally so we
 # can re-run quick smokes without rebuilding the map, but not committed
 # because it embeds an Anthropic-generated mapping with API-side variability.
