@@ -486,7 +486,7 @@ def main():
     # SLURM (--signal=B:USR1@<lead>) forwards SIGUSR1 a configurable number of
     # seconds before the wall-time SIGKILL. We flip a flag; the optimizer checks
     # it at the top of each iteration and breaks cleanly, so the run still writes
-    # its final archive snapshot, hillclimb_summary, run_config.json and rerun.sh
+    # its final archive snapshot, hillclimb_summary, and run_config.json
     # instead of being killed mid-iteration with those artefacts unwritten.
     import signal as _signal
     _stop_requested = {"flag": False}
@@ -833,28 +833,8 @@ def main():
         with open(config_file, "w") as f:
             json.dump(run_config, f, indent=2)
 
-        # rerun.sh — thin wrapper that reproduces this run from run_config.json.
-        # The mapping logic lives in scripts/experiments/rerun_from_config.py and
-        # dispatches by backend: API → python entrypoint; delftblue → sbatch the
-        # SLURM wrapper. Run it from the repo root.
-        rerun_lines = [
-            "#!/bin/bash",
-            "# Auto-generated. Reproduces this run from its run_config.json.",
-            f"# Original job: {run_config['slurm_job_id'] or 'local'}  host: {run_config['hostname']}",
-            f"# Timestamp: {timestamp}",
-            "#",
-            "# Usage (from repo root):",
-            f"#   bash {args.output_dir}/rerun.sh            # reproduce as originally run",
-            f"#   bash {args.output_dir}/rerun.sh --print    # show the command only",
-            f"#   bash {args.output_dir}/rerun.sh --as delftblue   # force sbatch on DelftBlue",
-            "",
-            'CONFIG="$(cd "$(dirname "$0")" && pwd)/run_config.json"',
-            f'exec python scripts/experiments/rerun_from_config.py "$CONFIG" "$@"',
-        ]
-        rerun_file = args.output_dir / "rerun.sh"
-        rerun_file.write_text("\n".join(rerun_lines) + "\n", encoding="utf-8")
-        rerun_file.chmod(0o755)
-        print(f"   • run_config.json + rerun.sh saved for easy reproduction")
+        print(f"   • run_config.json saved → reproduce with:")
+        print(f"       python scripts/experiments/rerun_from_config.py {args.output_dir}")
 
     print("\n✅ Per-prompt-rules experiment complete!")
     return 0

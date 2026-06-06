@@ -75,8 +75,8 @@ python scripts/experiments/run_with_rules_map.py \
   --output-dir experiments/results/local_smoke
 
 # Reproduce that exact run from its recorded config
-bash experiments/results/local_smoke/rerun.sh --print   # show the command
-bash experiments/results/local_smoke/rerun.sh           # actually re-run
+python scripts/experiments/rerun_from_config.py experiments/results/local_smoke --print   # show the command
+python scripts/experiments/rerun_from_config.py experiments/results/local_smoke           # actually re-run
 ```
 
 > If you call `.venv/bin/python` directly instead of activating, prefix the
@@ -106,7 +106,7 @@ docker run --rm \
 
 See [REPLICATION.md](REPLICATION.md) for the complete reviewer-facing reproduction guide (prerequisites, what gets installed, reproducibility guarantees, troubleshooting).
 
-A run directory contains: `run_config.json`, `hillclimb_summary_*.json`, `iterations.jsonl`, `archive_snapshots/` (EA only), `intermediate/{baseline,…}.jsonl`, `mutated_rules/iterNNN/`, `semgrep_debug/`, `run.log`, and `rerun.sh`. The exact schema is documented in [IMPLEMENTATION.md](IMPLEMENTATION.md#output-schema).
+A run directory contains: `run_config.json`, `hillclimb_summary_*.json`, `iterations.jsonl`, `archive_snapshots/` (EA only), `intermediate/{baseline,…}.jsonl`, `mutated_rules/iterNNN/`, `semgrep_debug/`, and `run.log`. The exact schema is documented in [IMPLEMENTATION.md](IMPLEMENTATION.md#output-schema).
 
 ---
 
@@ -195,7 +195,7 @@ for SEED in 1 7 123; do
 done
 ```
 
-Every run dir gets a `rerun.sh` (backend-aware: API → python entrypoint, DelftBlue → `sbatch`). See [WORKFLOW.md](WORKFLOW.md) for the full DelftBlue round-trip.
+Reproduce any run with `python scripts/experiments/rerun_from_config.py <run_dir>` (backend-aware: API → python entrypoint, DelftBlue → `sbatch`). See [WORKFLOW.md](WORKFLOW.md) for the full DelftBlue round-trip.
 
 ---
 

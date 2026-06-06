@@ -109,8 +109,8 @@ is written into `iterations.jsonl` and can be summarised with
 Reproduce that exact run from its recorded config:
 
 ```bash
-bash experiments/results/replication_smoke/rerun.sh --print   # show the command
-bash experiments/results/replication_smoke/rerun.sh           # actually re-run
+python scripts/experiments/rerun_from_config.py experiments/results/replication_smoke --print   # show the command
+python scripts/experiments/rerun_from_config.py experiments/results/replication_smoke           # actually re-run
 ```
 
 > **PATH note:** the pipeline shells out to `semgrep`. Either `source
@@ -155,8 +155,7 @@ experiments/results/<name>/
 │   └── {ea_iter0001,rand_iter0001,…}.jsonl
 ├── mutated_rules/iterNNN/           # mutated rule text (.md) + meta.json (mutation_chain, changes)
 ├── semgrep_debug/semgrep_debug.jsonl  # per-scan trace (failure vs zero-findings)
-├── run.log                          # stdout/stderr tee
-└── rerun.sh                         # backend-aware reproducer (delegates to rerun_from_config.py)
+└── run.log                          # stdout/stderr tee
 ```
 
 The full field-level schema is documented in

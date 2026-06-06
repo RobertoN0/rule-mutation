@@ -167,8 +167,7 @@ state into `restart_history` before reseeding from the original): `stagnation`
 ├── intermediate/{iter_id}.jsonl     # per-prompt evaluation records; iter_id ∈ {baseline, ea_iter0001, rand_iter0042}
 ├── mutated_rules/iterNNN/           # <rule>.md (mutated text) + meta.json
 ├── semgrep_debug/semgrep_debug.jsonl
-├── run.log
-└── rerun.sh
+└── run.log
 ```
 
 **`iterations.jsonl`** (one JSON object per line):
