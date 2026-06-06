@@ -17,6 +17,9 @@ Usage::
     # Reproduce however the run was originally executed (auto from backend):
     python scripts/experiments/rerun_from_config.py path/to/run_config.json
 
+    # A run directory also works (its run_config.json is located automatically):
+    python scripts/experiments/rerun_from_config.py path/to/run_dir
+
     # Just print the command, don't execute:
     python scripts/experiments/rerun_from_config.py run_config.json --print
 
@@ -126,7 +129,8 @@ def _build_slurm_env(args: dict) -> dict[str, str]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Reproduce a run from its run_config.json")
-    parser.add_argument("config", type=Path, help="Path to run_config.json")
+    parser.add_argument("config", type=Path,
+                        help="Path to run_config.json, or a run directory containing it")
     parser.add_argument("--as", dest="target", choices=["auto", "api", "delftblue"],
                         default="auto", help="Force a reproduction target (default: auto from backend)")
     parser.add_argument("--print", dest="print_only", action="store_true",
@@ -135,10 +139,11 @@ def main() -> int:
                         help="Override the API output dir (default: a sibling rerun_<ts> dir)")
     opts = parser.parse_args()
 
-    if not opts.config.exists():
-        print(f"❌ run_config.json not found: {opts.config}", file=sys.stderr)
+    config_path = opts.config / "run_config.json" if opts.config.is_dir() else opts.config
+    if not config_path.exists():
+        print(f"❌ run_config.json not found: {config_path}", file=sys.stderr)
         return 1
-    config = json.loads(opts.config.read_text(encoding="utf-8"))
+    config = json.loads(config_path.read_text(encoding="utf-8"))
     args = config.get("args", {})
     backend = args.get("backend", "delftblue")
 
@@ -153,7 +158,7 @@ def main() -> int:
                   "requires N_CASES. Set it explicitly before submitting.", file=sys.stderr)
         env_str = " ".join(f"{k}={shlex.quote(v)}" for k, v in env.items())
         sbatch_cmd = f"{env_str} sbatch {SLURM_WRAPPER}"
-        print(f"# DelftBlue reproduction (from {opts.config}):")
+        print(f"# DelftBlue reproduction (from {config_path}):")
         print(sbatch_cmd)
         if opts.print_only:
             return 0
@@ -163,7 +168,7 @@ def main() -> int:
     # API path
     out_dir = opts.output_dir or os.environ.get("OUTPUT_DIR") or str(args.get("output_dir", "experiments/results/rerun"))
     cmd = _build_api_command(args, out_dir)
-    print(f"# API reproduction (from {opts.config}):")
+    print(f"# API reproduction (from {config_path}):")
     print(" ".join(shlex.quote(c) for c in cmd))
     if opts.print_only:
         return 0

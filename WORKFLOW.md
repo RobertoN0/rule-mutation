@@ -132,14 +132,14 @@ the usual cause is `semgrep` not being on PATH (activate the venv / use
 
 ## 3. Reproducing a run
 
-Every run dir has a `rerun.sh` that delegates to
-`scripts/experiments/rerun_from_config.py`, which reads `run_config.json` and
-dispatches by backend:
+Reproduce any run with `scripts/experiments/rerun_from_config.py`, which reads the
+run's `run_config.json` and dispatches by backend. Pass the run directory (its
+`run_config.json` is found automatically) or the `run_config.json` path directly:
 
 ```bash
-bash experiments/results/<run>/rerun.sh --print          # show the command, don't run
-bash experiments/results/<run>/rerun.sh                  # reproduce as originally run
-bash experiments/results/<run>/rerun.sh --output-dir experiments/results/rerun_x   # override out dir
+python scripts/experiments/rerun_from_config.py experiments/results/<run> --print          # show the command, don't run
+python scripts/experiments/rerun_from_config.py experiments/results/<run>                  # reproduce as originally run
+python scripts/experiments/rerun_from_config.py experiments/results/<run> --output-dir experiments/results/rerun_x   # override out dir
 ```
 
 API runs re-invoke the python entrypoint; DelftBlue runs map the recorded args

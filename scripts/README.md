@@ -13,8 +13,8 @@ Why needed:
 
 ## experiments/ (reproduction)
 - rerun_from_config.py: reproduce a run from its `run_config.json` (API backend →
-  re-invoke the python entrypoint; delftblue → `sbatch` the SLURM wrapper). Each
-  run also writes a thin `rerun.sh` wrapper around this.
+  re-invoke the python entrypoint; delftblue → `sbatch` the SLURM wrapper). Accepts a
+  run directory or a `run_config.json` path.
 
 ## slurm/
 - slurm_ea_qwen32b.sh: SBATCH launcher for the (1+1) EA and random_baseline optimizers.
