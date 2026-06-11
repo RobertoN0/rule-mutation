@@ -220,83 +220,112 @@ def run_ea(
         parent = archive.sample_parent()
         assert parent is not None, "sample_parent returned None after eligibility filter"
 
-        # ---- 2. Pick mutator uniformly from those not yet tried on this parent
-        available = archive.available_mutators(parent, mutator_names)
-        if not available:
-            # Should be caught by restart trigger; defensive guard
-            archive.restart(current_iteration=i + 1, reason="mutator_exhausted")
-            continue
-        mutator_name = rng.choice(available)
-        mutator = mutator_by_name[mutator_name]
-
         num_affected = sum(1 for pwr in prompts_with_rules if rule_id in pwr.rule_ids)
-        log(f"\n🧬 Iteration {i+1}/{max_iterations} "
-            f"— rule={rule_id.replace('codeguard-', 'cg-')} "
-            f"depth={parent.depth} mutator={mutator_name} "
-            f"archive_size={len(archive)} {num_affected}/{len(prompts_with_rules)} prompts")
 
-        # ---- 3. Evaluate via the supplied closure (wraps HillClimber's pipeline)
-        # mutation_chain = parent lineage + this iteration's mutator (last element).
-        mutation_chain = parent.mutation_path + [mutator_name]
-        try:
-            (candidate_fitness, candidate_results, mutation_changes,
-             val_metadata, iter_mutated_text) = evaluate_fn(
-                rule_id, parent.rule_text, mutator, i + 1,
-                f"ea_iter{i+1:04d}",
-                mutation_chain,
-            )
-        except Exception as e:
-            if "rate_limit" in str(e).lower() or "429" in str(e) or "413" in str(e):
-                log(f"\n⚠️  Rate limit hit at EA iteration {i+1}: {e}")
-                rate_limit_hit = True
+        # ---- 2+3. Pick mutator + evaluate; retry within this iteration when
+        #     the mutation is identity (no rule-text change). Identity is detected
+        #     before code-gen so no LLM call is wasted, but we still consume the
+        #     iteration slot unless we find a non-identity mutator for this parent.
+        #     Each identity attempt marks the mutator tried; if all are exhausted
+        #     the archive restart fires and we skip to the next outer iteration.
+        candidate_fitness: "AggregatedFitness | None" = None
+        candidate_results: list[Any] = []
+        mutation_changes: list[str] = []
+        val_metadata: dict[str, Any] = {}
+        iter_mutated_text: "str | None" = None
+        mutator_name: str = ""
+        mutator: "Mutator | None" = None
+        mutation_chain: list[str] = []
+        _inner_exhausted = False
+
+        while True:
+            available = archive.available_mutators(parent, mutator_names)
+            if not available:
+                archive.restart(current_iteration=i + 1, reason="mutator_exhausted")
+                restart_reason_counts["mutator_exhausted"] += 1
+                _inner_exhausted = True
                 break
-            raise
+            mutator_name = rng.choice(available)
+            mutator = mutator_by_name[mutator_name]
+            mutation_chain = parent.mutation_path + [mutator_name]
 
-        if iter_mutated_text is None:
-            # Validation rejected the mutation (or no rule text produced) —
-            # still mark the (parent, mutator) pair as tried so we don't retry
-            # the same dead-end forever, and skip the archive insert.
-            archive.mark_tried(parent, mutator_name)
-            log(f"   ⚠️ No mutated text produced; marked {mutator_name} tried for parent")
-            if iter_record_fn is not None:
-                iter_record_fn({
-                    "iter": i + 1,
-                    "timestamp": _dt.now(_tz.utc).isoformat(timespec='microseconds').replace("+00:00", "Z"),
-                    "strategy": "ea",
-                    "rule_id": rule_id,
-                    "mutation_chain": mutation_chain,
-                    "chain_length": len(mutation_chain),
-                    "mutation_identity": None,
-                    "validation_passed": False,
-                    "f1": None, "f2": None, "f3": None,
-                    "f1_advance": False,
-                    "accepted": False,
-                    "num_prompts_affected": num_affected,
-                    "llm_calls_total": None,
-                    "input_tokens_total": None,
-                    "output_tokens_total": None,
-                    "validation_metadata": val_metadata or {},
-                    "selection_meta": {
-                        "parent_iter": parent.iteration_added,
-                        "parent_f1": parent.f1,
-                        "parent_depth": parent.depth,
-                        "archive_size_before": len(archive),
-                        "archive_size_after": len(archive),
-                        "attempts_since_insert": archive._attempts_since_insert,
-                        "n_eligible_rules": len(eligible_rids),
-                        "restarts_this_iter": restarts_this_iter,
-                    },
-                })
-            continue
+            log(f"\n🧬 Iteration {i+1}/{max_iterations} "
+                f"— rule={rule_id.replace('codeguard-', 'cg-')} "
+                f"depth={parent.depth} mutator={mutator_name} "
+                f"archive_size={len(archive)} {num_affected}/{len(prompts_with_rules)} prompts")
+
+            try:
+                (candidate_fitness, candidate_results, mutation_changes,
+                 val_metadata, iter_mutated_text) = evaluate_fn(
+                    rule_id, parent.rule_text, mutator, i + 1,
+                    f"ea_iter{i+1:04d}",
+                    mutation_chain,
+                )
+            except Exception as e:
+                if "rate_limit" in str(e).lower() or "429" in str(e) or "413" in str(e):
+                    log(f"\n⚠️  Rate limit hit at EA iteration {i+1}: {e}")
+                    rate_limit_hit = True
+                    break
+                raise
+
+            if iter_mutated_text is None:
+                # Identity mutation: mark this mutator tried, record the skip,
+                # and immediately retry with a different mutator for the same parent.
+                archive.mark_tried(parent, mutator_name)
+                mutator_stats[mutator_name]["attempts"] += 1
+                remaining = archive.available_mutators(parent, mutator_names)
+                log(f"   ⏭️  Identity from {mutator_name} — "
+                    f"trying next mutator ({len(remaining)} remaining for this parent)")
+                if iter_record_fn is not None:
+                    iter_record_fn({
+                        "iter": i + 1,
+                        "timestamp": _dt.now(_tz.utc).isoformat(timespec='microseconds').replace("+00:00", "Z"),
+                        "strategy": "ea",
+                        "rule_id": rule_id,
+                        "mutation_chain": mutation_chain,
+                        "chain_length": len(mutation_chain),
+                        "mutation_identity": True,
+                        "validation_passed": False,
+                        "f1": None, "f2": None, "f3": None,
+                        "f1_advance": False,
+                        "accepted": False,
+                        "num_prompts_affected": num_affected,
+                        "llm_calls_total": None,
+                        "input_tokens_total": None,
+                        "output_tokens_total": None,
+                        "validation_metadata": val_metadata or {},
+                        "selection_meta": {
+                            "parent_iter": parent.iteration_added,
+                            "parent_f1": parent.f1,
+                            "parent_depth": parent.depth,
+                            "archive_size_before": len(archive),
+                            "archive_size_after": len(archive),
+                            "attempts_since_insert": archive._attempts_since_insert,
+                            "n_eligible_rules": len(eligible_rids),
+                            "restarts_this_iter": restarts_this_iter,
+                        },
+                    })
+                continue  # inner loop: try next mutator
+
+            # Non-identity result — proceed with archive update.
+            break  # inner loop
+
+        if rate_limit_hit:
+            break  # outer loop
+
+        if _inner_exhausted:
+            continue  # outer loop: restart was triggered inside, slot consumed
+
+        assert iter_mutated_text is not None and mutator is not None
 
         # ---- 4. Mark tried (regardless of archive outcome) ---------------
         archive.mark_tried(parent, mutator_name)
         mutator_stats[mutator_name]["attempts"] += 1
 
-        # bd-3wa: capture mutation_identity flag BEFORE archive insertion
-        # (post-6ac526b try_add rejects identity, but the event is still
-        # observable for analysis).
-        mutation_identity = (iter_mutated_text == parent.rule_text)
+        # Parent-level identity is filtered by the inner loop above, so this
+        # is always False. try_add still rejects archive-level text duplicates
+        # (same text via a different lineage) — those are logged below.
+        mutation_identity = False
         archive_size_before = len(archive)
 
         # ---- 5. Offer offspring to the archive ---------------------------
@@ -333,7 +362,7 @@ def run_ea(
                     f" [archive_size={len(archive)}/cap={archive.cap},"
                     f" stagnation={archive._attempts_since_insert}/{archive.restart_h}]")
             else:
-                log(f"   ✗ rejected (identity): cand(f1={_cf1:+.2f}, f2={_cf2:.3f}, f3={_cf3:.3f})"
+                log(f"   ✗ rejected (duplicate text in archive): cand(f1={_cf1:+.2f}, f2={_cf2:.3f}, f3={_cf3:.3f})"
                     f" [archive_size={len(archive)}/cap={archive.cap},"
                     f" stagnation={archive._attempts_since_insert}/{archive.restart_h}]")
 
@@ -592,10 +621,37 @@ def run_random_baseline(
                 break
             raise
 
-        has_text = iter_mutated_text is not None
-        f1 = candidate_fitness.total_semgrep_delta
-        f1_advance = has_text and f1 > 0.0
-        mutation_identity = (iter_mutated_text == rule_originals[rule_id]) if has_text else None
+        if iter_mutated_text is None:
+            # Identity chain (entire mutation sequence produced no change) — skip slot.
+            log(f"   ⏭️  Identity chain at random iteration {i+1} — skipping")
+            for name in chain_names:
+                mutator_stats[name]["applications"] += 1
+            if iter_record_fn is not None:
+                iter_record_fn({
+                    "iter": i + 1,
+                    "timestamp": _dt.now(_tz.utc).isoformat(timespec='microseconds').replace("+00:00", "Z"),
+                    "strategy": "random_baseline",
+                    "rule_id": rule_id,
+                    "mutation_chain": chain_names,
+                    "chain_length": n,
+                    "mutation_identity": True,
+                    "validation_passed": False,
+                    "f1": None, "f2": None, "f3": None,
+                    "f1_advance": False,
+                    "accepted": False,
+                    "num_prompts_affected": num_affected,
+                    "llm_calls_total": None,
+                    "input_tokens_total": None,
+                    "output_tokens_total": None,
+                    "validation_metadata": {},
+                    "selection_meta": {},
+                })
+            continue
+
+        has_text = True
+        f1 = candidate_fitness.total_semgrep_delta  # type: ignore[union-attr]
+        f1_advance = f1 > 0.0
+        mutation_identity = (iter_mutated_text == rule_originals[rule_id])
 
         # whole-chain credit: every mutator in the chain gets an application; the
         # f1-advancing tally is credited only when the final candidate beat baseline.

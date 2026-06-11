@@ -45,7 +45,6 @@ EXPECTED_QUALITY_KEYS = {
     "perplexity_ratio",
     "inline_code_retention", "keyword_retention",
     "security_intent_preserved",
-    "readability_grade_original", "readability_grade_mutated", "readability_grade_delta",
     "passes_all", "changed",
 }
 
@@ -237,29 +236,10 @@ class TestSecurityPreservation:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# C-C6  Criterion 5 — Readability delta (informational only)
+# C-C6  Readability delta criterion — REMOVED 2026-06-11 (was informational-only)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class TestReadability:
-
-    def test_readability_fields_numeric_or_none(self):
-        """C-C6: readability fields are numeric (if textstat installed) or None."""
-        v = _validator()
-        result = v.validate(_make_result())
-        quality = result.metadata["quality"]
-        for key in ("readability_grade_original", "readability_grade_mutated"):
-            assert quality[key] is None or isinstance(quality[key], (int, float))
-
-    def test_readability_delta_computed(self):
-        """C-C6: delta = mutated - original (if both non-None)."""
-        v = _validator()
-        result = v.validate(_make_result())
-        quality = result.metadata["quality"]
-        if quality["readability_grade_original"] is not None:
-            expected_delta = round(
-                quality["readability_grade_mutated"] - quality["readability_grade_original"], 2,
-            )
-            assert quality["readability_grade_delta"] == pytest.approx(expected_delta)
+# (No tests — the readability criterion was removed from the validator on 2026-06-11.)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -281,134 +261,6 @@ class TestPassesAll:
         result = v.validate(_make_result(mutated=SAMPLE_RULE_TEXT, mutation_type="fluff"))
         assert result.metadata["quality"]["instruction_adherent"] is False
         assert result.metadata["quality"]["passes_all"] is False
-
-    def test_readability_alone_does_not_block(self):
-        """C-C7: readability delta does NOT gate passes_all."""
-        v = _validator()
-        result = v.validate(_make_result())
-        quality = result.metadata["quality"]
-        # Even if readability is terrible, passes_all should be unaffected
-        # (readability is informational only)
-        if quality["passes_all"]:
-            # Manually set readability to extreme value — shouldn't flip passes_all
-            quality["readability_grade_delta"] = 50.0
-            # Re-check: passes_all is not affected by readability
-            assert quality["passes_all"] is True
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# C-C8  Deterministic mutators not retried
-# ═══════════════════════════════════════════════════════════════════════════════
-
-class FakeDeterministicMutator(Mutator):
-    """Mutator with _temperature=0.0 (deterministic)."""
-    _temperature = 0.0
-    _call_count = 0
-
-    @property
-    def name(self) -> str:
-        return "fake_deterministic"
-
-    def mutate(self, text: str) -> MutationResult:
-        self._call_count += 1
-        return MutationResult(
-            original=text,
-            mutated=text.replace("MUST", "should"),
-            mutation_type=self.name,
-            changes=["weakened MUST"],
-        )
-
-
-class FakeStochasticMutator(Mutator):
-    """Mutator with _temperature=0.6 (stochastic)."""
-    _temperature = 0.6
-    _call_count = 0
-
-    @property
-    def name(self) -> str:
-        return "fake_stochastic"
-
-    def mutate(self, text: str) -> MutationResult:
-        self._call_count += 1
-        # Produce a different result each time by appending call count
-        return MutationResult(
-            original=text,
-            mutated=text.replace("MUST", f"may_{self._call_count}"),
-            mutation_type=self.name,
-            changes=[f"attempt {self._call_count}"],
-        )
-
-
-class TestRetryDeterministic:
-
-    def test_deterministic_single_attempt(self):
-        """C-C8: deterministic mutator gets exactly 1 attempt regardless of max_retries."""
-        v = _validator()
-        m = FakeDeterministicMutator()
-        v.validate_with_retry(m, SAMPLE_RULE_TEXT, max_retries=5)
-        assert m._call_count == 1
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# C-C9  Non-deterministic mutators retry up to max_retries
-# ═══════════════════════════════════════════════════════════════════════════════
-
-class TestRetryStochastic:
-
-    def test_stochastic_retries(self):
-        """C-C9: stochastic mutator retries up to max_retries."""
-        v = _validator()
-        # Force all validation to fail by making passes_all=False
-        with patch.object(v, "validate", side_effect=lambda r: _force_fail_validation(r)):
-            m = FakeStochasticMutator()
-            v.validate_with_retry(m, SAMPLE_RULE_TEXT, max_retries=3)
-            assert m._call_count == 3
-
-    def test_stochastic_early_exit_on_pass(self):
-        """C-C9: stochastic stops early when a candidate passes."""
-        v = _validator()
-        call_count = [0]
-
-        def _validate_fail_then_pass(r):
-            call_count[0] += 1
-            # Explicitly control passes_all: fail on attempt 1, pass on attempt 2
-            r.metadata["quality"] = {
-                "passes_all": call_count[0] >= 2,
-                "instruction_adherent": True,
-                "sbert_step": None,
-                "perplexity_ratio": None,
-                "inline_code_retention": 1.0,
-                "keyword_retention": 0.90,
-                "security_intent_preserved": True,
-                "readability_grade_original": None,
-                "readability_grade_mutated": None,
-                "readability_grade_delta": None,
-                "changed": True,
-            }
-            return r
-
-        with patch.object(v, "validate", side_effect=_validate_fail_then_pass):
-            m = FakeStochasticMutator()
-            result = v.validate_with_retry(m, SAMPLE_RULE_TEXT, max_retries=5)
-            assert m._call_count == 2  # stopped early
-
-
-def _force_fail_validation(result: MutationResult) -> MutationResult:
-    """Populate quality metadata with passes_all=False."""
-    result.metadata["quality"] = {
-        "passes_all": False,
-        "instruction_adherent": True,
-        "sbert_step": 0.50,
-        "perplexity_ratio": None,
-        "inline_code_retention": 1.0,
-        "keyword_retention": 0.90,
-        "security_intent_preserved": True,
-        "readability_grade_original": None,
-        "readability_grade_mutated": None,
-        "readability_grade_delta": None,
-        "changed": True,
-    }
-    return result
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

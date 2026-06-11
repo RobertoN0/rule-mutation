@@ -217,8 +217,8 @@ class NegationInjectionMutator(_LiveLLMMutator):
         → "While not required in all scenarios, you MUST validate all user input
            before processing."
 
-    Uses temperature=0 (deterministic).  Retrying with the same input produces
-    the same output, so ``validate_with_retry`` limits to 1 attempt.
+    Uses temperature=0 (deterministic): a single mutate() call per iteration
+    (the retry path was removed 2026-06-11; identity results are skipped as no-ops).
     """
 
     _system_prompt = _NEGATION_SYSTEM
@@ -238,15 +238,13 @@ class VoiceChangeMutator(_LiveLLMMutator):
         "Always sanitize user input before processing."
         → "User input should always be sanitized before processing."
 
-    Uses temperature=0 (deterministic).
-    New tries will uses temperature=0.3 so retries in validate_with_retry produce distinct
-    outputs when the first attempt is an identity (e.g. rules with few
-    qualifying imperatives).
+    Uses temperature=0 (deterministic).  Identity results (e.g. rules with few
+    qualifying imperatives) are skipped as no-ops — no code-gen/Semgrep is run
+    for them (the retry path was removed 2026-06-11).
     """
 
     _system_prompt = _VOICE_SYSTEM
     _temperature = 0.0
-    #_temperature = 0.3
 
     @property
     def name(self) -> str:
@@ -259,7 +257,7 @@ class ParaphraseMutator(_LiveLLMMutator):
     Source: LLMORPH MR-51 + AUGMENT synonym-constraint paraphrase type.
 
     Uses temperature=0.6 so that each call produces a genuinely different
-    candidate — retries in ``validate_with_retry`` are meaningful.
+    candidate with visible lexical variation.
     Short rules benefit from higher temperature to ensure visible lexical
     variation (previous 0.3 produced near-identical outputs for rules with
     limited synonymisable vocabulary).

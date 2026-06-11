@@ -410,8 +410,8 @@ def main():
         type=int,
         default=2,
         help=(
-            "Maximum validation retries per mutation when --enable-validation is set "
-            "(only effective for non-deterministic mutators like paraphrase; default: 2)"
+            "DEPRECATED (no-op since the 2026-06-11 retry removal; kept for config/CLI compat). "
+            "Mutations are now applied once; identity results are skipped as no-ops."
         ),
     )
     parser.add_argument(
@@ -664,11 +664,10 @@ def main():
             print(f"   Generation model loaded: {type(ppl_model_handle).__name__}")
         else:
             print(f"\n🔬 Setting up MutationQualityValidator")
-        print(f"   SBERT semantic similarity (all-mpnet-base-v2, threshold=0.80)")
+        print(f"   SBERT semantic similarity (all-mpnet-base-v2, threshold=0.75)")
         print(f"   Structural criteria: inline code retention + security keyword retention")
         if use_ppl:
-            print(f"   Perplexity ratio gate (threshold=2.0, model=32B shared)")
-        print(f"   Max retries: {args.mutation_max_retries}")
+            print(f"   Perplexity ratio (threshold=2.5, model=32B shared)")
         validator = MutationQualityValidator(
             use_sbert=True,
             use_perplexity=use_ppl,
