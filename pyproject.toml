@@ -39,7 +39,6 @@ dependencies = [
     # this line, sentence-transformers pulls the default ~8 GB CUDA wheel on Linux.
     "torch>=2.0,<3",
     "sentence-transformers>=2.2",
-    "textstat>=0.7",
 
     # Function-based mutators (bd-03k)
     "nlpaug>=1.1.11",
