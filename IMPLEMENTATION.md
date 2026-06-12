@@ -51,11 +51,13 @@ per mutation.
 |---|---|---|
 | `NegationInjectionMutator` | 0.0 | Inserts contradictory qualifiers before imperative directives (`"MUST validate all input"` → `"While not required in all scenarios, you MUST validate all input"`). Source: LLMORPH MR-48/76. |
 | `VoiceChangeMutator` | 0.0 | Active imperative → passive advisory (`"Always sanitize user input"` → `"User input should always be sanitized"`). Source: AUGMENT voice-change. |
-| `ParaphraseMutator` | 0.6 | Rewrites prose with weaker vocabulary; each retry is a genuinely different candidate. Inline code is masked with `ICODE_N` placeholders before the LLM call and restored after, guaranteeing `inline_code_retention == 1.0`. Source: LLMORPH MR-51 + AUGMENT. |
+| `ParaphraseMutator` | 0.6 | Rewrites prose with weaker vocabulary. Inline code is masked with `ICODE_N` placeholders before the LLM call and restored after, guaranteeing `inline_code_retention == 1.0`. Source: LLMORPH MR-51 + AUGMENT. |
 
 All LLM mutators strip frontmatter before the call and reattach it unchanged.
-`validate_with_retry` makes a single attempt for temperature-0 mutators (retry
-is pointless) and up to `max_retries` for the stochastic paraphraser.
+Each mutation is applied **once** (no retry). If a mutation returns text
+identical to its parent, the EA marks that mutator tried for the parent and
+selects a different mutator within the same iteration — so no code generation
+is spent on a no-op (`ea_optimizer.py`).
 
 #### `pool.py` — `MutatorPool`
 
@@ -63,30 +65,29 @@ A thin container for the mutator list + the shared RNG seed (`mutators`,
 `mutator_names`). Both search strategies do their own constrained selection over
 this set.
 
-#### `quality.py` — `MutationQualityValidator` (observational soft gate)
+#### `quality.py` — `MutationQualityValidator` (informational, post-hoc)
 
 Implements the AUGMENT three-criteria framework plus a security-domain
-criterion. Enabled with `--enable-validation`. **Observational:** every
-candidate's metadata is recorded; nothing is ever rejected on quality grounds.
-The post-hoc audit in `scripts/analyze/validation_audit.py` reports per-criterion
+criterion (four criteria total). Enabled with `--enable-validation`.
+**Informational:** every candidate's metadata is recorded; nothing is ever
+rejected on quality grounds (the validator never gates the search). The
+post-hoc audit in `scripts/analyze/validation_audit.py` reports per-criterion
 fail rates and a "what if we had gated" simulation.
 
 | # | Criterion | How measured | Default threshold |
 |---|---|---|---|
 | 1 | Instruction adherence | per-mutator check function | pass/fail |
 | 2 | Semantic similarity | cosine of `all-mpnet-base-v2` embeddings | ≥ 0.75 |
-| 3 | Perplexity ratio | perplexity(mutated)/perplexity(original) | ≤ 2.0 (off by default) |
+| 3 | Perplexity ratio | perplexity(mutated)/perplexity(original) | ≤ 2.5 (off by default) |
 | 4 | Security-domain preservation | inline-code retention (= 1.0) + keyword retention | keyword ≥ 0.70 |
-| 5 | Readability delta | Flesch-Kincaid grade change | informational |
 
 `passes_all = instruction_adherent AND keyword_retention ≥ 0.70 AND (sbert is
-None OR sbert ≥ 0.75) AND (perplexity is None OR perplexity ≤ 2.0)`.
+None OR sbert ≥ 0.75) AND (perplexity is None OR perplexity ≤ 2.5)`.
 
 `validation_metadata` recorded per iteration (in `iterations.jsonl`):
 `instruction_adherent`, `sbert_step`, `sbert_cum` (drift vs the on-disk
 original), `perplexity_ratio`, `inline_code_retention`, `keyword_retention`,
-`security_intent_preserved`, `readability_grade_original/mutated/delta`
-(informational), `passes_all`, `changed`. When validation is off,
+`security_intent_preserved`, `passes_all`, `changed`. When validation is off,
 `validation_metadata` is `{}`.
 
 ---
@@ -103,8 +104,9 @@ Owns the evaluation seam shared by both strategies. `optimize_per_prompt_rules()
 
 `HillClimbConfig` key fields: `max_iterations`, `optimizer` (`"ea"` default |
 `"random_baseline"`), `archive_cap` (6), `restart_h` (8), `max_depth_ea` (4),
-`max_mutations_per_iter` (4), `enable_validation`, `mutation_max_retries` (2),
-`enable_eval_cache` (True), `fitness_strategy` (SEVERITY_WEIGHTED).
+`max_mutations_per_iter` (4), `enable_validation`, `enable_eval_cache` (True),
+`fitness_strategy` (SEVERITY_WEIGHTED). (`mutation_max_retries` is retained as a
+deprecated no-op for CLI/config back-compat.)
 
 **Eval cache:** per prompt, keyed by `(test_case_id, sha256(assembled_rule_text))`.
 A hit skips both code generation and Semgrep — safe under `temperature=0` greedy

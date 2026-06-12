@@ -34,7 +34,7 @@ flowchart TD
     %% ===== Mutator pool =====
     MUT -->|rule-based| MB[synonym, add_random_word,<br/>section_reorder shuffle/degrade,<br/>verb_weakening]
     MUT -->|LLM-based| LB[paraphrase, voice_change,<br/>negation_injection]
-    MB --> QV[Quality validation<br/>record 5 criteria]
+    MB --> QV[Quality validation<br/>record 4 criteria]
     LB --> QV
     QV --> ASM[Reassemble<br/>safe zone + mutated prose]
 
@@ -82,7 +82,7 @@ strategy** differs between the two configurations
 1. **Select** prompts from CyberSecEval (a language / count filter, seeded).
 2. **Map** each prompt to the CodeGuard rules relevant to it (pre-computed retrieval maps under `pipeline_breakdown/rule_retrieval_output/`).
 3. **Mutate** the target rule with one of the 8 mutators, respecting the *safe-zone contract* (frontmatter, fenced code, and inline code are never touched).
-4. **Validate** the mutation against five quality criteria — *observational*: the metadata is recorded for post-run analysis.
+4. **Validate** the mutation against four quality criteria — *informational*: the metadata is recorded for post-run analysis and never gates the search.
 5. **Generate** code for every prompt that uses the rule, under the original rule (baseline, once) and under the mutated rule.
 6. **Score** each prompt: Semgrep severity-weighted finding count, and code divergence `1 − CodeBLEU(generated, baseline-generated)`.
 7. **Search**: aggregate the per-prompt scores into three objectives and let the strategy drive the next mutation.
@@ -135,7 +135,7 @@ rules map ──► select N cases (language filter, seed) ──► prompt + ru
                                                                    │
                        ┌─────────────── iteration i: target rule R ───────────────┐
                        │  strategy picks parent text + mutator(s) for R            │
-                       │  validate (observational) → mutated R                     │
+                       │  validate (informational, post-hoc) → mutated R           │
                        │  assemble R into each prompt that uses it                 │
                        │  LLM: generate code (eval cache skips identical inputs)   │
                        │  Semgrep batch (one subprocess) + CodeBLEU per prompt     │
