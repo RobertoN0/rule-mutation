@@ -100,9 +100,9 @@ and writes a complete run directory (see §6). To run the random-baseline
 ablation instead, swap `--optimizer random_baseline` and replace the EA knobs
 with `--max-mutations-per-iter 4`.
 
-To also record the (observational) quality-validation metadata — SBERT
+To also record the (informational, post-hoc) quality-validation metadata — SBERT
 similarity, instruction adherence, keyword retention, etc. — add
-`--enable-validation --mutation-max-retries 2`. Nothing is rejected; the metadata
+`--enable-validation`. Nothing is rejected; the metadata
 is written into `iterations.jsonl` and can be summarised with
 `scripts/analyze/validation_audit.py` (see §5).
 

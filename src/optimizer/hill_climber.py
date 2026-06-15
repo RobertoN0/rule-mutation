@@ -102,8 +102,8 @@ class HillClimbConfig:
     enable_validation: bool = False
     """Run MutationQualityValidator after each mutation before code generation."""
 
-    mutation_max_retries: int = 2
-    """Maximum validation retries per mutation (only effective for non-deterministic mutators)."""
+    mutation_max_retries: int = 2  # DEPRECATED: no-op since retry removal (2026-06-11)
+    """DEPRECATED (no-op since 2026-06-11): the retry path was removed; mutations are applied once."""
 
     # ----- (1+1) EA + Pareto archive (optimizer="ea") ------------------
     optimizer: str = "ea"
@@ -623,11 +623,17 @@ class HillClimber:
             # Pick the mutator for this iteration (pool-selected or self.mutator)
             iter_mutator = selected_mutator if selected_mutator is not None else self.mutator
             if original_text:
+                mutation_result = iter_mutator.mutate(original_text)
+                # Skip-on-identity: a mutation that produced no change is a no-op.
+                # Skip the expensive code-generation + Semgrep evaluation entirely;
+                # the EA / random-baseline runners treat a None mutated-text as a
+                # no-op iteration (mark the mutator tried, no archive insert).
+                if mutation_result.mutated == original_text:
+                    self._log("   ⏭️  Identity mutation (no change) — skipping code-gen/Semgrep")
+                    return None, [], mutation_result.changes, {}, None
+                # Post-hoc validation (informational only — never refuses the mutation)
                 if self.validator is not None and self.config.enable_validation:
-                    mutation_result = self.validator.validate_with_retry(
-                        iter_mutator, original_text,
-                        max_retries=self.config.mutation_max_retries,
-                    )
+                    self.validator.validate(mutation_result)
                     pre_validation_metadata = mutation_result.metadata.get("quality", {})
                     
                     # Cumulative drift: SBERT vs the raw on-disk original rule.
@@ -679,11 +685,8 @@ class HillClimber:
                         f"sbert_cum={pre_validation_metadata.get('sbert_cum')}  "
                         f"ppl={pre_validation_metadata.get('perplexity_ratio')}  "
                         f"inline_code={pre_validation_metadata.get('inline_code_retention')}  "
-                        f"keywords={pre_validation_metadata.get('keyword_retention')}\n"
-                        f"     retries_exhausted={pre_validation_metadata.get('retries_exhausted', False)}"
+                        f"keywords={pre_validation_metadata.get('keyword_retention')}"
                     )
-                else:
-                    mutation_result = iter_mutator.mutate(original_text)
                 pre_mutated_text = mutation_result.mutated
                 pre_mutation_changes = mutation_result.changes
 
@@ -975,8 +978,10 @@ class HillClimber:
                 raise
             raise
 
+        _orig_raw = sum(r.raw_count for r in original_fitness.individual_results)
         self._log(f"   Original fitness: {original_fitness.total_fitness:.1f} "
-                  f"({original_fitness.num_vulnerable}/{original_fitness.num_prompts} vulnerable)")
+                  f"({original_fitness.num_vulnerable}/{original_fitness.num_prompts} vulnerable, "
+                  f"{_orig_raw} raw findings)")
 
         # Index baseline per-case fitness and reference code for composite delta computation
         if self.composite_evaluator is not None:

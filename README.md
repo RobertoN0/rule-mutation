@@ -124,7 +124,7 @@ python scripts/analyze/analyze_run.py experiments/results/local_smoke
 # Across runs → RQ3 (EA vs random, paired tests), multi-seed median+IQR
 python scripts/analyze/compare_runs.py experiments/results/
 
-# Observational quality-validation audit (only for --enable-validation runs)
+# Informational quality-validation audit (only for --enable-validation runs)
 python scripts/analyze/validation_audit.py <run_dir>
 ```
 
@@ -137,7 +137,7 @@ Each script writes a `summary.md` + CSVs + PNGs into `<run_dir>/analysis/` (or a
 1. **Select** test prompts from CyberSecEval.
 2. **Map** relevant CodeGuard rules to each prompt via AI-based retrieval (pre-computed maps in `pipeline_breakdown/rule_retrieval_output/`).
 3. **Mutate** the target rule with one of 8 adversarial strategies.
-4. **Validate** mutation quality (SBERT similarity, instruction adherence, security-keyword retention) — an *observational soft gate*: every candidate is recorded, none are rejected.
+4. **Validate** mutation quality (SBERT similarity, instruction adherence, security-keyword retention) — *informational and post-hoc*: every candidate is recorded, none are rejected (the validator never gates the search).
 5. **Generate** code with the configured backend on the original vs. mutated rule — Qwen2.5-Coder-32B-Instruct on DelftBlue, or Claude / OpenAI locally.
 6. **Score** each prompt by Semgrep finding count + code-divergence via CodeBLEU.
 7. **Optimize** with one of two interchangeable search strategies (`--optimizer`):

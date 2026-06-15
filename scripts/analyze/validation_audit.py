@@ -20,7 +20,7 @@ via flags. Only meaningful for runs launched with --enable-validation; otherwise
 
 Usage:
     python scripts/analyze/validation_audit.py <run_dir> [--out <dir>]
-      [--sbert-threshold 0.75] [--perplexity-threshold 2.0] [--keyword-threshold 0.70]
+      [--sbert-threshold 0.75] [--perplexity-threshold 2.5] [--keyword-threshold 0.70]
 """
 
 from __future__ import annotations
@@ -161,7 +161,7 @@ def main() -> int:
     ap.add_argument("run_dir", type=Path)
     ap.add_argument("--out", type=Path, default=None)
     ap.add_argument("--sbert-threshold", type=float, default=0.75)  # matches MutationQualityValidator default
-    ap.add_argument("--perplexity-threshold", type=float, default=2.0)
+    ap.add_argument("--perplexity-threshold", type=float, default=2.5)  # matches MutationQualityValidator default (AUGMENT App C.2)
     ap.add_argument("--keyword-threshold", type=float, default=0.70)
     args = ap.parse_args()
     run = L.load_run(args.run_dir)

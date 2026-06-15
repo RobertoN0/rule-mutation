@@ -4,23 +4,23 @@ Mutation quality validation — AUGMENT three-criteria framework.
 Implements the quality-checking pipeline from Chataigner et al. 2025 (AUGMENT),
 extended with a project-specific security-domain preservation criterion.
 
-The validator is **post-hoc only** — it is never called inside the
-hill-climbing inner loop.  It populates ``MutationResult.metadata['quality']``
-and is used for analysis, reporting, and (for ParaphraseMutator) selecting the
-best candidate from a set of generated options.
+The validator is **informational only** — it never refuses a mutation and never
+affects archive admission (which is Pareto dominance over f1/f2/f3).  When
+``--enable-validation`` is set it runs once per mutation inside the loop (no
+retry; identity mutations are skipped before code-gen); otherwise it is unused.
+It populates ``MutationResult.metadata['quality']`` for analysis/reporting, and
+is also used by ``select_best_candidate`` (ParaphraseMutator).
 
-Five criteria
+Four criteria
 -------------
 1. Instruction adherence  — did the mutation actually perform its intended
    transformation?  (difflib, stdlib only)
 2. Semantic similarity    — is the meaning preserved?  (sentence-transformers
    ``all-mpnet-base-v2``, cosine similarity ≥ 0.75)
-3. Realism (perplexity ratio) — is the mutated text linguistically natural?
-   (perplexity ratio ≤ 2.0, computed with the caller-supplied LM handle)
+3. Perplexity ratio — is the mutated text linguistically natural?
+   (perplexity ratio ≤ 2.5, computed with the caller-supplied LM handle)
 4. Security-domain preservation — are all inline code tokens and core security
    vocabulary still present?  (ParsedRule + curated word list)
-5. Readability delta      — Flesch-Kincaid grade level change (informational
-   only, no pass/fail gate; requires ``textstat``)
 
 Usage
 -----
@@ -201,14 +201,19 @@ class MutationQualityValidator:
     ppl_tokenizer_handle:
         The tokenizer paired with ``ppl_model_handle``.
     sbert_threshold:
-        Minimum cosine similarity to pass the semantic similarity gate (0.75,
-        AUGMENT default; Paper 6 LAP shows perplexity ratio ≤ 2.0 ↔
-        SBERT ≥ 0.80 in >90% of cases — 0.75 is the AUGMENT-calibrated
-        operating point).
+        Minimum cosine similarity for the semantic-similarity criterion.
+        0.75 is AUGMENT's global SBERT threshold (Chataigner et al. 2025,
+        App C.2 / Fig 5).  NOTE: AUGMENT calibrated 0.75 on stsb-distilroberta;
+        this validator uses all-mpnet-base-v2, so the cutoff is transferred,
+        not re-calibrated.  Informational/post-hoc — not a hard gate.
     perplexity_threshold:
-        Maximum perplexity ratio to pass the realism gate (2.0, from AUGMENT).
+        Maximum perplexity ratio for the realism criterion (2.5 — AUGMENT's
+        value, App C.2 / Fig 8).  Off by default.
+        (An earlier comment attributed a perplexity<->SBERT calibration to
+        LAP / Paper 6 — that claim is NOT in LAP and has been removed.)
     keyword_threshold:
-        Minimum security-keyword retention fraction (0.70).
+        Minimum security-keyword retention fraction (0.70; thesis-original
+        criterion, not in AUGMENT).
     """
 
     use_sbert: bool = True
@@ -217,7 +222,7 @@ class MutationQualityValidator:
     ppl_model_handle: Any = field(default=None, repr=False, compare=False)
     ppl_tokenizer_handle: Any = field(default=None, repr=False, compare=False)
     sbert_threshold: float = 0.75
-    perplexity_threshold: float = 2.0
+    perplexity_threshold: float = 2.5
     keyword_threshold: float = 0.70
 
     # Lazy-loaded SBERT handle; ppl handles are seeded from constructor args
@@ -352,17 +357,6 @@ class MutationQualityValidator:
             log.warning("Perplexity computation failed: %s", exc)
             return None
 
-    @staticmethod
-    def _compute_readability(prose: str) -> float | None:
-        """Flesch-Kincaid Grade Level (informational only)."""
-        try:
-            import textstat  # type: ignore
-            return round(textstat.flesch_kincaid_grade(prose), 2) # type: ignore
-        except ImportError:
-            return None
-        except Exception:
-            return None
-
     # ------------------------------------------------------------------
     # Instruction adherence
     # ------------------------------------------------------------------
@@ -431,10 +425,6 @@ class MutationQualityValidator:
             and keyword_retention >= self.keyword_threshold
         )
 
-        # 5. Readability (informational only)
-        readability_orig = self._compute_readability(orig_prose)
-        readability_mut = self._compute_readability(mut_prose)
-
         # Combined gate
         passes_all = (
             instruction_adherent
@@ -455,14 +445,6 @@ class MutationQualityValidator:
             "inline_code_retention": round(inline_code_retention, 4),
             "keyword_retention": round(keyword_retention, 4),
             "security_intent_preserved": security_intent_preserved,
-            # Criterion 5 (informational)
-            "readability_grade_original": readability_orig,
-            "readability_grade_mutated": readability_mut,
-            "readability_grade_delta": (
-                round(readability_mut - readability_orig, 2)
-                if readability_orig is not None and readability_mut is not None
-                else None
-            ),
             # Summary
             "passes_all": passes_all,
             "changed": result.changed,
@@ -514,109 +496,5 @@ class MutationQualityValidator:
             "inline_code_retention": q.get("inline_code_retention"),
             "keyword_retention": q.get("keyword_retention"),
             "security_intent_preserved": q.get("security_intent_preserved"),
-            "readability_grade_original": q.get("readability_grade_original"),
-            "readability_grade_mutated": q.get("readability_grade_mutated"),
-            "readability_grade_delta": q.get("readability_grade_delta"),
             "passes_all": q.get("passes_all"),
         }
-
-    def validate_with_retry(
-        self,
-        mutator: "Mutator",
-        text: str,
-        max_retries: int = 2,
-    ) -> MutationResult:
-        """Mutate + validate in-loop, with retry on failure.
-
-        Designed for use inside the hill-climbing loop: call this instead of
-        ``mutator.mutate()`` when in-loop validation is enabled.
-
-        For **deterministic** mutators (``_temperature == 0.0``), only 1 attempt
-        is made — retrying with the same input produces the same output (the
-        ``DelftBlueLocalBackend`` uses ``do_sample=False`` when temperature≤0).
-
-        For **non-deterministic** mutators (e.g. ``ParaphraseMutator``,
-        temperature=0.3), each retry calls the LLM again and gets a genuinely
-        different candidate.
-
-        Parameters
-        ----------
-        mutator:
-            The mutator to call.
-        text:
-            Original rule text to mutate.
-        max_retries:
-            Maximum number of attempts.  Ignored for deterministic mutators
-            (capped at 1).
-
-        Returns
-        -------
-        MutationResult
-            The first result that passes all criteria.  If all retries fail,
-            returns the best attempt (by SBERT similarity).  If even that is
-            an identity (unchanged), returns a clean identity ``MutationResult``
-            so the hill-climber treats this iteration as "no mutation".
-        """
-        is_deterministic = getattr(mutator, "_temperature", None) == 0.0
-        effective_retries = 1 if is_deterministic else max_retries
-
-        best_result: MutationResult | None = None
-        best_sim: float = -1.0
-
-        for attempt in range(effective_retries):
-            result = mutator.mutate(text)
-
-            if not result.changed:
-                log.warning(
-                    "validate_with_retry: attempt %d/%d produced identity "
-                    "(mutator=%s)", attempt + 1, effective_retries, mutator.name,
-                )
-                if best_result is None:
-                    best_result = result
-                continue
-
-            self.validate(result)
-            quality = result.metadata.get("quality", {})
-
-            if quality.get("passes_all", False):
-                log.info(
-                    "validate_with_retry: attempt %d/%d passed all criteria "
-                    "(mutator=%s)", attempt + 1, effective_retries, mutator.name,
-                )
-                return result  # early exit on first passing candidate
-
-            # Track best-so-far by SBERT similarity (step vs parent)
-            sim = quality.get("sbert_step") or 0.0
-            if sim > best_sim:
-                best_sim = sim
-                best_result = result
-
-            log.warning(
-                "validate_with_retry: attempt %d/%d failed validation "
-                "(mutator=%s, passes_all=False, sbert=%.3f)",
-                attempt + 1, effective_retries, mutator.name, sim,
-            )
-
-        # All retries exhausted ------------------------------------------------
-        if best_result is None or not best_result.changed:
-            log.warning(
-                "validate_with_retry: all %d attempt(s) failed or were identity; "
-                "returning identity (mutator=%s)",
-                effective_retries, mutator.name,
-            )
-            return MutationResult(
-                original=text, mutated=text,
-                mutation_type=mutator.name,
-                changes=["all validation retries failed; identity returned"],
-                metadata={"quality": {
-                    "passes_all": False,
-                    "retries_exhausted": True,
-                }},
-            )
-
-        # Return best attempt even though it failed validation (graceful degradation)
-        log.warning(
-            "validate_with_retry: returning best failed attempt "
-            "(mutator=%s, sbert=%.3f)", mutator.name, best_sim,
-        )
-        return best_result

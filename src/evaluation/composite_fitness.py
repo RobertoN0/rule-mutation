@@ -1,16 +1,18 @@
 """
 Composite fitness evaluator for the SBST hill-climbing optimizer.
 
-Tracks two signals per test case, used by the lexicographic acceptance
-criterion in the hill climber:
+Computes two signals per test case, which the (1+1) EA aggregates into the
+three objectives of a per-rule Pareto archive (see ``ea_optimizer`` /
+``pareto_archive``):
 
-    semgrep_delta   : float   — semgrep_score - baseline_score (primary axis)
+    semgrep_delta   : float   — semgrep_score - baseline_score (effectiveness)
     code_divergence : float   — 1 - CodeBLEU(generated, reference)  [0, 1]
 
-``semgrep_delta`` is the primary fitness signal.  ``code_divergence`` is the
-secondary axis: it measures how much the mutation changed the LLM's actual
-code output, and is used to break ties and avoid semantics-preserving identity
-mutations being accepted.
+``semgrep_delta`` is the effectiveness signal; ``code_divergence`` measures how
+much the mutation changed the LLM's actual code output.  The EA aggregates these
+across a rule's test cases into f1 = total semgrep delta, f2 = proportion of
+divergent cases, f3 = conditional mean divergence, and admits a candidate to the
+archive iff it is **not Pareto-dominated** on (f1, f2, f3). 
 
 Reference code
 --------------
