@@ -978,8 +978,10 @@ class HillClimber:
                 raise
             raise
 
+        _orig_raw = sum(r.raw_count for r in original_fitness.individual_results)
         self._log(f"   Original fitness: {original_fitness.total_fitness:.1f} "
-                  f"({original_fitness.num_vulnerable}/{original_fitness.num_prompts} vulnerable)")
+                  f"({original_fitness.num_vulnerable}/{original_fitness.num_prompts} vulnerable, "
+                  f"{_orig_raw} raw findings)")
 
         # Index baseline per-case fitness and reference code for composite delta computation
         if self.composite_evaluator is not None:

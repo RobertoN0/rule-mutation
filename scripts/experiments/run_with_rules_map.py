@@ -323,6 +323,28 @@ def main():
         help="Quantization for the delftblue backend: fp16 (default) or 4bit"
     )
     parser.add_argument(
+        "--bnb-compute-dtype",
+        default="float16",
+        choices=["float16", "bfloat16"],
+        help=(
+            "4-bit (NF4) dequant compute dtype for the delftblue backend. "
+            "Only used when --quantization 4bit. Default float16; use bfloat16 "
+            "for bf16-native models (e.g. Llama-3.3) to avoid fp16 overflow."
+        ),
+    )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=0.0,
+        help=(
+            "Sampling temperature for the code-gen (model-under-test) calls "
+            "only (default: 0.0 = deterministic greedy decoding, matching the "
+            "temp=0 baselines). >0.0 enables sampling (do_sample=True) for the "
+            "temp>0 statistical arm. Does NOT affect LLM mutators: they pass "
+            "their own fixed per-call temperature (e.g. paraphrase=0.6)."
+        ),
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Test pipeline without API calls"
@@ -457,6 +479,14 @@ def main():
     
     args = parser.parse_args()
 
+    try:
+        from transformers import set_seed as _set_seed
+        _set_seed(args.seed)
+    except Exception as _seed_err:  # transformers absent (non-GPU env) → best effort
+        import random as _random
+        _random.seed(args.seed)
+        print(f"⚠️  transformers.set_seed unavailable ({_seed_err}); seeded stdlib random only")
+
     # Install stdout/stderr tee → <output_dir>/run.log so local runs leave a
     # persistent log next to their artifacts (DelftBlue SLURM .out/.err files
     # already land in logs/)
@@ -552,10 +582,11 @@ def main():
 
         config = LLMConfig(
             model=args.model,
-            temperature=0.0,
+            temperature=args.temperature,
             max_tokens=4096,
             extra={
                 "quantization": args.quantization,
+                "bnb_4bit_compute_dtype": args.bnb_compute_dtype,
                 "local_files_only": True,
                 "trust_remote_code": True,
             },
@@ -584,7 +615,7 @@ def main():
         config = LLMConfig(
             model=args.model,
             api_key=api_key,
-            temperature=0.0,
+            temperature=args.temperature,
             max_tokens=4096,
         )
         try:
@@ -607,7 +638,7 @@ def main():
         config = LLMConfig(
             model=args.model,
             api_key=api_key,
-            temperature=0.0,
+            temperature=args.temperature,
             max_tokens=4096,
         )
         try:
@@ -759,12 +790,16 @@ def main():
         f"{result.total_input_tokens + result.total_output_tokens:,}"
     )
     print()
+    _orig_raw = sum(r.raw_count for r in result.original_fitness.individual_results)
+    _best_raw = sum(r.raw_count for r in result.best_fitness.individual_results)
     print(f"Original fitness: {result.original_fitness.total_fitness:.1f}")
     print(f"  - Vulnerable prompts: {result.original_fitness.num_vulnerable}/{result.original_fitness.num_prompts}")
+    print(f"  - Raw vulnerabilities (total semgrep findings): {_orig_raw}")
     print(f"  - Mean fitness: {result.original_fitness.mean_fitness:.2f}")
     print()
     print(f"Best fitness: {result.best_fitness.total_fitness:.1f}")
     print(f"  - Vulnerable prompts: {result.best_fitness.num_vulnerable}/{result.best_fitness.num_prompts}")
+    print(f"  - Raw vulnerabilities (total semgrep findings): {_best_raw}")
     print(f"  - Mean fitness: {result.best_fitness.mean_fitness:.2f}")
     print()
     print(f"Fitness increase: {result.fitness_increase:+.1f}")
@@ -802,6 +837,8 @@ def main():
                 "backend":                args.backend,
                 "model":                  args.model,
                 "quantization":           getattr(args, "quantization", None),
+                "bnb_compute_dtype":      getattr(args, "bnb_compute_dtype", None),
+                "temperature":            getattr(args, "temperature", None),
                 "rules_map":              str(args.rules_map),
                 "n_cases":                args.n_cases,
                 "iterations":             args.iterations,
