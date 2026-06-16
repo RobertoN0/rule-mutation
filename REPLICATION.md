@@ -86,7 +86,7 @@ covers Python + Java; `--languages python` keeps it small and cheap):
 # activated venv:  source .venv/bin/activate first
 python scripts/experiments/run_with_rules_map.py \
   --backend claude --optimizer ea \
-  --rules-map pipeline_breakdown/rule_retrieval_output/map_qwen32b_python_java.json \
+  --rules-map rule_maps/map_qwen32b_python_java.json \
   --n-cases 2 --iterations 5 \
   --archive-cap 6 --restart-h 8 --max-depth-ea 4 \
   --mutators synonym_replacement add_random_word verb_weakening \

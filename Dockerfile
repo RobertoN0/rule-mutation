@@ -21,7 +21,7 @@
 #     codeguard-sbst:replication \
 #     python scripts/experiments/run_with_rules_map.py \
 #       --backend claude --optimizer random_baseline \
-#       --rules-map pipeline_breakdown/rule_retrieval_output/map_qwen32b_python_java.json \
+#       --rules-map rule_maps/map_qwen32b_python_java.json \
 #       --n-cases 2 --iterations 3 --languages python --seed 42 \
 #       --mutators synonym_replacement add_random_word verb_weakening \
 #       --output-dir /app/results/docker_smoke
@@ -66,10 +66,11 @@ RUN uv sync --frozen --no-dev
 COPY src                 ./src
 COPY scripts             ./scripts
 COPY project-codeguard   ./project-codeguard
-COPY pipeline_breakdown  ./pipeline_breakdown
+COPY rule_maps           ./rule_maps
 COPY README.md           ./README.md
 COPY REPLICATION.md      ./REPLICATION.md
 COPY ARCHITECTURE.md     ./ARCHITECTURE.md
+COPY IMPLEMENTATION.md   ./IMPLEMENTATION.md
 COPY WORKFLOW.md         ./WORKFLOW.md
 
 # Smoke test by default. Override at `docker run` time for real experiments.

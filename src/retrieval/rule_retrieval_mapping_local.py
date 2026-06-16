@@ -23,15 +23,15 @@ Usage
   sbatch scripts/slurm/slurm_rule_retrieval_local.sh
 
   # Direct (on a GPU node with sbst env active):
-  python pipeline_breakdown/rule_retrieval_mapping_local.py --limit-per-cwe 5
+  python src/retrieval/rule_retrieval_mapping_local.py --limit-per-cwe 5
 
   # Expand coverage, skipping already-mapped prompts:
-  python pipeline_breakdown/rule_retrieval_mapping_local.py \\
+  python src/retrieval/rule_retrieval_mapping_local.py \\
       --limit-per-cwe 10 \\
-      --exclude-map pipeline_breakdown/rule_retrieval_output/prev_run.json
+      --exclude-map rule_maps/prev_run.json
 
   # Dry run:
-  python pipeline_breakdown/rule_retrieval_mapping_local.py --dry-run
+  python src/retrieval/rule_retrieval_mapping_local.py --dry-run
 """
 
 from __future__ import annotations
@@ -79,7 +79,7 @@ TEMPERATURE = 0.0
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 RULES_DIR = PROJECT_ROOT / "project-codeguard" / "skills" / "software-security" / "rules"
-OUTPUT_DIR = PROJECT_ROOT / "pipeline_breakdown" / "rule_retrieval_output"
+OUTPUT_DIR = PROJECT_ROOT / "rule_maps"
 
 # ── Language -> file extension (for dataset loading) ─────────────────────────
 LANG_EXTENSIONS = {

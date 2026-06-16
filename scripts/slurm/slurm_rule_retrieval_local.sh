@@ -26,7 +26,7 @@
 #
 #   # Expand coverage, skipping already-mapped prompts
 #   LIMIT_PER_CWE=10 \
-#   EXCLUDE_MAP=pipeline_breakdown/rule_retrieval_output/prev_run.json \
+#   EXCLUDE_MAP=rule_maps/prev_run.json \
 #     sbatch scripts/slurm/slurm_rule_retrieval_local.sh
 #
 #   # Specific languages, 4-bit quantization
@@ -34,7 +34,7 @@
 #     sbatch scripts/slurm/slurm_rule_retrieval_local.sh
 #
 #   # Resume an interrupted run
-#   RESUME=pipeline_breakdown/rule_retrieval_output/rule_retrieval_progress_local_20260410.jsonl \
+#   RESUME=rule_maps/rule_retrieval_progress_local_20260410.jsonl \
 #     sbatch scripts/slurm/slurm_rule_retrieval_local.sh
 #############################################################################
 
@@ -144,7 +144,7 @@ if [ -n "$OUTPUT" ]; then
     ARGS="$ARGS --output $OUTPUT"
 fi
 
-python pipeline_breakdown/rule_retrieval_mapping_local.py \
+python src/retrieval/rule_retrieval_mapping_local.py \
     --model "$MODEL_ID" \
     --quantization "$QUANTIZATION" \
     --max-tokens "$MAX_TOKENS" \

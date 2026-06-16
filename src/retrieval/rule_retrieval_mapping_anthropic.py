@@ -24,25 +24,23 @@ Prerequisites
 Usage
 ─────
   # Full run (all 1,916 prompts) with the default model (claude-sonnet-4-6)
-  uv run python pipeline_breakdown/rule_retrieval_mapping_anthropic.py
+  uv run python src/retrieval/rule_retrieval_mapping_anthropic.py
 
-  # Cheap replication run: 2 prompts, Haiku 4.5, non-interactive, from a
-  # pre-existing interesting_cases JSON (skips the HuggingFace dataset download)
-  uv run python pipeline_breakdown/rule_retrieval_mapping_anthropic.py \\
-      --prompts-from-json pipeline_breakdown/generation_results/<cases>.json \\
-      --limit-total 2 \\
+  # Cheap replication run: 1 prompt, Haiku 4.5, non-interactive (~1 cent)
+  uv run python src/retrieval/rule_retrieval_mapping_anthropic.py \\
+      --cwes CWE-89 --languages python --limit-per-cwe 1 \\
       --model claude-haiku-4-5 \\
       --yes
 
   # Specific CWEs / languages
-  uv run python pipeline_breakdown/rule_retrieval_mapping_anthropic.py \\
+  uv run python src/retrieval/rule_retrieval_mapping_anthropic.py \\
       --cwes CWE-89 CWE-79 --languages python java
 
   # Dry run (estimate cost, don't call the API)
-  uv run python pipeline_breakdown/rule_retrieval_mapping_anthropic.py --dry-run
+  uv run python src/retrieval/rule_retrieval_mapping_anthropic.py --dry-run
 
   # Resume an interrupted run
-  uv run python pipeline_breakdown/rule_retrieval_mapping_anthropic.py \\
+  uv run python src/retrieval/rule_retrieval_mapping_anthropic.py \\
       --resume rule_retrieval_progress_<TIMESTAMP>.jsonl
 """
 
@@ -89,7 +87,7 @@ def _resolve_project_root() -> Path:
 
 PROJECT_ROOT = _resolve_project_root()
 RULES_DIR  = PROJECT_ROOT / "project-codeguard" / "skills" / "software-security" / "rules"
-OUTPUT_DIR = PROJECT_ROOT / "pipeline_breakdown" / "rule_retrieval_output"
+OUTPUT_DIR = PROJECT_ROOT / "rule_maps"
 
 # Per-1M-token pricing for the Anthropic models we may use. Falls back to
 # Sonnet rates for unknown models so the cost estimate is never zero by accident.

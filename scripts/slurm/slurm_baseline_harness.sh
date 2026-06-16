@@ -48,8 +48,8 @@ else
 fi
 
 REPO_ROOT="${REPO_ROOT:-/home/rnegro/thesis/rule-mutation}"
-NORULES_MAP="$REPO_ROOT/pipeline_breakdown/rule_retrieval_output/map_no_rules_python_java.json"
-WITHRULES_MAP="$REPO_ROOT/pipeline_breakdown/rule_retrieval_output/map_qwen32b_python_java.json"
+NORULES_MAP="$REPO_ROOT/rule_maps/map_no_rules_python_java.json"
+WITHRULES_MAP="$REPO_ROOT/rule_maps/map_qwen32b_python_java.json"
 SEMGREP_RULESET=${SEMGREP_RULESET:-/scratch/$USER/semgrep-rules/security-audit}
 SEMGREP_TIMEOUT_SECONDS=${SEMGREP_TIMEOUT_SECONDS:-180}
 SEMGREP_JOBS=${SEMGREP_JOBS:-4}

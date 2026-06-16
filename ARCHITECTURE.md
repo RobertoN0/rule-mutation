@@ -80,7 +80,7 @@ strategy** differs between the two configurations
 ## The pipeline, step by step
 
 1. **Select** prompts from CyberSecEval (a language / count filter, seeded).
-2. **Map** each prompt to the CodeGuard rules relevant to it (pre-computed retrieval maps under `pipeline_breakdown/rule_retrieval_output/`).
+2. **Map** each prompt to the CodeGuard rules relevant to it (pre-computed retrieval maps under `rule_maps/`).
 3. **Mutate** the target rule with one of the 8 mutators, respecting the *safe-zone contract* (frontmatter, fenced code, and inline code are never touched).
 4. **Validate** the mutation against four quality criteria — *informational*: the metadata is recorded for post-run analysis and never gates the search.
 5. **Generate** code for every prompt that uses the rule, under the original rule (baseline, once) and under the mutated rule.
