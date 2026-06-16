@@ -119,13 +119,13 @@ uv sync --extra dev --extra analysis    # see the uv gotcha above
 
 # Single run → RQ1 (per-rule + per-prompt baseline-vs-best, Wilcoxon/McNemar),
 # RQ2 (per-mutator effective rate + bootstrap CI), convergence, cost + cache hygiene
-python scripts/analyze/analyze_run.py experiments/results/local_smoke
+uv run python scripts/analyze/analyze_run.py experiments/results/local_smoke
 
 # Across runs → RQ3 (EA vs random, paired tests), multi-seed median+IQR
-python scripts/analyze/compare_runs.py experiments/results/
+uv run python scripts/analyze/compare_runs.py experiments/results/
 
 # Informational quality-validation audit (only for --enable-validation runs)
-python scripts/analyze/validation_audit.py <run_dir>
+uv run python scripts/analyze/validation_audit.py <run_dir>
 ```
 
 Each script writes a `summary.md` + CSVs + PNGs into `<run_dir>/analysis/` (or a `--out` dir for `compare_runs.py`).

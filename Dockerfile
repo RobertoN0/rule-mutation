@@ -70,6 +70,7 @@ COPY pipeline_breakdown  ./pipeline_breakdown
 COPY README.md           ./README.md
 COPY REPLICATION.md      ./REPLICATION.md
 COPY ARCHITECTURE.md     ./ARCHITECTURE.md
+COPY IMPLEMENTATION.md   ./IMPLEMENTATION.md
 COPY WORKFLOW.md         ./WORKFLOW.md
 
 # Smoke test by default. Override at `docker run` time for real experiments.
