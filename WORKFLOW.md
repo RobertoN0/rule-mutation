@@ -23,7 +23,7 @@ source .venv/bin/activate        # or prefix commands with `uv run`
 
 python scripts/experiments/run_with_rules_map.py \
   --backend claude --model claude-haiku-4-5 --optimizer ea \
-  --rules-map pipeline_breakdown/rule_retrieval_output/map_qwen32b_python_java.json \
+  --rules-map rule_maps/map_qwen32b_python_java.json \
   --n-cases 8 --iterations 25 \
   --archive-cap 6 --restart-h 8 --max-depth-ea 4 \
   --mutators synonym_replacement add_random_word verb_weakening \
@@ -57,7 +57,7 @@ The chosen model is recorded in `run_config.json` and `hillclimb_summary_*.json`
 | `--backend {claude,openai,delftblue}` | code-generation provider |
 | `--model NAME` | model within the provider (default resolved per backend) |
 | `--optimizer {ea,random_baseline}` | search strategy |
-| `--rules-map PATH` | prompt → rule-IDs map (pre-computed maps in `pipeline_breakdown/rule_retrieval_output/`) |
+| `--rules-map PATH` | prompt → rule-IDs map (pre-computed maps in `rule_maps/`) |
 | `--n-cases N`, `--languages …` | size + language filter of the prompt set |
 | `--iterations T` | search budget (one code-gen call per iteration) |
 | `--selection {first,random}` | take the first N cases, or a seeded random N |
@@ -210,7 +210,7 @@ lack them (the data is still there). To finish a shorter run, lower `--n-cases`
 | Findings all 0 **and** `semgrep_debug` shows errored scans | `semgrep` not on PATH | activate the venv / `uv run` / `PATH="$PWD/.venv/bin:$PATH"` |
 | `pytest` gone after `uv sync --extra analysis` | uv pruned the `dev` extra | `uv sync --extra dev --extra analysis` (combine extras) |
 | `FileNotFoundError: project-codeguard/...` | submodule not initialised | `git submodule update --init --recursive` |
-| `No matching prompts in rule mapping` | the rules map doesn't match the dataset slice | use a committed map under `pipeline_breakdown/rule_retrieval_output/` |
+| `No matching prompts in rule mapping` | the rules map doesn't match the dataset slice | use a committed map under `rule_maps/` |
 | `WARNING: no reference data-flows extracted` (only visible in old logs) | CodeBLEU can't parse a few prompts | harmless and **silenced by default** (root-logger filter in `composite_fitness.py`); that prompt's divergence omits the data-flow sub-score. Findings unaffected. |
 
 ---

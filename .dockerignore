@@ -37,8 +37,7 @@ experiments/results
 generated_code
 useful_files
 delftblue
-pipeline_breakdown/interesting_generated_files
-pipeline_breakdown/rule_retrieval_output/*progress*.jsonl
+rule_maps/*progress*.jsonl
 old_security_smells_thesis
 python_notebook_experiment
 literature_review

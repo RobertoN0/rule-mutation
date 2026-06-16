@@ -68,7 +68,7 @@ gpu = [
 ]
 
 # Rule-retrieval scripts (build retrieval_map JSONs from raw CodeGuard rules).
-# Optional because pre-computed maps in pipeline_breakdown/rule_retrieval_output/ let
+# Optional because pre-computed maps in rule_maps/ let
 # replicators skip this step entirely.
 retrieval = [
     "langchain>=0.3,<0.4",

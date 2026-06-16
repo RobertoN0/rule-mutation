@@ -135,7 +135,7 @@ Each script writes a `summary.md` + CSVs + PNGs into `<run_dir>/analysis/` (or a
 ## How it works
 
 1. **Select** test prompts from CyberSecEval.
-2. **Map** relevant CodeGuard rules to each prompt via AI-based retrieval (pre-computed maps in `pipeline_breakdown/rule_retrieval_output/`).
+2. **Map** relevant CodeGuard rules to each prompt via AI-based retrieval (pre-computed maps in `rule_maps/`).
 3. **Mutate** the target rule with one of 8 adversarial strategies.
 4. **Validate** mutation quality (SBERT similarity, instruction adherence, security-keyword retention) — *informational and post-hoc*: every candidate is recorded, none are rejected (the validator never gates the search).
 5. **Generate** code with the configured backend on the original vs. mutated rule — Qwen2.5-Coder-32B-Instruct on DelftBlue, or Claude / OpenAI locally.
@@ -207,14 +207,15 @@ Reproduce any run with `python scripts/experiments/rerun_from_config.py <run_dir
 │   ├── optimizer/         # (1+1) EA + Pareto archive (ea_optimizer.py, pareto_archive.py)
 │   │                      #   + stateless random baseline; HillClimber orchestration
 │   ├── evaluation/        # Semgrep runner, CodeBLEU code-divergence, fitness, rule/dataset loading
-│   └── llm_backends/      # Claude / OpenAI / DelftBlue-local backends
+│   ├── llm_backends/      # Claude / OpenAI / DelftBlue-local backends
+│   └── retrieval/         # prompt → CodeGuard-rule map builders (local + Anthropic; [retrieval] extra)
 ├── scripts/
 │   ├── experiments/       # run_with_rules_map.py (entrypoint); rerun_from_config.py (reproducer)
 │   ├── slurm/             # slurm_ea_qwen32b.sh (EA / random) + slurm_rule_retrieval_local.sh
 │   └── analyze/           # loaders, stats, analyze_run, compare_runs, validation_audit
 ├── tests/unit/            # 181 unit tests
 ├── project-codeguard/     # CodeGuard security rule library (git submodule)
-├── pipeline_breakdown/    # Pre-computed rule-retrieval maps
+├── rule_maps/             # Pre-computed prompt → rule-ID retrieval maps
 ├── literature_review/     # Paper PDFs + INDEX_AND_LINKS.md + analysis docs
 ├── experiments/results/   # Experiment outputs (gitignored)
 ├── Dockerfile             # API-only replication image

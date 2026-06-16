@@ -96,7 +96,7 @@ MUTATION_MAX_RETRIES=${MUTATION_MAX_RETRIES:-2}
 ENABLE_EVAL_CACHE=${ENABLE_EVAL_CACHE:-1}
 
 MODEL_ID="Qwen/Qwen2.5-Coder-32B-Instruct"
-RULES_MAP=${RULES_MAP:-"/home/rnegro/thesis/rule-mutation/pipeline_breakdown/rule_retrieval_output/map_qwen32b_python_java.json"}
+RULES_MAP=${RULES_MAP:-"/home/rnegro/thesis/rule-mutation/rule_maps/map_qwen32b_python_java.json"}
 
 # Validate OPTIMIZER value
 if [ "$OPTIMIZER" != "ea" ] && [ "$OPTIMIZER" != "random_baseline" ]; then

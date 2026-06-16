@@ -12,7 +12,7 @@ Usage:
 
     # Full run with specific model and iteration budget
     python scripts/experiments/run_with_rules_map.py \
-        --rules-map pipeline_breakdown/rule_retrieval_output/map_qwen32b_python_java.json \
+        --rules-map rule_maps/map_qwen32b_python_java.json \
         --model Qwen/Qwen2.5-Coder-32B-Instruct \
         --iterations 10
 
@@ -121,8 +121,7 @@ SCHEMA_VERSION = 2
 
 # Default paths (relative to project root)
 DEFAULT_RULES_MAP = (
-    PROJECT_ROOT / "pipeline_breakdown" / "rule_retrieval_output" / 
-    "map_qwen32b_python_java.json"
+    PROJECT_ROOT / "rule_maps" / "map_qwen32b_python_java.json"
 )
 RULES_DIR = PROJECT_ROOT / "project-codeguard" / "skills" / "software-security" / "rules"
 
