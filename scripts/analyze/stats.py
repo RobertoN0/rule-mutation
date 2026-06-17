@@ -9,6 +9,7 @@ return a result object with ``p`` = None and a ``note`` rather than raising.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import sqrt
 from typing import Sequence
 
 import numpy as np
@@ -99,3 +100,19 @@ def bootstrap_ci(outcomes: Sequence[float], n_boot: int = 10000, ci: float = 0.9
     lo = float(np.quantile(means, (1 - ci) / 2))
     hi = float(np.quantile(means, 1 - (1 - ci) / 2))
     return (point, lo, hi)
+
+
+def wilson_ci(successes: int, n: int, z: float = 1.959963984540054) -> tuple[float, float, float]:
+    """Wilson score interval for a binomial proportion.
+
+    Returns (point_estimate, lo, hi). Empty samples return NaN values.
+    """
+    if n <= 0:
+        return (float("nan"), float("nan"), float("nan"))
+    phat = successes / n
+    denom = 1 + z * z / n
+    centre = phat + z * z / (2 * n)
+    margin = z * sqrt((phat * (1 - phat) + z * z / (4 * n)) / n)
+    lo = (centre - margin) / denom
+    hi = (centre + margin) / denom
+    return (phat, lo, hi)

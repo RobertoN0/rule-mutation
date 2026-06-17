@@ -111,7 +111,11 @@ class RunData:
     @property
     def languages(self) -> list[str]:
         langs = self.args.get("languages")
-        return list(langs) if langs else []
+        if not langs:
+            return []
+        if isinstance(langs, str):
+            return [langs]
+        return list(langs)
 
     @property
     def iter_prefix(self) -> str:
@@ -183,6 +187,19 @@ def per_rule_best(run: RunData) -> dict[str, dict]:
         if rid not in best or it["f1"] > best[rid]["f1"]:
             best[rid] = it
     return best
+
+
+def per_rule_worst(run: RunData) -> dict[str, dict]:
+    """For each rule_id, the iteration record with the LOWEST f1 (most defensive
+    / safest direction — the negative-f1 excursion)."""
+    worst: dict[str, dict] = {}
+    for it in valid_iters(run):
+        rid = it.get("rule_id")
+        if rid is None:
+            continue
+        if rid not in worst or it["f1"] < worst[rid]["f1"]:
+            worst[rid] = it
+    return worst
 
 
 def convergence(run: RunData) -> list[tuple[int, float]]:
