@@ -25,35 +25,23 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import csv
 import statistics
 import sys
 from collections import defaultdict
 from pathlib import Path
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 import loaders as L
 import stats as S
+from report.tables import md_table, write_csv
+from viz.style import plt
 
 
 def _lang_key(run: L.RunData) -> str:
     return ",".join(run.languages) if run.languages else "all"
-
-
-def write_csv(path: Path, header, rows) -> None:
-    with open(path, "w", newline="", encoding="utf-8") as f:
-        w = csv.writer(f); w.writerow(header); w.writerows(rows)
-
-
-def md_table(header, rows) -> str:
-    out = ["| " + " | ".join(header) + " |", "| " + " | ".join("---" for _ in header) + " |"]
-    out += ["| " + " | ".join(str(c) for c in r) + " |" for r in rows]
-    return "\n".join(out)
 
 
 def _iqr_band(curves: list[list[float]]) -> tuple[list[float], list[float], list[float]]:

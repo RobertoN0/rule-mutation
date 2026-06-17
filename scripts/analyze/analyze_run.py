@@ -29,36 +29,15 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import csv
 import sys
 from pathlib import Path
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 import loaders as L
 import stats as S
-
-
-# ---------------------------------------------------------------------------
-# Small output helpers
-# ---------------------------------------------------------------------------
-
-def write_csv(path: Path, header: list[str], rows: list[list]) -> None:
-    with open(path, "w", newline="", encoding="utf-8") as f:
-        w = csv.writer(f)
-        w.writerow(header)
-        w.writerows(rows)
-
-
-def md_table(header: list[str], rows: list[list]) -> str:
-    out = ["| " + " | ".join(header) + " |",
-           "| " + " | ".join("---" for _ in header) + " |"]
-    for r in rows:
-        out.append("| " + " | ".join(str(c) for c in r) + " |")
-    return "\n".join(out)
+from report.tables import md_table, write_csv
+from viz.style import plt
 
 
 # ---------------------------------------------------------------------------
@@ -72,6 +51,7 @@ def rq1_per_rule_table(run: L.RunData) -> list[list]:
     """
     base = run.baseline()
     base_by_tc = {str(r["test_case_id"]): r for r in base}
+    worst = L.per_rule_worst(run)
     rows: list[list] = []
     for rid, it in sorted(L.per_rule_best(run).items()):
         affected = [
@@ -81,6 +61,7 @@ def rq1_per_rule_table(run: L.RunData) -> list[list]:
         base_f = sum(int(base_by_tc[tc]["fitness"]["raw_count"]) for tc in affected)
         it_find = L.iteration_findings(run, it["iter"])
         best_f = sum(int(it_find.get(tc, 0)) for tc in affected)
+        wit = worst.get(rid)
         rows.append([
             rid.replace("codeguard-", "cg-"),
             len(affected),
@@ -90,6 +71,8 @@ def rq1_per_rule_table(run: L.RunData) -> list[list]:
             "+".join(it.get("mutation_chain") or []) or "(none)",
             it.get("chain_length"),
             f'{it["f1"]:+.2f}',
+            f'{wit["f1"]:+.2f}' if wit else "+0.00",
+            ("+".join(wit.get("mutation_chain") or []) or "(none)") if wit else "(none)",
         ])
     return rows
 
@@ -107,25 +90,6 @@ def rq1_paired_findings(run: L.RunData) -> tuple[list[int], list[int], list[str]
         t_vals.append(int(best.get(tc, 0)))
         langs.append(r.get("language", "?"))
     return b_vals, t_vals, langs
-
-
-def fig_rq1(run: L.RunData, out: Path) -> Path | None:
-    b, t, langs = rq1_paired_findings(run)
-    if not b:
-        return None
-    fig, ax = plt.subplots(figsize=(7, 4))
-    x = range(len(b))
-    for i in x:
-        ax.plot([0, 1], [b[i], t[i]], color="lightgray", lw=0.8, zorder=1)
-    ax.scatter([0] * len(b), b, label="baseline (original rule)", zorder=2)
-    ax.scatter([1] * len(t), t, label="best mutation", zorder=2)
-    ax.set_xticks([0, 1]); ax.set_xticklabels(["baseline", "best"])
-    ax.set_ylabel("Semgrep findings per prompt")
-    ax.set_title(f"RQ1 — per-prompt findings: baseline vs best\n{run.name}")
-    ax.legend()
-    p = out / "rq1_baseline_vs_best.png"
-    fig.tight_layout(); fig.savefig(p, dpi=120); plt.close(fig)
-    return p
 
 
 # ---------------------------------------------------------------------------
@@ -181,6 +145,32 @@ def fig_convergence(run: L.RunData, out: Path) -> Path | None:
     return p
 
 
+def fig_per_rule_fitness(run: L.RunData, out: Path) -> Path | None:
+    """Per-rule fitness reach: the most-adversarial (max f1, red →) and the
+    most-defensive (min f1, green ←) result the search found for each rule."""
+    best = L.per_rule_best(run)
+    worst = L.per_rule_worst(run)
+    rids = sorted(set(best) | set(worst))
+    if not rids:
+        return None
+    labels = [r.replace("codeguard-", "cg-") for r in rids]
+    best_v = [float(best.get(r, {}).get("f1", 0.0) or 0.0) for r in rids]
+    worst_v = [float(worst.get(r, {}).get("f1", 0.0) or 0.0) for r in rids]
+
+    fig, ax = plt.subplots(figsize=(7, 0.32 * len(rids) + 1.5))
+    ax.barh(labels, best_v, color="#c73e3a", label="best f1 (most vulnerable)")
+    ax.barh(labels, worst_v, color="#3d8f5f", label="safest f1 (most defensive)")
+    ax.axvline(0, color="#333333", linewidth=0.8)
+    ax.set_xlabel("f1 = total_semgrep_delta vs baseline")
+    ax.set_title(f"Per-rule fitness reach — {run.name}")
+    ax.tick_params(labelsize=8)
+    ax.grid(True, axis="x", alpha=0.25, linewidth=0.4)
+    ax.legend(fontsize=8, loc="lower right")
+    p = out / "per_rule_fitness.png"
+    fig.tight_layout(); fig.savefig(p, dpi=120); plt.close(fig)
+    return p
+
+
 # ---------------------------------------------------------------------------
 # Driver
 # ---------------------------------------------------------------------------
@@ -212,24 +202,38 @@ def analyze(run: L.RunData, out: Path) -> str:
         sizes = {rid: len(rec.get("current_entries", [])) for rid, rec in arch.items()}
         lines.append(f"- final archive sizes: {sizes}")
 
-    # RQ1
-    lines.append("\n## RQ1 — per-rule findings (baseline → best)")
-    r1 = rq1_per_rule_table(run)
-    header1 = ["rule", "prompts", "base_find", "best_find", "Δ", "winning_chain", "chain_len", "best_f1"]
-    write_csv(out / "rq1_per_rule.csv", header1, r1)
-    lines.append(md_table(header1, r1) if r1 else "(no rules)")
+    # RQ1 significance — does the best mutation systematically change findings?
+    lines.append("\n## RQ1 significance — paired tests (baseline vs best)")
+    lines.append("_For each prompt: finding count under the original rules vs. at the run's best "
+                 "(most-adversarial) iteration. Low p = the best mutation significantly increases findings._")
     b, t, _ = rq1_paired_findings(run)
     if b:
         pos = [x > 0 for x in b]; pos_t = [x > 0 for x in t]
-        lines.append("\n**Paired tests (all prompts, baseline vs best):**")
         lines.append(f"- {S.wilcoxon_paired(b, t)}")
         lines.append(f"- {S.mcnemar_binary(pos, pos_t)}")
-    f = fig_rq1(run, out)
+    else:
+        lines.append("(no prompts)")
+
+    # Per-rule fitness reach (most-adversarial vs most-defensive per rule) — the headline figure
+    f = fig_per_rule_fitness(run, out)
     if f:
-        lines.append(f"\n![RQ1]({f.name})")
+        lines.append("\n## Per-rule fitness reach (best vs safest)")
+        lines.append("_Per rule: red = most-vulnerable f1 reached (→), green = safest/most-negative f1 (←); "
+                     "0 = the original rule. Bars left of 0 = rephrasings made the model write safer code._")
+        lines.append(f"![per-rule fitness]({f.name})")
+
+    # RQ1 detail table (long; for drill-down)
+    lines.append("\n## RQ1 — per-rule findings (table)")
+    r1 = rq1_per_rule_table(run)
+    header1 = ["rule", "prompts", "base_find", "best_find", "Δ", "winning_chain", "chain_len",
+               "best_f1", "safest_f1", "safest_chain"]
+    write_csv(out / "rq1_per_rule.csv", header1, r1)
+    lines.append(md_table(header1, r1) if r1 else "(no rules)")
 
     # RQ2
     lines.append("\n## RQ2 — per-mutator effectiveness")
+    lines.append("_effective_rate = fraction of a mutator's applications that increased f1; "
+                 "95% CI is a bootstrap interval (wide = few applications)._")
     r2 = rq2_table(run)
     header2 = ["mutator", "applications", "f1_advancing", "effective_rate", "95%_CI"]
     write_csv(out / "rq2_per_mutator.csv", header2, r2)
@@ -238,10 +242,10 @@ def analyze(run: L.RunData, out: Path) -> str:
     if f:
         lines.append(f"\n![RQ2]({f.name})")
 
-    # Trajectory
+    # Convergence (best-so-far f1 over iterations) — kept for drill-down
     f = fig_convergence(run, out)
     if f:
-        lines.append(f"\n## Trajectory\n![convergence]({f.name})")
+        lines.append(f"\n## Convergence (secondary)\n![convergence]({f.name})")
 
     text = "\n".join(lines) + "\n"
     (out / "summary.md").write_text(text, encoding="utf-8")

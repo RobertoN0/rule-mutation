@@ -171,12 +171,42 @@ python scripts/analyze/analyze_run.py experiments/results/<run>
 # Across runs: RQ3 (EA vs random, paired sign/Wilcoxon), multi-seed median+IQR
 python scripts/analyze/compare_runs.py experiments/results/
 
+# RESULTS FRAMING (bd-7kr): Cisco-style prompt headline + rule-prompt macro/micro backing view
+python scripts/analyze/outcome_distribution.py experiments/results/<run_or_parent> --out analysis_output/outcomes
+
+# RQ-AXIS TOOLKIT (schema-2 metrics package; each CLI = thin wrapper over metrics/ + viz/ + report/)
+# See scripts/analyze/README.md for the full guide. Per-rule fitness variation (f1 envelope per rule):
+python scripts/analyze/fitness_trajectories.py experiments/results/<run_or_parent> --source iterations
+# Merge a run's reports into one curated REPORT.md:
+python scripts/analyze/collect_reports.py experiments/results/<run>/analysis
+
+# RQ2 mutator effectiveness (bd-03k.1): lineage delta, position/order, LLM-vs-structural, best paths
+python scripts/analyze/analyze_mutators.py experiments/results/<runs_or_parent>
+
+# Security detail: per-CWE outcomes, which Semgrep checks a rephrasing added/removed, severity shifts
+python scripts/analyze/analyze_security.py experiments/results/<run_or_parent>
+
+# Search behaviour (RQ3): efficiency, restart reasons (bd-qfm gate), Pareto front, EA-vs-random
+python scripts/analyze/analyze_search.py experiments/results/<runs_or_parent>
+
+# Cost / operational: wall time, tokens, eval-cache, latency, budget-matched best-f1
+python scripts/analyze/analyze_cost.py experiments/results/<runs_or_parent>
+
 # Validation audit (only for --enable-validation runs): per-criterion fail rate,
 #   per-mutator pass rate, "what if we had gated" simulation
 python scripts/analyze/validation_audit.py experiments/results/<val_run>
 ```
 
-Each per-run script writes `summary.md` + CSVs + PNGs into `<run>/analysis/`.
+The legacy per-run scripts write `summary.md` + CSVs + PNGs into `<run>/analysis/`.
+The schema-2 toolkit (`outcome_distribution` and the RQ-axis CLIs) writes per-run reports plus
+cross-run CSV/Markdown under the selected `--out` directory; layers live in
+`scripts/analyze/{metrics,viz,report}/` (pure compute / plotting / serialization). The
+`outcome_distribution` scopes are:
+
+- `prompt`: prompt-level headline, collapsed over all observed rephrasings of retrieved rules.
+- `applicable`: rule-prompt exposures where the rule was actually retrieved for the prompt.
+- `all_prompt_rules`: every mutated rule crossed with every prompt, treating non-applicable
+  pairs as unchanged; useful for compatibility with the first bd-7kr evidence table.
 
 ### Quick manual peek at the trajectory
 
