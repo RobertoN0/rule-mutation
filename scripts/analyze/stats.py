@@ -82,6 +82,28 @@ def sign_test(deltas: Sequence[float]) -> TestResult:
                       note=f"pos={pos}, neg={neg}")
 
 
+def ttest_paired(baseline: Sequence[float], treatment: Sequence[float]) -> TestResult:
+    """Paired t-test on paired observations (e.g. per-seed totals, norules vs withrules).
+
+    Parametric counterpart to the sign / Wilcoxon tests: uses the magnitude of each
+    paired difference and assumes the differences are roughly normal. Degrades
+    gracefully on <2 pairs or zero-variance differences (returns p=None + note).
+    Statistic sign follows ``treatment - baseline`` (negative → treatment lower).
+    """
+    from scipy import stats
+
+    a, b = np.asarray(baseline, float), np.asarray(treatment, float)
+    n = len(a)
+    if n < 2:
+        return TestResult("Paired t-test", None, None, n, note="need >=2 pairs")
+    diffs = b - a
+    if np.allclose(diffs, diffs[0]):
+        return TestResult("Paired t-test", None, None, n,
+                          note="zero variance in differences (all pairs identical delta)")
+    res = stats.ttest_rel(b, a)
+    return TestResult("Paired t-test", float(res.statistic), float(res.pvalue), n)
+
+
 def bootstrap_ci(outcomes: Sequence[float], n_boot: int = 10000, ci: float = 0.95,
                  seed: int = 0) -> tuple[float, float, float]:
     """Bootstrap CI for the mean of a sample (e.g. per-mutator effective rate).
