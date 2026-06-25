@@ -28,6 +28,21 @@ if TYPE_CHECKING:
     from .hill_climber import IterationResult, PerRuleResult
 
 
+class WallTimeStop(BaseException):
+    """Raised to abort the IN-FLIGHT iteration when SLURM's pre-timeout signal
+    fires, so we don't wait out a (possibly ~1h) iteration before saving.
+
+    Subclasses ``BaseException`` (not ``Exception``) on purpose: the evaluation
+    hot path wraps the eval call in ``except Exception`` (rate-limit handling),
+    and we must NOT let that swallow the stop. It is raised from a controlled
+    checkpoint (the per-prompt loop in ``HillClimber._evaluate_with_per_prompt_rules``,
+    which checks ``should_stop_fn``), never from the async signal handler — the
+    handler only sets a flag. ``run_ea`` catches it at the eval call, discards the
+    partial iteration, and falls through to its normal finalization (last
+    completed iteration's archive snapshot + summary).
+    """
+
+
 # evaluate_fn signature contract — mirrors the eval seam from
 # HillClimber._evaluate_with_per_prompt_rules so callers can plug it in directly.
 # mutation_chain is the full ordered list of mutator names that produced the
@@ -237,6 +252,7 @@ def run_ea(
         mutator: "Mutator | None" = None
         mutation_chain: list[str] = []
         _inner_exhausted = False
+        _wall_stop = False  # set if the pre-timeout signal aborts this eval
 
         while True:
             available = archive.available_mutators(parent, mutator_names)
@@ -261,6 +277,11 @@ def run_ea(
                     f"ea_iter{i+1:04d}",
                     mutation_chain,
                 )
+            except WallTimeStop:
+                # Pre-timeout signal landed mid-eval: discard this in-flight
+                # iteration and break out to finalize from the last completed one.
+                _wall_stop = True
+                break
             except Exception as e:
                 if "rate_limit" in str(e).lower() or "429" in str(e) or "413" in str(e):
                     log(f"\n⚠️  Rate limit hit at EA iteration {i+1}: {e}")
@@ -309,6 +330,12 @@ def run_ea(
 
             # Non-identity result — proceed with archive update.
             break  # inner loop
+
+        if _wall_stop:
+            log(f"\n⏱️  Pre-timeout signal during iteration {i+1} — discarding the "
+                f"in-flight iteration; finalizing from {last_completed} completed "
+                f"iterations.")
+            break  # outer loop
 
         if rate_limit_hit:
             break  # outer loop

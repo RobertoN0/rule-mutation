@@ -86,7 +86,16 @@ class HillClimbConfig:
     
     fitness_strategy: FitnessStrategy = FitnessStrategy.SEVERITY_WEIGHTED
     """How to calculate fitness from Semgrep results."""
-    
+
+    objective_direction: str = "maximize"
+    """Optimization direction for the f1 (semgrep_delta) objective.
+        "maximize" — reward MORE vulnerabilities than baseline (the attack: degrade
+                     secure-code generation). Default; preserves all prior behavior.
+        "minimize" — reward FEWER vulnerabilities than baseline. Implemented by
+                     negating semgrep_delta so the EA's maximize logic is unchanged;
+                     a positive recorded f1 then means the mutation REDUCED vulns.
+    """
+
     random_restarts: int = 0
     """Number of random restarts to escape local optima."""
     
@@ -710,6 +719,11 @@ class HillClimber:
         cache_enabled = self.config.enable_eval_cache
 
         for idx, pwr in enumerate(prompts_with_rules):
+            if phase != "baseline":
+                _stop = getattr(self, "_should_stop_fn", None)
+                if _stop is not None and _stop():
+                    from .ea_optimizer import WallTimeStop
+                    raise WallTimeStop()
             rule_text = pwr.combined_rules if pwr.combined_rules else None
             mutated_rule_file = None
 
@@ -834,7 +848,14 @@ class HillClimber:
                     test_case_id=tc_id,
                     lang=test_prompt.language,   # bd-03k.2: per-case CodeBLEU grammar
                 )
-                fitness.composite_score = composite_result.semgrep_delta
+                # f1 objective = semgrep_delta. For a "minimize vulnerabilities"
+                # run we negate it so the EA's maximize/Pareto logic is unchanged
+                # (higher f1 ⇒ fewer vulns than baseline). Default ("maximize")
+                # leaves the sign untouched, preserving all prior behavior.
+                _delta = composite_result.semgrep_delta
+                if self.config.objective_direction == "minimize":
+                    _delta = -_delta
+                fitness.composite_score = _delta
                 fitness.code_divergence = composite_result.code_divergence
                 fitness.details["composite"] = composite_result.components
 

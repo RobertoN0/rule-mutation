@@ -293,7 +293,17 @@ def main():
         "--iterations", "-i",
         type=int,
         default=5,
-        help="Number of hill climbing iterations (default: 5)"
+        help="Number of hill climbing iterations (default: 5). Upper-bound cap; "
+             "set high for time-bounded SLURM runs and let the wall-time signal "
+             "(SIGUSR1, see --signal) stop the run by aborting the in-flight iteration."
+    )
+    parser.add_argument(
+        "--objective-direction",
+        choices=["maximize", "minimize"],
+        default="maximize",
+        help="f1 optimization direction. 'maximize' (default) = degrade security "
+             "(more vulnerabilities, the attack). 'minimize' = reward fewer "
+             "vulnerabilities than baseline (positive recorded f1 ⇒ mutation reduced vulns).",
     )
     parser.add_argument(
         "--model", "-m",
@@ -522,8 +532,9 @@ def main():
     def _on_sigusr1(_signum, _frame):
         if not _stop_requested["flag"]:
             _stop_requested["flag"] = True
-            print("\n⏱️  SIGUSR1 received (SLURM pre-timeout) — finishing the current "
-                  "iteration then saving final results.", flush=True)
+            print("\n⏱️  SIGUSR1 received (SLURM pre-timeout) — aborting the in-flight "
+                  "iteration and saving final results from the last completed one.",
+                  flush=True)
     try:
         _signal.signal(_signal.SIGUSR1, _on_sigusr1)
     except (ValueError, OSError):
@@ -724,6 +735,7 @@ def main():
         restart_h=args.restart_h,
         max_depth_ea=args.max_depth_ea,
         max_mutations_per_iter=args.max_mutations_per_iter,
+        objective_direction=args.objective_direction,
     )
 
     print(f"\n⚙️  Hill Climbing Configuration:")

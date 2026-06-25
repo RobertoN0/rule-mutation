@@ -94,6 +94,11 @@ ENABLE_VALIDATION=${ENABLE_VALIDATION:-0}
 ENABLE_PERPLEXITY=${ENABLE_PERPLEXITY:-0}
 MUTATION_MAX_RETRIES=${MUTATION_MAX_RETRIES:-2}
 ENABLE_EVAL_CACHE=${ENABLE_EVAL_CACHE:-1}
+# Optimization direction: "maximize" (attack: more vulns) | "minimize" (fewer vulns).
+OBJECTIVE_DIRECTION=${OBJECTIVE_DIRECTION:-maximize}
+# Time-bounded runs: set N_ITERATIONS high and let the SBATCH --time + the
+# pre-timeout signal (--signal=B:USR1@<lead>, header) stop the run by aborting the
+# in-flight iteration and finalizing from the last completed one. No iteration budget.
 
 MODEL_ID="Qwen/Qwen2.5-Coder-32B-Instruct"
 RULES_MAP=${RULES_MAP:-"/home/rnegro/thesis/rule-mutation/rule_maps/map_qwen32b_python_java.json"}
@@ -137,6 +142,7 @@ echo "  Mutators:        $MUTATORS"
 echo "  Validation:      $ENABLE_VALIDATION (1=enabled)"
 echo "  Perplexity gate: $ENABLE_PERPLEXITY (1=enabled; requires ENABLE_VALIDATION=1)"
 echo "  Eval cache:      $ENABLE_EVAL_CACHE (0=disabled)"
+echo "  Objective dir:   $OBJECTIVE_DIRECTION (minimize=reward fewer vulns)"
 echo ""
 echo "Input files:"
 echo "  Rules map:       $RULES_MAP"
@@ -240,6 +246,7 @@ python scripts/experiments/run_with_rules_map.py \
     --max-mutations-per-iter "$MAX_MUTATIONS_PER_ITER" \
     $VALIDATION_FLAG \
     $NO_EVAL_CACHE_FLAG \
+    --objective-direction "$OBJECTIVE_DIRECTION" \
     --semgrep-config "$SEMGREP_RULESET" \
     --semgrep-timeout-seconds "$SEMGREP_TIMEOUT_SECONDS" \
     --semgrep-jobs "$SEMGREP_JOBS" \
