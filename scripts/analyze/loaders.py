@@ -97,6 +97,18 @@ class RunData:
         return self.args.get("optimizer") or (self.summary.get("pool_arm_stats", {}) or {}).get("strategy", "?")
 
     @property
+    def objective_direction(self) -> str:
+        """'maximize' (attack: more vulns) | 'minimize' (reward fewer vulns).
+
+        Sign-aware reporting depends on this: under 'minimize' the f1 sign is
+        already flipped at search time, so within the run **higher f1 = SAFER**
+        — the opposite of the toolkit's default 'maximize' narrative. Defaults to
+        'maximize' for legacy runs predating run_config serialization of the
+        field (the two seed-42 minimize runs need their run_config patched, or
+        read the job name / run.log)."""
+        return self.args.get("objective_direction", "maximize")
+
+    @property
     def strategy(self) -> str:
         # iterations carry the canonical strategy ("ea" | "random_baseline")
         for it in self.iterations:
@@ -224,6 +236,40 @@ def iter_to_first_best(run: RunData) -> int | None:
         if it["f1"] >= bf:
             return it["iter"]
     return None
+
+
+def direction_terms(objective_direction: str) -> dict[str, str]:
+    """Sign-aware vocabulary + colour keys for f1 reporting.
+
+    f1 is the per-run search signal. Under ``'minimize'`` it is negated at search
+    time, so within the run **higher f1 = SAFER** (fewer vulnerabilities than
+    baseline); under ``'maximize'`` higher f1 = MORE vulnerable. Reporting that
+    does not flip with direction would colour minimize security wins red and call
+    them "most vulnerable". The viz/report layers interpolate these terms; colour
+    values are keys into ``style.OUTCOME_COLORS`` so this module stays
+    matplotlib-free. Pass ``RunData.objective_direction``.
+    """
+    if objective_direction == "minimize":
+        return {
+            "high_label": "largest reduction (safest)",
+            "low_label": "least reduction / worsened",
+            "pos_delta_label": "+ = fewer vulnerabilities (safer)",
+            "best_f1_label": "largest vulnerability reduction vs baseline",
+            "positive_iter_label": "found a safer rephrasing",
+            "high_color": "safer",        # high f1 = safer  → green
+            "low_color": "degraded",      # low  f1 = worse  → red
+            "goal": "minimize vulnerabilities",
+        }
+    return {
+        "high_label": "most vulnerable",
+        "low_label": "safest (negative f1)",
+        "pos_delta_label": "+ = more vulnerable",
+        "best_f1_label": "largest vulnerability increase vs baseline",
+        "positive_iter_label": "found a more-vulnerable rephrasing",
+        "high_color": "degraded",         # high f1 = more vulnerable → red
+        "low_color": "safer",             # low  f1 = safer          → green
+        "goal": "maximize vulnerabilities (attack)",
+    }
 
 
 def baseline_findings(run: RunData) -> dict[str, int]:
