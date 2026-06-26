@@ -858,6 +858,7 @@ def main():
                 "languages":              args.languages,
                 "mutators":               args.mutators,
                 "optimizer":              args.optimizer,
+                "objective_direction":    args.objective_direction,
                 "archive_cap":            args.archive_cap,
                 "restart_h":              args.restart_h,
                 "max_depth_ea":           args.max_depth_ea,

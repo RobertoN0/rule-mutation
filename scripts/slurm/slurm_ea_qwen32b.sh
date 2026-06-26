@@ -177,12 +177,15 @@ echo "=== GPU Check ==="
 nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv
 echo ""
 
-# Output dir: tag the optimizer (and cap for EA) so EA / random / sweep runs don't mingle
+# Output dir: tag the optimizer (and cap for EA) so EA / random / sweep runs don't mingle.
+# OUTPUT_BASE lets a curated set (e.g. the final experiments) land in its own directory
+# instead of the shared results/ pool. Default preserves prior behaviour.
+OUTPUT_BASE=${OUTPUT_BASE:-experiments/results}
 DATE=$(date +%m%d)
 if [ "$OPTIMIZER" = "ea" ]; then
-    OUTPUT_DIR="experiments/results/job${SLURM_JOB_ID}_ea_cap${ARCHIVE_CAP}_h${RESTART_H}_${N_CASES}_${DATE}"
+    OUTPUT_DIR="${OUTPUT_BASE}/job${SLURM_JOB_ID}_ea_cap${ARCHIVE_CAP}_h${RESTART_H}_${N_CASES}_${DATE}"
 else
-    OUTPUT_DIR="experiments/results/job${SLURM_JOB_ID}_rand_${N_CASES}_${DATE}"
+    OUTPUT_DIR="${OUTPUT_BASE}/job${SLURM_JOB_ID}_rand_${N_CASES}_${DATE}"
 fi
 mkdir -p "$OUTPUT_DIR"
 mkdir -p logs
