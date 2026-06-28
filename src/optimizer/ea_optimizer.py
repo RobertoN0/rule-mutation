@@ -641,6 +641,15 @@ def run_random_baseline(
                 f"rand_iter{i+1:04d}",
                 chain_names,
             )
+        except WallTimeStop:
+            # Pre-timeout signal landed mid-eval: discard this in-flight iteration
+            # and break out so the summary + return below run and the caller
+            # finalizes (run_config + hillclimb_summary) from completed iterations.
+            # Mirrors run_ea (without this, WallTimeStop — a BaseException — escapes
+            # the except-Exception below, crashes the run, and nothing is saved).
+            log(f"\n⏹️  Graceful stop (SLURM pre-timeout) mid-eval — "
+                f"stopping after {len(iterations)}/{max_iterations} iterations")
+            break
         except Exception as e:
             if "rate_limit" in str(e).lower() or "429" in str(e) or "413" in str(e):
                 log(f"\n⚠️  Rate limit hit at random-baseline iteration {i+1}: {e}")

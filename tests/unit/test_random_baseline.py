@@ -175,3 +175,37 @@ class TestMutatorStats:
         result, _ = _run(mutators=_mutators(8), max_iterations=40, K=4, seed=10, f1=0.0)
         for stats in result.mutator_stats.values():
             assert stats["applications_f1_advancing"] == 0
+
+
+class TestWallTimeStop:
+    """Regression: a WallTimeStop raised mid-eval must break and let the runner
+    return (so the caller finalizes run_config + summary), not propagate and crash.
+    This is the bug that lost every random run in the first final set."""
+
+    def test_walltime_stop_finalizes_instead_of_crashing(self):
+        from src.optimizer.ea_optimizer import WallTimeStop
+
+        calls = {"n": 0}
+
+        def stub(target_rid, parent_text, mutator, iteration, phase, mutation_chain):
+            calls["n"] += 1
+            if calls["n"] == 3:                 # signal lands during the 3rd eval
+                raise WallTimeStop()
+            return (_fit(f1=1.0), [], ["c"], {}, mutator.mutate(parent_text).mutated)
+
+        # Must not raise; the 2 completed iterations are kept, the 3rd is discarded.
+        result = run_random_baseline(
+            prompts_with_rules=_make_prompts(["r1"]),
+            all_rule_ids=["r1"],
+            rule_originals={"r1": "ORIGINAL[r1]"},
+            mutators=_mutators(8),
+            evaluate_fn=stub,
+            iteration_result_factory=IterationResult,
+            per_rule_result_factory=PerRuleResult,
+            max_iterations=50,
+            max_mutations_per_iter=4,
+            seed=1,
+            log=_silent,
+        )
+        assert result is not None
+        assert len(result.iterations) == 2
