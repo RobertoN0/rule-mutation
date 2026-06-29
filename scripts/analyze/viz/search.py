@@ -61,6 +61,36 @@ def convergence_band(runs_by_strategy: dict[str, list[L.RunData]], out_path: Pat
     return style.savefig(fig, out_path)
 
 
+def best_f1_box(runs_by_strategy: dict[str, list[L.RunData]], out_path: Path,
+                title: str) -> Path:
+    """Box of per-run best_f1 per strategy, with the individual seed points overlaid.
+
+    The canonical RQ3 figure (Arcuri & Briand): are the EA bests distributed above
+    the random bests? With a single strategy it just shows that arm's spread across
+    seeds — useful even before the random arm lands. Points are overlaid because n is
+    small, so the raw values must stay visible.
+    """
+    import numpy as np
+
+    order = [s for s in ("ea", "random_baseline") if runs_by_strategy.get(s)]
+    order += [s for s in sorted(runs_by_strategy) if s not in order and runs_by_strategy.get(s)]
+    data = [[L.best_f1(r) for r in runs_by_strategy[s]] for s in order]
+    if not any(data):
+        return out_path
+
+    fig, ax = plt.subplots(figsize=(1.8 * len(order) + 2.0, 4.5))
+    ax.boxplot(data, widths=0.5, showmeans=True)
+    ax.set_xticks(range(1, len(order) + 1))
+    ax.set_xticklabels([f"{s.replace('_baseline', '')}\n(n={len(d)})" for s, d in zip(order, data)])
+    rng = np.random.default_rng(0)
+    for i, d in enumerate(data, start=1):
+        ax.scatter(rng.normal(i, 0.05, len(d)), d, s=26, color="#333333", alpha=0.8, zorder=3)
+    ax.set_ylabel("best_f1 (per run)", fontsize=9)
+    ax.set_title(title, fontsize=11)
+    ax.grid(True, axis="y", alpha=0.25, linewidth=0.4)
+    return style.savefig(fig, out_path)
+
+
 def convergence_overlay(runs: list[L.RunData], out_path: Path, title: str) -> Path:
     """Best-so-far f1 vs iteration, one line per run (labelled strategy/seed)."""
     colors = style.distinct_colors(len(runs))

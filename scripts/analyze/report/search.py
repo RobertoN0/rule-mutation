@@ -82,6 +82,8 @@ def write_comparison(runs: list[L.RunData], out_dir: Path) -> None:
             lines.append("- ⚠️ n < 4 per arm: Mann-Whitney U cannot reach p < 0.05 (small-n floor) — "
                          "read Â₁₂ and the raw values, not the p-value.")
 
+    VSR.best_f1_box(by_strat, out_dir / "best_f1_box.png", "best_f1 per run by strategy")
+    lines.append("\n![best_f1 box](best_f1_box.png)")
     VSR.convergence_band(by_strat, out_dir / "convergence_band.png",
                          f"Convergence — median + IQR ({len(runs)} runs)")
     lines.append("\n![convergence band](convergence_band.png)\n")
