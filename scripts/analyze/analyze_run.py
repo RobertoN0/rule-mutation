@@ -157,9 +157,12 @@ def fig_per_rule_fitness(run: L.RunData, out: Path) -> Path | None:
     best_v = [float(best.get(r, {}).get("f1", 0.0) or 0.0) for r in rids]
     worst_v = [float(worst.get(r, {}).get("f1", 0.0) or 0.0) for r in rids]
 
+    terms = L.direction_terms(run.objective_direction)
+    _minz = run.objective_direction == "minimize"
+    hi_color, lo_color = ("#3d8f5f", "#c73e3a") if _minz else ("#c73e3a", "#3d8f5f")
     fig, ax = plt.subplots(figsize=(7, 0.32 * len(rids) + 1.5))
-    ax.barh(labels, best_v, color="#c73e3a", label="best f1 (most vulnerable)")
-    ax.barh(labels, worst_v, color="#3d8f5f", label="safest f1 (most defensive)")
+    ax.barh(labels, best_v, color=hi_color, label=f"max f1: {terms['high_label']}")
+    ax.barh(labels, worst_v, color=lo_color, label=f"min f1: {terms['low_label']}")
     ax.axvline(0, color="#333333", linewidth=0.8)
     ax.set_xlabel("f1 = total_semgrep_delta vs baseline")
     ax.set_title(f"Per-rule fitness reach — {run.name}")
@@ -204,8 +207,9 @@ def analyze(run: L.RunData, out: Path) -> str:
 
     # RQ1 significance — does the best mutation systematically change findings?
     lines.append("\n## RQ1 significance — paired tests (baseline vs best)")
+    _eff = "reduces" if run.objective_direction == "minimize" else "increases"
     lines.append("_For each prompt: finding count under the original rules vs. at the run's best "
-                 "(most-adversarial) iteration. Low p = the best mutation significantly increases findings._")
+                 f"iteration. Low p = the best mutation significantly {_eff} findings._")
     b, t, _ = rq1_paired_findings(run)
     if b:
         pos = [x > 0 for x in b]; pos_t = [x > 0 for x in t]

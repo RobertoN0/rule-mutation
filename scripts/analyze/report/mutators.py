@@ -22,8 +22,10 @@ def _position_matrix(position_rows: list[list]):
     return mutators, positions, matrix
 
 
-def _write_step_derived(steps, out_dir: Path, label: str, *, with_plots: bool) -> list[str]:
+def _write_step_derived(steps, out_dir: Path, label: str, *, with_plots: bool,
+                        direction: str = "maximize") -> list[str]:
     """Shared per-mutator / position / composition outputs for a set of steps."""
+    t = L.direction_terms(direction)
     per_mut = MUT.per_mutator_delta(steps)
     position = MUT.position_table(steps)
     composition = MUT.composition_compare(steps)
@@ -35,10 +37,9 @@ def _write_step_derived(steps, out_dir: Path, label: str, *, with_plots: bool) -
     lines = [f"# Mutator effectiveness - {label}\n"]
     lines.append(f"- lineage steps: {len(steps)}")
     lines.append("_A step credits the last mutator in the chain with `delta = f1 - parent_f1` (how much it "
-                 "moved security that step). `mean_delta` averages those: **negative = on average makes code "
-                 "safer**, positive = more vulnerable. `mean_delta_first`/`_later` split by whether the mutator "
-                 "opened the chain (depth 1) or was stacked deeper (order sensitivity)._\n")
-    lines.append("## Per-mutator step-delta (delta = f1 - parent_f1; + = more vulnerable)")
+                 f"moved f1 that step; {t['pos_delta_label']}). `mean_delta_first`/`_later` split by whether the "
+                 "mutator opened the chain (depth 1) or was stacked deeper (order sensitivity)._\n")
+    lines.append(f"## Per-mutator step-delta (delta = f1 - parent_f1; {t['pos_delta_label']})")
     lines.append(md_table(MUT.PER_MUTATOR_HEADER, per_mut))
     lines.append("\n## LLM vs structural vs mixed chains")
     lines.append(md_table(MUT.COMPOSITION_HEADER, composition))
@@ -48,7 +49,7 @@ def _write_step_derived(steps, out_dir: Path, label: str, *, with_plots: bool) -
     if with_plots:
         VM.per_mutator_delta_bar(
             [(r[0], r[3]) for r in per_mut], out_dir / "per_mutator_delta.png",
-            f"Per-mutator mean step-delta - {label}",
+            f"Per-mutator mean step-delta - {label}", direction=direction,
         )
         mutators, positions, matrix = _position_matrix(position)
         if mutators and positions:
@@ -72,7 +73,8 @@ def write_run_report(run: L.RunData, out_dir: Path) -> int:
     write_csv(out_dir / "per_rule_best_path.csv", MUT.BEST_PATH_HEADER, MUT.per_rule_best_path(run))
     write_csv(out_dir / "per_rule_safest_path.csv", MUT.SAFEST_PATH_HEADER, MUT.per_rule_safest_path(run))
 
-    lines = _write_step_derived(steps, out_dir, label, with_plots=True)
+    lines = _write_step_derived(steps, out_dir, label, with_plots=True,
+                                direction=run.objective_direction)
     lines.append("\n## Archive insertion rates (from summary)")
     lines.append(md_table(MUT.INSERT_RATE_HEADER, MUT.insert_rate_rows(run)))
     lines.append("\n## Recurring high-fitness combinations (surviving front)")
@@ -88,6 +90,7 @@ def write_run_report(run: L.RunData, out_dir: Path) -> int:
 def write_pooled_report(runs: list[L.RunData], out_dir: Path) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     steps = [s for run in runs for s in MUT.lineage_steps(run)]
-    lines = _write_step_derived(steps, out_dir, f"pooled ({len(runs)} runs)", with_plots=True)
+    lines = _write_step_derived(steps, out_dir, f"pooled ({len(runs)} runs)", with_plots=True,
+                                direction=(runs[0].objective_direction if runs else "maximize"))
     (out_dir / "mutators_pooled.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     return len(steps)

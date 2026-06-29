@@ -10,12 +10,21 @@ from pathlib import Path
 
 from matplotlib.lines import Line2D
 
+import loaders as L
 from metrics.series import Series
 from viz import style
 from viz.style import plt
 
 _ADVERSARIAL = style.OUTCOME_COLORS["degraded"]  # max / more vulnerable
 _DEFENSIVE = style.OUTCOME_COLORS["safer"]        # min / safer (negative f1)
+
+
+def _dir_colors(direction: str):
+    """(colour for max f1, colour for min f1, terms) for the run's objective.
+    'maximize': max f1 = red (more vulnerable). 'minimize': max f1 = green
+    (largest reduction = safest). Keeps the figure honest per direction."""
+    t = L.direction_terms(direction)
+    return style.OUTCOME_COLORS[t["high_color"]], style.OUTCOME_COLORS[t["low_color"]], t
 
 
 def small_multiples(
@@ -91,9 +100,12 @@ def overlay(
 
 def envelope_grid(
     best: list[Series], worst: list[Series], out_path: Path, title: str, ylabel: str,
+    direction: str = "maximize",
 ) -> Path:
-    """Per-rule panels showing BOTH search extremes: max f1 (adversarial, red)
-    and min f1 (safer / negative, green), shaded between, with a zero line."""
+    """Per-rule panels showing BOTH search extremes (max f1 and min f1), shaded
+    between, with a zero line. Colours follow the objective: 'maximize' paints
+    max f1 red (more vulnerable); 'minimize' paints it green (largest reduction)."""
+    hi_color, lo_color, _ = _dir_colors(direction)
     bmap = {s.key: s for s in best}
     wmap = {s.key: s for s in worst}
     keys = sorted(set(bmap) | set(wmap))
@@ -108,9 +120,9 @@ def envelope_grid(
         if b and w and b.xs == w.xs:
             ax.fill_between(b.xs, w.ys, b.ys, color="#d9d9d9", alpha=0.6)
         if w:
-            ax.plot(w.xs, w.ys, color=_DEFENSIVE, linewidth=1.2, marker="o", markersize=2)
+            ax.plot(w.xs, w.ys, color=lo_color, linewidth=1.2, marker="o", markersize=2)
         if b:
-            ax.plot(b.xs, b.ys, color=_ADVERSARIAL, linewidth=1.2, marker="o", markersize=2)
+            ax.plot(b.xs, b.ys, color=hi_color, linewidth=1.2, marker="o", markersize=2)
         ax.axhline(0, color="#333333", linewidth=0.6)
         ax.set_title((b or w).label, fontsize=7)
         ax.tick_params(labelsize=6)
@@ -125,24 +137,26 @@ def envelope_grid(
 
 def envelope_overlay(
     best: list[Series], worst: list[Series], out_path: Path, title: str, ylabel: str,
-    drop_flat: bool = True,
+    drop_flat: bool = True, direction: str = "maximize",
 ) -> Path:
-    """All rules' adversarial (max, red) and safer (min, green) trajectories on
-    one axis, around a zero line — the full up/down spread the search explored."""
+    """All rules' max-f1 and min-f1 trajectories on one axis, around a zero line —
+    the full up/down spread the search explored. Colours/legend follow the
+    objective (see ``_dir_colors``)."""
+    hi_color, lo_color, t = _dir_colors(direction)
     fig, ax = plt.subplots(figsize=(9, 4.5))
     for s in worst:
         if not (drop_flat and s.is_flat()):
-            ax.plot(s.xs, s.ys, color=_DEFENSIVE, linewidth=0.9, alpha=0.7)
+            ax.plot(s.xs, s.ys, color=lo_color, linewidth=0.9, alpha=0.7)
     for s in best:
         if not (drop_flat and s.is_flat()):
-            ax.plot(s.xs, s.ys, color=_ADVERSARIAL, linewidth=0.9, alpha=0.7)
+            ax.plot(s.xs, s.ys, color=hi_color, linewidth=0.9, alpha=0.7)
     ax.axhline(0, color="#333333", linewidth=0.8)
     ax.set_xlabel("iteration", fontsize=9)
     ax.set_ylabel(ylabel, fontsize=9)
     ax.set_title(title, fontsize=11)
     ax.grid(True, alpha=0.25, linewidth=0.4)
     ax.legend(handles=[
-        Line2D([0], [0], color=_ADVERSARIAL, label="max f1 per rule (more vulnerable)"),
-        Line2D([0], [0], color=_DEFENSIVE, label="min f1 per rule (safer / negative)"),
+        Line2D([0], [0], color=hi_color, label=f"max f1 per rule ({t['high_label']})"),
+        Line2D([0], [0], color=lo_color, label=f"min f1 per rule ({t['low_label']})"),
     ], loc="best", fontsize=7, frameon=False)
     return style.savefig(fig, out_path)

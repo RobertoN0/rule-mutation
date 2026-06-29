@@ -73,8 +73,10 @@ def write_run_trajectories(
             if not best and not worst:
                 continue
             tag = f"{source}_{field}_envelope"
-            TRJ.envelope_grid(best, worst, out_dir / f"grid_{tag}.png", title, ylabel)
-            TRJ.envelope_overlay(best, worst, out_dir / f"overlay_{tag}.png", title, ylabel, drop_flat=drop_flat)
+            TRJ.envelope_grid(best, worst, out_dir / f"grid_{tag}.png", title, ylabel,
+                              direction=run.objective_direction)
+            TRJ.envelope_overlay(best, worst, out_dir / f"overlay_{tag}.png", title, ylabel,
+                                 drop_flat=drop_flat, direction=run.objective_direction)
             made.append((tag, []))
             for bound, series_list in (("max", best), ("min", worst)):
                 for s in series_list:
