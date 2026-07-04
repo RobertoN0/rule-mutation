@@ -1,5 +1,6 @@
 .env
 .venv
+.tools/
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
@@ -36,8 +37,12 @@ results/
 DEPENDENCIES_AND_FLOW.md
 analysis_prompts/post_run_analysis.md
 
+literature_review/LITERATURE_REVIEW_ANALYSIS.md
+
 # Generated retrieval maps + progress logs (timestamped; API-side variability).
 # The committed reference maps are the explicit map_*.json files under rule_maps/.
 rule_maps/rule_retrieval_map_*.json
 rule_maps/retrieval_map_*.json
 rule_maps/*progress*.jsonl
+
+experiments/final/

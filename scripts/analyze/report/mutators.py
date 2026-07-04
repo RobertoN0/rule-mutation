@@ -79,9 +79,16 @@ def write_run_report(run: L.RunData, out_dir: Path) -> int:
     lines.append(md_table(MUT.INSERT_RATE_HEADER, MUT.insert_rate_rows(run)))
     lines.append("\n## Recurring high-fitness combinations (surviving front)")
     lines.append(md_table(MUT.COMBINATION_HEADER, MUT.combination_counts(run)) or "(none)")
-    lines.append("\n## Per-rule best path (most adversarial, max f1)")
+    # BEST_PATH = max-fitness path, SAFEST_PATH = min-fitness path. Their real-world
+    # meaning flips with the objective, so label them per direction to avoid confusion.
+    _minz = run.objective_direction == "minimize"
+    _max_hdr = ("Per-rule max-fitness path (the strongest repair: max fitness = safest)" if _minz
+                else "Per-rule max-fitness path (most adversarial: max fitness = most vulnerable)")
+    _min_hdr = ("Per-rule min-fitness path (the most-degrading: min fitness = most vulnerable)" if _minz
+                else "Per-rule min-fitness path (most defensive: min fitness = safest)")
+    lines.append(f"\n## {_max_hdr}")
     lines.append(md_table(MUT.BEST_PATH_HEADER, MUT.per_rule_best_path(run)) or "(none)")
-    lines.append("\n## Per-rule safest path (most defensive, min / negative f1)")
+    lines.append(f"\n## {_min_hdr}")
     lines.append(md_table(MUT.SAFEST_PATH_HEADER, MUT.per_rule_safest_path(run)) or "(none)")
     (out_dir / "mutators.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     return len(steps)

@@ -136,9 +136,11 @@ def fig_convergence(run: L.RunData, out: Path) -> Path | None:
     if not conv:
         return None
     xs, ys = zip(*conv)
+    terms = L.direction_terms(run.objective_direction)
     fig, ax = plt.subplots(figsize=(7, 4))
     ax.plot(xs, ys, marker="o", ms=3)
-    ax.set_xlabel("iteration"); ax.set_ylabel("best-so-far f1 (total_semgrep_delta)")
+    ax.set_xlabel("iteration")
+    ax.set_ylabel(f"best-so-far fitness (↑ = {terms['high_label']})")
     ax.set_title(f"Convergence — {run.name}")
     p = out / "convergence.png"
     fig.tight_layout(); fig.savefig(p, dpi=120); plt.close(fig)
@@ -146,8 +148,10 @@ def fig_convergence(run: L.RunData, out: Path) -> Path | None:
 
 
 def fig_per_rule_fitness(run: L.RunData, out: Path) -> Path | None:
-    """Per-rule fitness reach: the most-adversarial (max f1, red →) and the
-    most-defensive (min f1, green ←) result the search found for each rule."""
+    """Per-rule fitness reach: the max-fitness and min-fitness result the search
+    found for each rule. Colours/labels follow the objective (direction_terms):
+    under 'minimize' max fitness = safest (green), min = most vulnerable (red);
+    under 'maximize' the meanings (and colours) flip."""
     best = L.per_rule_best(run)
     worst = L.per_rule_worst(run)
     rids = sorted(set(best) | set(worst))
@@ -161,10 +165,12 @@ def fig_per_rule_fitness(run: L.RunData, out: Path) -> Path | None:
     _minz = run.objective_direction == "minimize"
     hi_color, lo_color = ("#3d8f5f", "#c73e3a") if _minz else ("#c73e3a", "#3d8f5f")
     fig, ax = plt.subplots(figsize=(7, 0.32 * len(rids) + 1.5))
-    ax.barh(labels, best_v, color=hi_color, label=f"max f1: {terms['high_label']}")
-    ax.barh(labels, worst_v, color=lo_color, label=f"min f1: {terms['low_label']}")
+    ax.barh(labels, best_v, color=hi_color, label=f"max fitness: {terms['high_label']}")
+    ax.barh(labels, worst_v, color=lo_color, label=f"min fitness: {terms['low_label']}")
     ax.axvline(0, color="#333333", linewidth=0.8)
-    ax.set_xlabel("f1 = total_semgrep_delta vs baseline")
+    _axis = ("fitness = baseline − mutated findings (↑ = safer)" if _minz
+             else "fitness = mutated − baseline findings (↑ = more vulnerable)")
+    ax.set_xlabel(_axis)
     ax.set_title(f"Per-rule fitness reach — {run.name}")
     ax.tick_params(labelsize=8)
     ax.grid(True, axis="x", alpha=0.25, linewidth=0.4)
@@ -187,7 +193,9 @@ def analyze(run: L.RunData, out: Path) -> str:
     lines.append("## Overview")
     lines.append(f"- optimizer/strategy: **{run.strategy}**  |  languages: {run.languages or 'all'}  |  seed: {run.seed}")
     lines.append(f"- iterations run: {s.get('num_iterations_run')} / {s.get('max_iterations')}")
-    lines.append(f"- best f1 (total_semgrep_delta): **{L.best_f1(run):+.2f}** (first reached at iter {L.iter_to_first_best(run)})")
+    _terms = L.direction_terms(run.objective_direction)
+    lines.append(f"- best fitness: **{L.best_f1(run):+.2f}** ({_terms['best_f1_label']}; "
+                 f"first reached at iter {L.iter_to_first_best(run)})")
     lines.append("\n## Cost")
     lines.append(f"- wall time: {s.get('total_time_seconds')}s  |  LLM calls: {s.get('total_llm_calls')}  "
                  f"|  tokens: {s.get('total_input_tokens')} in / {s.get('total_output_tokens')} out")
@@ -218,19 +226,27 @@ def analyze(run: L.RunData, out: Path) -> str:
     else:
         lines.append("(no prompts)")
 
-    # Per-rule fitness reach (most-adversarial vs most-defensive per rule) — the headline figure
+    # Per-rule fitness reach (max vs min fitness per rule) — the headline figure
     f = fig_per_rule_fitness(run, out)
     if f:
-        lines.append("\n## Per-rule fitness reach (best vs safest)")
-        lines.append("_Per rule: red = most-vulnerable f1 reached (→), green = safest/most-negative f1 (←); "
-                     "0 = the original rule. Bars left of 0 = rephrasings made the model write safer code._")
+        if run.objective_direction == "minimize":
+            reach = ("_Per rule: **green** = max fitness = safest rephrasing reached (bars **right** of 0 = "
+                     "fewer findings than baseline); **red** = min fitness = most-vulnerable rephrasing (bars "
+                     "left of 0 = more findings). 0 = the original rule. So bars **right** of 0 are repairs._")
+        else:
+            reach = ("_Per rule: **red** = max fitness = most-vulnerable rephrasing reached (bars **right** of "
+                     "0 = more findings than baseline); **green** = min fitness = safest (bars **left** of 0 = "
+                     "fewer findings). 0 = the original rule. So bars **left** of 0 are safer._")
+        lines.append("\n## Per-rule fitness reach (max vs min fitness)")
+        lines.append(reach)
         lines.append(f"![per-rule fitness]({f.name})")
 
     # RQ1 detail table (long; for drill-down)
     lines.append("\n## RQ1 — per-rule findings (table)")
     r1 = rq1_per_rule_table(run)
-    header1 = ["rule", "prompts", "base_find", "best_find", "Δ", "winning_chain", "chain_len",
-               "best_f1", "safest_f1", "safest_chain"]
+    # Direction-neutral names: max_fitness/min_fitness (under minimize, max = safest).
+    header1 = ["rule", "prompts", "base_find", "best_find", "Δ", "max_chain", "chain_len",
+               "max_fitness", "min_fitness", "min_chain"]
     write_csv(out / "rq1_per_rule.csv", header1, r1)
     lines.append(md_table(header1, r1) if r1 else "(no rules)")
 

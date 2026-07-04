@@ -61,12 +61,17 @@ A run directory contains:
 | `archive_snapshots/iterNNNN.json` | per-rule Pareto archive every 20 iters: front entries with `f1/f2/f3`, `depth`, `mutation_chain`, `restart_history` (the **true** chains) |
 | `mutated_rules/iterN/` | the mutated rule Markdown + `meta.json` |
 
-### The three objectives (all *maximised*, over the prompts that use the rule)
+### The three objectives (the EA always *maximises* f1 internally, over the prompts that use the rule)
 
-- **f1 = `total_semgrep_delta`** — extra weighted Semgrep findings vs. baseline
-  (weights **ERROR=3, WARNING=1, INFO=0**). The primary security signal.
-  **Higher f1 = the rephrasing made the model write *more* vulnerable code;
-  negative f1 = it made the model write *safer* code.**
+- **f1 = the security fitness** (weights **ERROR=3, WARNING=1, INFO=0**), the primary signal.
+  ⚠️ **Its sign depends on `objective_direction`** (recorded in `run_config.json`), because f1 is
+  negated at search time so the EA can always maximise:
+  - **`minimize` (the repair runs — all 20 final runs):** `f1 = baseline − mutated findings`, so
+    **higher f1 = SAFER** (fewer vulnerabilities), negative f1 = more vulnerable.
+  - **`maximize` (the legacy adversarial runs):** `f1 = mutated − baseline` (`total_semgrep_delta`), so
+    **higher f1 = MORE vulnerable**, negative f1 = safer.
+  Reporting resolves this via `loaders.direction_terms(run.objective_direction)` — never assume a sign
+  from the raw value alone.
 - **f2 = `proportion_divergent`** — fraction of affected prompts whose generated
   code changed at all (`code_divergence > 0`).
 - **f3 = `conditional_mean_divergence`** — mean CodeBLEU divergence among those
@@ -241,8 +246,11 @@ EA-vs-random), `outcome_comparison.md` (with a **field-reference glossary**).
 **What.** How a field evolves per rule (one curve per archive, ~21) as a
 small-multiples grid + an overlay. **Why.** A single best-f1 number hides the
 dynamics; this shows convergence, which rules drive gains, and — via the
-**envelope** — how far the search pushed each rule *up* (adversarial, red) and
-*down* (safer/negative, green). **Produces:** `grid_*`/`overlay_*` PNGs,
+**envelope** — how far the search pushed each rule to higher and lower fitness.
+Colours follow `objective_direction` (see `direction_terms`): under **minimize**
+(the repair runs) the high-fitness extreme is the *safer* one (green) and the
+low-fitness extreme is *more vulnerable* (red); under maximize the colours flip.
+**Produces:** `grid_*`/`overlay_*` PNGs,
 `series_long.csv`, `trajectories.md`.
 **Run.** `fitness_trajectories.py <run_or_parent>`
 - `--source iterations` (dense, every iteration) | `archive` (authoritative front state)

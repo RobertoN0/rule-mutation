@@ -181,8 +181,10 @@ def archive_series(run: L.RunData, field: str = "f1", reduce: str = "max") -> li
     """Per-rule series of a front-level field across the archive snapshots.
 
     For objective fields, ``reduce`` picks the front extreme: ``max`` = the
-    most-adversarial kept entry (higher f1), ``min`` = the most-defensive
-    (lower / negative f1 — the safer direction).
+    highest-fitness front entry, ``min`` = the lowest. Their real-world meaning
+    (safer vs more-vulnerable) depends on the run's ``objective_direction``:
+    under 'minimize' max fitness = safest, under 'maximize' max fitness = most
+    vulnerable. Callers colour/label accordingly (see ``direction_terms``).
     """
     label = field_label(field, source="archive")
     grouped: dict[str, Series] = {}

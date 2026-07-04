@@ -184,7 +184,9 @@ def valid_iters(run: RunData) -> list[dict]:
 
 
 def best_iteration(run: RunData) -> dict | None:
-    """The iteration with the highest f1 (= total_semgrep_delta) across the run."""
+    """The iteration with the highest fitness (f1) across the run — direction-correct
+    for both objectives, since f1 is negated at search time under 'minimize', so
+    max f1 is always the safest under 'minimize' / the most vulnerable under 'maximize'."""
     vi = valid_iters(run)
     return max(vi, key=lambda it: it["f1"]) if vi else None
 

@@ -104,6 +104,41 @@ def ttest_paired(baseline: Sequence[float], treatment: Sequence[float]) -> TestR
     return TestResult("Paired t-test", float(res.statistic), float(res.pvalue), n)
 
 
+def friedman_test(*conditions: Sequence[float]) -> TestResult:
+    """Friedman test — non-parametric repeated-measures ANOVA across >=3 related
+    conditions measured on the same blocks (RQ1/RQ3 aggregate across coding tasks).
+
+    Each ``conditions[i]`` is one condition's value per block (e.g. per coding
+    task), so all conditions must share the same length (the blocks are matched
+    rows). With exactly 2 conditions Friedman is undefined and reduces to the
+    Wilcoxon/sign test — use those instead. Degrades gracefully (p=None + note)
+    on <3 conditions, mismatched lengths, <2 blocks, or zero within-block variance
+    (all conditions identical on every block).
+    """
+    from scipy import stats
+
+    k = len(conditions)
+    arrs = [np.asarray(c, float) for c in conditions]
+    n = arrs[0].size if arrs else 0
+    if k < 3:
+        return TestResult("Friedman", None, None, n,
+                          note=f"need >=3 conditions (got {k}); 2 conditions -> use Wilcoxon/sign")
+    if any(a.size != n for a in arrs):
+        return TestResult("Friedman", None, None, n, note="conditions have mismatched lengths")
+    if n < 2:
+        return TestResult("Friedman", None, None, n, note="need >=2 blocks (tasks)")
+    stacked = np.vstack(arrs)               # k x n
+    if np.allclose(stacked.max(axis=0), stacked.min(axis=0)):
+        return TestResult("Friedman", None, None, n,
+                          note="no within-block variance (all conditions identical on every task)")
+    try:
+        res = stats.friedmanchisquare(*arrs)
+        return TestResult("Friedman", float(res.statistic), float(res.pvalue), n,
+                          note=f"k={k} conditions, n={n} blocks")
+    except ValueError as e:
+        return TestResult("Friedman", None, None, n, note=str(e))
+
+
 def mann_whitney_u(a: Sequence[float], b: Sequence[float],
                    alternative: str = "two-sided") -> TestResult:
     """Mann-Whitney U on two INDEPENDENT samples — the RQ3 primary

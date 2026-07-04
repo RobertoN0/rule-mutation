@@ -155,7 +155,9 @@ back to the SLURM wrapper's env vars (`--as delftblue` to force that form).
 - **f2 = `proportion_divergent`** — fraction of affected prompts whose generated code changed (`code_divergence > 0`).
 - **f3 = `conditional_mean_divergence`** — mean code divergence among those that changed.
 
-Higher f1 = the mutation made the LLM write more vulnerable code. f2/f3 capture
+f1's sign depends on `objective_direction` (f1 is negated at search time so the EA always
+maximises): under **minimize** (the repair runs) higher f1 = *safer* code (fewer findings);
+under **maximize** (legacy adversarial) higher f1 = *more vulnerable* code. f2/f3 capture
 whether the mutation changed the generated code *at all* — useful when Semgrep
 finds nothing but the output still shifted.
 

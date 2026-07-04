@@ -15,8 +15,9 @@ from metrics.series import Series
 from viz import style
 from viz.style import plt
 
-_ADVERSARIAL = style.OUTCOME_COLORS["degraded"]  # max / more vulnerable
-_DEFENSIVE = style.OUTCOME_COLORS["safer"]        # min / safer (negative f1)
+# NOTE: fitness colours are chosen per objective at draw time via ``_dir_colors``
+# (direction_terms high_color/low_color) — under 'minimize' max fitness = green
+# (safest), under 'maximize' max fitness = red (most vulnerable). Do not hardcode.
 
 
 def _dir_colors(direction: str):

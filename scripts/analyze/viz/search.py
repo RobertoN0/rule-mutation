@@ -85,7 +85,7 @@ def best_f1_box(runs_by_strategy: dict[str, list[L.RunData]], out_path: Path,
     rng = np.random.default_rng(0)
     for i, d in enumerate(data, start=1):
         ax.scatter(rng.normal(i, 0.05, len(d)), d, s=26, color="#333333", alpha=0.8, zorder=3)
-    ax.set_ylabel("best_f1 (per run)", fontsize=9)
+    ax.set_ylabel("best fitness (per run)", fontsize=9)
     ax.set_title(title, fontsize=11)
     ax.grid(True, axis="y", alpha=0.25, linewidth=0.4)
     return style.savefig(fig, out_path)

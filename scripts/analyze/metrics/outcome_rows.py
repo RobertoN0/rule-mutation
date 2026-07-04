@@ -61,7 +61,7 @@ SUMMARY_HEADER = [
     "applicable_macro_safer_rate", "applicable_macro_code_changed_rate",
     "all_micro_degraded_rate", "all_micro_unchanged_rate", "all_micro_safer_rate", "all_micro_code_changed_rate",
     "all_macro_degraded_rate", "all_macro_unchanged_rate", "all_macro_safer_rate", "all_macro_code_changed_rate",
-    "positive_iteration_rate", "best_f1",
+    "positive_iteration_rate", "best_fitness",
 ]
 PAIR_HEADER = [
     "language", "seed", "matched_prompts",

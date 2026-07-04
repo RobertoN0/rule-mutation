@@ -118,7 +118,8 @@ def per_mutator_delta(steps: list[LineageStep]) -> list[list]:
             sum(1 for d in deltas if d > 0), sum(1 for d in deltas if d < 0),
             max(deltas), min(deltas),
         ])
-    rows.sort(key=lambda r: r[3], reverse=True)  # by mean_delta desc (most adversarial first)
+    rows.sort(key=lambda r: r[3], reverse=True)  # mean_delta desc; sign meaning is
+    # direction-dependent: under 'minimize' +delta = safer (repair), under 'maximize' +delta = more vulnerable.
     return rows
 
 

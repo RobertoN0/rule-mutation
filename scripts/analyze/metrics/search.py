@@ -12,7 +12,7 @@ import loaders as L
 from metrics.outcomes import lang_key
 
 EFFICIENCY_HEADER = [
-    "run", "strategy", "language", "seed", "iterations", "best_f1",
+    "run", "strategy", "language", "seed", "iterations", "best_fitness",
     "iter_to_first_best", "positive_iteration_rate", "acceptance_rate", "identity_rate",
 ]
 RESTART_HEADER = ["reason", "count"]
