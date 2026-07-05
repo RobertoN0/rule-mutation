@@ -114,10 +114,11 @@ from src.evaluation.semgrep_runner import (
 # CONFIGURATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# Output schema version written to run_config.json. Bumped to 2 for the
-# post-redesign schema (unified mutation_chain, stateless random baseline).
-# Distinguishes new run trees from the old (schema_version absent ⇒ legacy).
-SCHEMA_VERSION = 2
+# Output schema version written to run_config.json. Bumped to 3 for the
+# full-chromosome archive redesign (single archive of RuleSetChromosomes, global
+# rule-order gene, signature cache). Schema 3 is a clean break — not comparable
+# to schema-2 per-rule runs (see CHROMOSOME_RESTRUCTURE_PLAN.md).
+SCHEMA_VERSION = 3
 
 # Default paths (relative to project root)
 DEFAULT_RULES_MAP = (
@@ -382,9 +383,32 @@ def main():
         choices=["ea", "random_baseline"],
         help=(
             "Optimizer family (default: ea). "
-            "ea = (1+1) EA over per-rule Pareto archive (3 objectives); "
-            "random_baseline = stateless per-iteration multi-mutation sampler, no archive."
+            "ea = (1+1) EA over a single full-chromosome Pareto archive (3 objectives); "
+            "random_baseline = persistent single-chromosome random walk, no archive."
         ),
+    )
+    parser.add_argument(
+        "--ea-n-mutations",
+        type=int,
+        default=1,
+        help=(
+            "EA: mutators applied per text move (default 1 = Design A / local search). "
+            ">1 = Design B: sample a 1..n chain per move to match the random baseline, "
+            "isolating selection as the only variable."
+        ),
+    )
+    parser.add_argument(
+        "--order-move-weight",
+        type=float,
+        default=0.0,
+        help="EA: probability weight of the rule-order mutation move (default 0 = off).",
+    )
+    parser.add_argument(
+        "--reverse-move-weight",
+        type=float,
+        default=0.0,
+        help="EA: probability weight of the reverse (restore-gene-to-original) move "
+             "(default 0 = off).",
     )
     parser.add_argument(
         "--archive-cap",
@@ -735,6 +759,9 @@ def main():
         restart_h=args.restart_h,
         max_depth_ea=args.max_depth_ea,
         max_mutations_per_iter=args.max_mutations_per_iter,
+        ea_n_mutations=args.ea_n_mutations,
+        order_move_weight=args.order_move_weight,
+        reverse_move_weight=args.reverse_move_weight,
         objective_direction=args.objective_direction,
     )
 
@@ -863,6 +890,9 @@ def main():
                 "restart_h":              args.restart_h,
                 "max_depth_ea":           args.max_depth_ea,
                 "max_mutations_per_iter": args.max_mutations_per_iter,
+                "ea_n_mutations":         args.ea_n_mutations,
+                "order_move_weight":      args.order_move_weight,
+                "reverse_move_weight":    args.reverse_move_weight,
                 "enable_validation":      args.enable_validation,
                 "enable_perplexity":      getattr(args, "enable_perplexity", False),
                 "enable_eval_cache":     not args.no_eval_cache,

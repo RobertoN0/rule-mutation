@@ -55,6 +55,7 @@ from src.llm_backends import LLMConfig  # noqa: E402
 from src.llm_backends.delftblue_local_backend import DelftBlueLocalBackend  # noqa: E402
 from src.mutation.base import Mutator, MutationResult  # noqa: E402
 from src.optimizer.hill_climber import HillClimber, HillClimbConfig  # noqa: E402
+from src.optimizer.chromosome import RuleSetSpace  # noqa: E402
 from src.evaluation.composite_fitness import CompositeFitnessEvaluator  # noqa: E402
 from src.evaluation.semgrep_runner import configure_semgrep  # noqa: E402
 
@@ -62,7 +63,9 @@ METRICS = ("raw_findings", "vulnerable_cases", "weighted_fitness")
 
 
 class _NoopMutator(Mutator):
-    """Identity mutator — baseline (target_rule_id=None) never applies it."""
+    """Identity mutator — the baseline harness only evaluates the origin
+    chromosome, so no mutation is ever applied; this just satisfies the
+    HillClimber's required mutator pool."""
 
     @property
     def name(self) -> str:
@@ -391,11 +394,9 @@ def main() -> None:
         languages=[args.language], selection=args.selection, seed=args.seed_base,
     )
     overridden_rule_ids: list[str] = []
-    mutated_rule_file = None
     if override_mode:
         override_texts = _load_override_texts(args.rules_override_dir)
         overridden_rule_ids = sorted(_apply_overrides(prompts, override_texts))
-        mutated_rule_file = str(args.rules_override_dir)
         print(f"   Injected mutated text into {len(overridden_rule_ids)} rule(s)", flush=True)
         if args.only_overridden_prompts:
             ov = set(overridden_rule_ids)
@@ -404,6 +405,13 @@ def main() -> None:
             print(f"   Restricted to {len(prompts)}/{before} prompts using an "
                   f"overridden rule", flush=True)
     print(f"   {len(prompts)} prompts", flush=True)
+
+    # Rule-set space (genome definition) over the possibly-overridden rule texts.
+    _originals: dict[str, str] = {}
+    for _p in prompts:
+        for _rid, _txt in _p.individual_rules.items():
+            _originals.setdefault(_rid, _txt)
+    _space = RuleSetSpace(all_rule_ids=sorted(_originals), originals=_originals)
 
     # ---- Resume: skip seeds already recorded -------------------------------
     rep_path = args.output_dir / "replicates.jsonl"
@@ -428,21 +436,12 @@ def main() -> None:
                 ),
                 composite_evaluator=CompositeFitnessEvaluator(reference_codes={}, lang=args.language),
             )
-            agg, results, *_rest = hc._evaluate_with_per_prompt_rules(
-                prompts, target_rule_id=None, mutator_fn=None,
-                iteration=None, phase="baseline",
+            # Schema-3 seam: render the (possibly overridden) rule set as the
+            # origin chromosome. intermediate/{iter_id}.jsonl (with generated_code)
+            # is written inside _evaluate_chromosome.
+            agg, *_rest = hc._evaluate_chromosome(
+                _space.origin(), _space, prompts, iter_id=iter_id,
             )
-            # Persist per-prompt records WITH generated_code (canonical schema).
-            records = []
-            for idx, r in enumerate(results):
-                rec = hc._build_intermediate_record(
-                    r, idx, iter_id, mutated_rule_file,
-                    prompts[idx].rule_ids if idx < len(prompts) else [],
-                    target_rule_id=None,
-                )
-                if rec is not None:
-                    records.append(rec)
-            hc._save_intermediate_iter_jsonl(iter_id, records)
 
             per_case = [r.raw_count for r in agg.individual_results]
             cases_per_check: Counter = Counter()

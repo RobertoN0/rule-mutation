@@ -51,6 +51,28 @@ def restart_rows(run: L.RunData) -> list[list]:
 
 def final_front_rows(run: L.RunData) -> list[list]:
     archive = run.final_archive()
+
+    # schema 3: single archive of full chromosomes. One row per chromosome; the
+    # "rule" column carries the chromosome id and "front_size" its mutated-gene
+    # count (columns reused to keep the FRONT_HEADER shape stable).
+    if "chromosomes" in archive:
+        n_ins = int(archive.get("n_inserts") or 0)
+        n_rej = int(archive.get("n_rejected") or 0)
+        n_dup = int(archive.get("n_dup_rejected") or 0)
+        rows = []
+        for ch in archive.get("chromosomes") or []:
+            genes = ch.get("genes") or {}
+            depth = max((int(g.get("depth") or 0) for g in genes.values()), default=0)
+            f1 = float(ch.get("f1") or 0.0)
+            rows.append([
+                ch.get("cid", "?"), len(genes), f1, f1,
+                float(ch.get("f2") or 0.0), round(float(ch.get("f3") or 0.0), 4), depth,
+                n_ins, n_rej, n_dup,
+            ])
+        rows.sort(key=lambda r: r[3], reverse=True)
+        return rows
+
+    # schema 2: per-rule archives.
     rows = []
     for rule_id, rule_archive in (archive.get("archives") or {}).items():
         entries = rule_archive.get("current_entries") or []
