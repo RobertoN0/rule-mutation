@@ -1,247 +1,139 @@
-"""Smoke tests for run_ea and run_random_baseline.
+"""Smoke + behaviour tests for the chromosome run_ea.
 
-These bypass the LLM/Semgrep pipeline by stubbing evaluate_fn. They verify
-the runner's iteration logic, archive integration, and restart behavior in
+The LLM/Semgrep pipeline is bypassed via a stub ``evaluate_chromosome_fn`` that
+scores a chromosome from its mutated-gene set, so we exercise the runner's move
+selection, archive integration, interaction stacking, and graceful stop in
 isolation.
 """
+from __future__ import annotations
 
 import pytest
 
 from src.evaluation.fitness import AggregatedFitness
 from src.evaluation.rule_mapping import PromptWithRules
 from src.mutation.base import Mutator, MutationResult
+from src.optimizer.chromosome import RuleSetSpace
 from src.optimizer.ea_optimizer import run_ea
-from src.optimizer.hill_climber import IterationResult, PerRuleResult
+from src.optimizer.hill_climber import IterationResult
 
-
-# ---------------------------------------------------------------------------
-# Stubs
-# ---------------------------------------------------------------------------
 
 class FakeMutator(Mutator):
-    """Deterministic mutator that appends its name to the input."""
+    """Deterministic mutator that appends its name (always non-identity)."""
 
-    def __init__(self, fake_name: str, seed: int | None = None):
-        super().__init__(seed)
-        self._name = fake_name
+    def __init__(self, name: str):
+        super().__init__(0)
+        self._n = name
 
     @property
     def name(self) -> str:
-        return self._name
+        return self._n
 
     def mutate(self, text: str) -> MutationResult:
-        out = f"{text}|{self._name}"
-        return MutationResult(
-            original=text,
-            mutated=out,
-            mutation_type=self._name,
-            changes=[f"applied {self._name}"],
-        )
+        return MutationResult(text, f"{text}|{self._n}", self._n, [f"+{self._n}"])
 
 
-def _fit(f1: float = 0.0, f2: float = 0.0, f3: float = 0.0) -> AggregatedFitness:
+def _fit(f1: float, f2: float = 0.0, f3: float = 0.0) -> AggregatedFitness:
     return AggregatedFitness(
-        total_fitness=f1,
-        mean_fitness=f1,
-        max_fitness=f1,
-        num_prompts=2,
-        num_vulnerable=int(f1 > 0),
-        individual_results=[],
-        total_semgrep_delta=f1,
-        total_code_divergence=f3 * 2,
-        n_divergent_prompts=int(f2 * 2),
-        mean_code_divergence=f3,
-        proportion_divergent=f2,
-        conditional_mean_divergence=f3,
+        total_fitness=f1, mean_fitness=f1, max_fitness=f1, num_prompts=2,
+        num_vulnerable=int(f1 > 0), individual_results=[], total_semgrep_delta=f1,
+        total_code_divergence=f3 * 2, n_divergent_prompts=int(f2 * 2),
+        mean_code_divergence=f3, proportion_divergent=f2, conditional_mean_divergence=f3,
     )
 
 
-def _make_prompts(rule_ids_per_prompt: list[list[str]]) -> list[PromptWithRules]:
-    out = []
-    for i, rids in enumerate(rule_ids_per_prompt):
-        individual = {rid: f"ORIGINAL[{rid}]" for rid in rids}
-        out.append(PromptWithRules(
-            prompt=f"prompt-{i}",
-            language="python",
-            cwe_id="cwe-079",
-            rule_ids=rids,
-            combined_rules="\n---\n".join(individual.values()),
-            individual_rules=individual,
-            metadata={"test_case_id": f"tc{i}"},
-        ))
-    return out
+def _space() -> RuleSetSpace:
+    return RuleSetSpace(all_rule_ids=["r1", "r2"], originals={"r1": "R1", "r2": "R2"})
 
 
-def _silent_log(_: str) -> None:
+def _prompts():
+    def mk(i, rids):
+        return PromptWithRules(prompt=f"p{i}", language="python", cwe_id="c", rule_ids=rids,
+                               combined_rules="", individual_rules={r: f"R{r}" for r in rids},
+                               metadata={"test_case_id": f"tc{i}"})
+    return [mk(0, ["r1", "r2"]), mk(1, ["r1"])]
+
+
+def _origin(space):
+    o = space.origin()
+    o.f1 = o.f2 = o.f3 = 0.0
+    o.fitness = _fit(0.0)
+    return o
+
+
+def _silent(_: str) -> None:
     pass
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# (1+1) EA
-# ═══════════════════════════════════════════════════════════════════════════════
+def _run(evaluate, **kw):
+    space = _space()
+    defaults = dict(
+        space=space, origin=_origin(space), prompts_with_rules=_prompts(),
+        mutators=[FakeMutator("m0"), FakeMutator("m1"), FakeMutator("m2")],
+        evaluate_chromosome_fn=evaluate, iteration_result_factory=IterationResult,
+        max_iterations=10, archive_cap=3, restart_h=8, max_depth=4, seed=42, log=_silent,
+    )
+    defaults.update(kw)
+    return run_ea(**defaults)
+
 
 class TestRunEA:
+    def test_climbs_and_snapshots(self):
+        def ev(chromo, iter_id):
+            n = len(chromo.mutated_rule_ids())
+            return _fit(float(n), min(0.1 * n, 1.0), min(0.05 * n, 1.0)), [], 0, 0
+        res = _run(ev)
+        assert len(res.iterations) <= 10
+        assert res.best_chromosome.f1 > 0
+        assert "entries" in res.archive_snapshot
+        assert res.archive_snapshot["n_inserts"] >= 1
 
-    def test_completes_and_returns_archives(self):
-        prompts = _make_prompts([["r1", "r2"], ["r1"]])
-        all_rids = sorted({rid for p in prompts for rid in p.rule_ids})
-        mutators = [FakeMutator("m0"), FakeMutator("m1"), FakeMutator("m2")]
-        rule_originals = {rid: f"ORIGINAL[{rid}]" for rid in all_rids}
+    def test_reaches_interaction_only_solution(self):
+        """R1' alone = 0, R2' alone = 0, R1'+R2' = 1 — impossible under per-rule search."""
+        def ev(chromo, iter_id):
+            m = chromo.mutated_rule_ids()
+            f1 = 1.0 if {"r1", "r2"} <= m else 0.0
+            return _fit(f1, 0.5 if f1 else 0.0, 0.0), [], 0, 0
+        res = _run(ev, max_iterations=60, seed=1)
+        assert res.best_chromosome.f1 == 1.0
+        assert {"r1", "r2"} <= res.best_chromosome.mutated_rule_ids()
 
-        # Counter for monotonically improving fitness — every offspring strictly
-        # dominates its parent on f1, ensuring archive inserts happen.
-        counter = {"i": 0}
-        def stub_eval(target_rid, parent_text, mutator, iteration, phase, mutation_chain):
-            counter["i"] += 1
-            f = float(counter["i"])
-            return (
-                _fit(f1=f, f2=min(0.1 * f, 1.0), f3=min(0.05 * f, 1.0)),
-                [], [f"stub change for {mutator.name}"], {}, f"{parent_text}|{mutator.name}",
-            )
+    def test_records_have_schema3_fields(self):
+        recs, snaps = [], []
+        def ev(chromo, iter_id):
+            return _fit(float(len(chromo.mutated_rule_ids()))), [], 1, 2
+        _run(ev, iter_record_fn=recs.append, archive_snapshot_fn=lambda it, s: snaps.append(it),
+             snapshot_every=3, max_iterations=6)
+        assert recs and all(r["strategy"] == "ea" for r in recs)
+        real = [r for r in recs if not r["mutation_identity"]]
+        assert real and all("chromosome_id" in r and "mutated_rule_ids" in r for r in real)
+        assert all(r["n_prompts_rerun"] == 2 and r["n_prompts_reused"] == 1 for r in real)
+        assert snaps  # at least the final snapshot fired
 
-        result = run_ea(
-            prompts_with_rules=prompts,
-            all_rule_ids=all_rids,
-            rule_originals=rule_originals,
-            baseline_fitness=_fit(0, 0, 0),
-            mutators=mutators,
-            evaluate_fn=stub_eval,
-            iteration_result_factory=IterationResult,
-            per_rule_result_factory=PerRuleResult,
-            max_iterations=10,
-            archive_cap=3,
-            restart_h=8,
-            max_depth=4,
-            seed=42,
-            log=_silent_log,
-        )
+    def test_graceful_stop_limits_iterations(self):
+        recs = []
+        def ev(chromo, iter_id):
+            return _fit(float(len(chromo.mutated_rule_ids()))), [], 0, 0
+        res = _run(ev, iter_record_fn=recs.append,
+                   should_stop_fn=lambda: len([r for r in recs if not r["mutation_identity"]]) >= 3,
+                   max_iterations=10)
+        assert len(res.iterations) <= 3
 
-        assert len(result.iterations) == 10
-        assert len(result.per_rule_results) == 10
-        # Every rule should have a snapshot
-        for rid in all_rids:
-            assert rid in result.archives_snapshot
-            snap = result.archives_snapshot[rid]
-            assert snap["cap"] == 3
-            assert snap["max_depth"] == 4
-        # Some inserts must have happened (monotone improvement guarantees it)
-        total_inserts = sum(s["n_inserts"] for s in result.archives_snapshot.values())
-        assert total_inserts >= 1
-        # Best fitness must be set
-        assert result.best_fitness is not None
-        assert result.best_fitness.total_semgrep_delta > 0
+    def test_reproducible_under_fixed_seed(self):
+        def ev(chromo, iter_id):
+            return _fit(float(len(chromo.mutated_rule_ids()))), [], 0, 0
+        a = _run(ev, seed=7)
+        b = _run(ev, seed=7)
+        assert a.best_chromosome.cid == b.best_chromosome.cid
 
-    def test_graceful_stop_breaks_loop_and_labels_final_snapshot(self):
-        # should_stop_fn flips True after 3 iterations; the loop must break before
-        # iteration 4, run only 3 iterations, and label the final archive snapshot
-        # with the actual completed count (3), not max_iterations (10).
-        prompts = _make_prompts([["r1", "r2"], ["r1"]])
-        all_rids = sorted({rid for p in prompts for rid in p.rule_ids})
-        mutators = [FakeMutator("m0"), FakeMutator("m1"), FakeMutator("m2")]
-        rule_originals = {rid: f"ORIGINAL[{rid}]" for rid in all_rids}
-
-        counter = {"i": 0}
-        def stub_eval(target_rid, parent_text, mutator, iteration, phase, mutation_chain):
-            counter["i"] += 1
-            f = float(counter["i"])
-            return (
-                _fit(f1=f, f2=min(0.1 * f, 1.0), f3=min(0.05 * f, 1.0)),
-                [], [f"stub change for {mutator.name}"], {}, f"{parent_text}|{mutator.name}",
-            )
-
-        records: list[dict] = []
-        snapshots: list[int] = []  # iteration labels passed to archive_snapshot_fn
-
-        def stop_after_three() -> bool:
-            # len(records) == number of completed iterations so far
-            return len(records) >= 3
-
-        result = run_ea(
-            prompts_with_rules=prompts,
-            all_rule_ids=all_rids,
-            rule_originals=rule_originals,
-            baseline_fitness=_fit(0, 0, 0),
-            mutators=mutators,
-            evaluate_fn=stub_eval,
-            iteration_result_factory=IterationResult,
-            per_rule_result_factory=PerRuleResult,
-            max_iterations=10,
-            archive_cap=3,
-            restart_h=8,
-            max_depth=4,
-            seed=42,
-            log=_silent_log,
-            iter_record_fn=records.append,
-            archive_snapshot_fn=lambda it, snap: snapshots.append(it),
-            snapshot_every=20,  # periodic never fires; only the final snapshot does
-            should_stop_fn=stop_after_three,
-        )
-
-        # Exactly 3 iterations ran (broke at the top of iteration 4)
-        assert len(result.iterations) == 3
-        assert len(records) == 3
-        # The final snapshot is labelled with the real stop point, not max_iterations
-        assert snapshots == [3]
-
-    def test_no_stop_fn_runs_to_completion(self):
-        # Regression: omitting should_stop_fn (default None) must not change behaviour.
-        prompts = _make_prompts([["r1"]])
-        mutators = [FakeMutator("m0"), FakeMutator("m1")]
-        snapshots: list[int] = []
-        result = run_ea(
-            prompts_with_rules=prompts,
-            all_rule_ids=["r1"],
-            rule_originals={"r1": "ORIGINAL[r1]"},
-            baseline_fitness=_fit(0, 0, 0),
-            mutators=mutators,
-            evaluate_fn=lambda rid, pt, m, it, ph, mc: (
-                _fit(float(it), 0.0, 0.0), [], [], {}, f"{pt}|{m.name}",
-            ),
-            iteration_result_factory=IterationResult,
-            per_rule_result_factory=PerRuleResult,
-            max_iterations=5,
-            archive_cap=3,
-            restart_h=8,
-            max_depth=4,
-            seed=1,
-            log=_silent_log,
-            archive_snapshot_fn=lambda it, snap: snapshots.append(it),
-            snapshot_every=20,
-        )
-        assert len(result.iterations) == 5
-        # Final snapshot labelled with the full run length
-        assert snapshots == [5]
-
-    def test_archive_dedup_eventually_restarts(self):
-        prompts = _make_prompts([["r1"]])
-        mutators = [FakeMutator("m0"), FakeMutator("m1")]
-        # max_depth small + only 2 mutators → mutator-exhausted restart should fire
-        result = run_ea(
-            prompts_with_rules=prompts,
-            all_rule_ids=["r1"],
-            rule_originals={"r1": "ORIGINAL[r1]"},
-            baseline_fitness=_fit(0, 0, 0),
-            mutators=mutators,
-            evaluate_fn=lambda rid, pt, m, it, ph, mc: (
-                _fit(0.0, 0.0, 0.0),  # never improves → never inserts → stagnation
-                [], [], {}, f"{pt}|{m.name}",
-            ),
-            iteration_result_factory=IterationResult,
-            per_rule_result_factory=PerRuleResult,
-            max_iterations=20,
-            archive_cap=3,
-            restart_h=4,  # short — should trigger stagnation fast
-            max_depth=2,
-            seed=0,
-            log=_silent_log,
-        )
-        # We expect at least one restart in r1's history
-        r1_snap = result.archives_snapshot["r1"]
-        assert len(r1_snap["restart_history"]) >= 1
-        # All restart reasons should be one of the documented triggers
-        for h in r1_snap["restart_history"]:
-            assert h["reason"] in {"stagnation", "depth_saturated", "mutator_exhausted", "fully_exhausted"}
-
-
-# The redesigned random baseline (stateless per-iteration multi-mutation
-# sampler) is covered by tests/unit/test_random_baseline.py.
+    def test_design_b_multi_mutation_chain(self):
+        """ea_n_mutations>1 (Design B): a move applies a 1..n chain, so a gene can
+        reach depth>1 in a single move; respects the depth cap; still climbs."""
+        seen_depths = []
+        def ev(chromo, iter_id):
+            for g in chromo.genes.values():
+                seen_depths.append(g.depth)
+            return _fit(float(len(chromo.mutated_rule_ids()))), [], 0, 0
+        res = _run(ev, ea_n_mutations=3, max_depth=4, max_iterations=30, seed=3)
+        assert max(seen_depths, default=0) >= 2          # a multi-mutator chain landed
+        assert max(seen_depths, default=0) <= 4          # depth cap respected
+        assert res.best_chromosome.f1 > 0

@@ -15,7 +15,6 @@ Algorithm:
 from __future__ import annotations
 
 import fcntl
-import hashlib
 import json
 import time
 from dataclasses import dataclass, field
@@ -23,13 +22,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
-from ..evaluation import run_semgrep, run_semgrep_batch_dir, calculate_fitness, FitnessResult
+from ..evaluation import run_semgrep_batch_dir, calculate_fitness, FitnessResult
 from ..evaluation.fitness import aggregate_fitness, AggregatedFitness, FitnessStrategy
 from ..evaluation.composite_fitness import CompositeFitnessEvaluator
 from ..llm_backends import LLMBackend
 from ..mutation import Mutator
 from ..mutation.pool import MutatorPool
 from ..mutation.quality import MutationQualityValidator
+from .chromosome import RuleSetChromosome, RuleSetSpace
 
 
 @dataclass
@@ -134,15 +134,27 @@ class HillClimbConfig:
     """random_baseline: max chain length K. Each iteration samples
     n in [1, K] distinct mutators and applies them to the original rule."""
 
+    ea_n_mutations: int = 1
+    """EA: mutators applied per text move (D12). 1 = Design A (local search,
+    default/first-run). >1 = Design B: sample a 1..n chain per move to match the
+    random baseline's move-breadth, isolating selection as the only variable."""
+
+    order_move_weight: float = 0.0
+    """EA: probability weight for the rule-order mutation move (gated off = 0)."""
+
+    reverse_move_weight: float = 0.0
+    """EA: probability weight for the reverse (restore-gene-to-original) move
+    (gated off = 0)."""
+
     enable_eval_cache: bool = True
     """Reuse cached (code, Semgrep result) for prompts whose assembled rule
     text is identical to a previously evaluated one.
 
     Relies on ``temperature=0.0`` (greedy decoding) yielding deterministic
-    generation for identical inputs. When ``_apply_targeted_mutation`` returns
-    the prompt's original ``combined_rules`` unchanged (because the target
-    rule is not applicable to that prompt), the cache skips both LLM
-    generation and Semgrep analysis for that prompt.
+    generation for identical inputs. Keyed on the per-prompt render signature
+    (``RuleSetSpace.prompt_signature``): prompts whose rendered rule set is
+    unchanged from a prior evaluation reuse the cached code + Semgrep result,
+    skipping both LLM generation and Semgrep analysis.
 
     Disable this only if the pipeline is switched to ``temperature > 0`` or
     if bit-identical GPU determinism is required — in which case the cache's
@@ -177,32 +189,6 @@ class IterationResult:
 
 
 @dataclass
-class PerRuleResult:
-    """Fitness outcome for one iteration that targeted a specific rule."""
-
-    rule_id: str
-    """The rule that was mutated in this iteration."""
-
-    iteration: int
-    """Iteration index (0-based)."""
-
-    fitness_delta: float
-    """Change in aggregated fitness vs the original baseline (positive = more vulns)."""
-
-    aggregated_fitness: AggregatedFitness
-    """Full fitness for this iteration."""
-
-    mutation_changes: list[str]
-    """Description of mutations applied to this rule."""
-
-    is_improvement: bool
-    """Whether this iteration improved the overall best fitness."""
-
-    num_prompts_affected: int
-    """Number of prompts that include this rule (the rest are unaffected)."""
-
-
-@dataclass
 class HillClimbResult:
     """Final result of hill climbing optimization."""
 
@@ -230,20 +216,11 @@ class HillClimbResult:
     config: HillClimbConfig
     """Configuration used."""
 
-    per_rule_results: list[PerRuleResult] = field(default_factory=list)
-    """One entry per iteration, capturing which rule was targeted and the outcome."""
-
-    per_rule_best_delta: dict[str, float] = field(default_factory=dict)
-    """Maximum fitness delta observed per rule_id across all iterations."""
-
-    per_rule_best_code_divergence: dict[str, float] = field(default_factory=dict)
-    """Maximum mean_code_divergence observed per rule_id across all iterations."""
-
     pool_arm_stats: dict | None = None
     """Per-strategy mutator/restart stats from the EA / random_baseline runner."""
 
     compounding_state: dict | None = None
-    """Per-rule archive snapshot from the EA runner (keyed by rule_id)."""
+    """The single chromosome-archive snapshot from the EA runner ({} for random)."""
 
     eval_cache_stats: dict | None = None
     """Hit/miss counts for the per-prompt generation+Semgrep cache."""
@@ -414,66 +391,6 @@ class HillClimber:
             finally:
                 self._iterations_jsonl_file = None
 
-    def _save_archive_snapshot(
-        self,
-        iteration: int,
-        archives_snapshot: dict[str, dict],
-    ) -> None:
-        """Dump the full archive state for a single EA iteration.
-
-        Written under <output_dir>/archive_snapshots/iter{N}.json. Rule text is
-        NOT inlined: each entry carries a ``rule_text_ref`` pointing at the
-        corresponding ``mutated_rules/`` file (derived from rule_id +
-        iteration_added). Seed/original entries (depth 0) have no such file so
-        their ref is null (the text is the on-disk original rule). The per-rule
-        config (cap/restart_h/max_depth/n_mutators, identical across rules) is
-        hoisted into one top-level ``config`` block. Called every 20 iters by run_ea.
-        """
-        output_dir = self.config.output_dir
-        if not output_dir:
-            return
-        from pathlib import Path
-        snap_dir = Path(output_dir) / "archive_snapshots"
-        snap_dir.mkdir(parents=True, exist_ok=True)
-        snap_path = snap_dir / f"iter{iteration:04d}.json"
-
-        def _add_refs(rid: str, entry: dict) -> dict:
-            """Attach rule_text_ref derived from rule_id + iteration_added."""
-            entry = dict(entry)
-            if entry.get("depth", 0) == 0:
-                entry["rule_text_ref"] = None  # seed: the original rule (not in mutated_rules)
-            else:
-                rule_short = rid.replace("codeguard-", "cg-")
-                entry["rule_text_ref"] = (
-                    f"mutated_rules/iter{entry['iteration_added']:03d}/{rule_short}.md"
-                )
-            return entry
-
-        config: dict[str, Any] = {}
-        archives: dict[str, dict] = {}
-        for rid, rec in archives_snapshot.items():
-            rec = dict(rec)
-            for key in ("cap", "restart_h", "max_depth", "n_mutators"):
-                if key in rec:
-                    config[key] = rec.pop(key)
-            rec["current_entries"] = [_add_refs(rid, e) for e in rec.get("current_entries", [])]
-            new_history = []
-            for h in rec.get("restart_history", []):
-                h = dict(h)
-                h["entries_before_reset"] = [
-                    _add_refs(rid, e) for e in h.get("entries_before_reset", [])
-                ]
-                new_history.append(h)
-            rec["restart_history"] = new_history
-            archives[rid] = rec
-
-        payload = {
-            "iter": iteration,
-            "config": config,
-            "archives": archives,
-        }
-        with open(snap_path, "w", encoding="utf-8") as f:
-            json.dump(payload, f, indent=2)
 
     def _save_intermediate_iter_jsonl(
         self,
@@ -495,6 +412,127 @@ class HillClimber:
         with open(path, "w", encoding="utf-8") as f:
             for r in results:
                 f.write(json.dumps(r) + "\n")
+
+    def _save_chromosome_move(
+        self,
+        iteration: int,
+        chromo: RuleSetChromosome,
+        space: RuleSetSpace,
+        move_type: str,
+        rule_id: str | None,
+        chain_names: list[str],
+        changes: list[str],
+        validation_metadata: dict | None = None,
+        accepted: bool | None = None,
+    ) -> None:
+        """Write a chromosome's mutated-gene texts + a manifest for one iteration.
+
+        Writes every mutated gene's current allele to
+        ``mutated_rules/iterNNN/<rule>.md`` (so a snapshot entry accepted at
+        iteration NNN can reference its genes there) plus ``meta.json`` describing
+        the move + full chromosome state. Called for every evaluated iteration
+        (EA: accepted or rejected; random: every step)."""
+        output_dir = self.config.output_dir
+        if not output_dir:
+            return
+        from pathlib import Path
+        iter_dir = Path(output_dir) / "mutated_rules" / f"iter{iteration:03d}"
+        iter_dir.mkdir(parents=True, exist_ok=True)
+        for rid in sorted(chromo.mutated_rule_ids()):
+            short = rid.replace("codeguard-", "cg-")
+            (iter_dir / f"{short}.md").write_text(space.allele(chromo, rid), encoding="utf-8")
+        meta = {
+            "iteration": iteration,
+            "chromosome_id": chromo.cid,
+            "parent_id": chromo.parent_id,
+            "move_type": move_type,
+            "changed_rule_id": rule_id,
+            "chain": list(chain_names),
+            "mutated_rule_ids": sorted(chromo.mutated_rule_ids()),
+            "order_priority": dict(chromo.order_priority),
+            "changes": list(changes),
+            "gene_paths": {rid: g.mutation_path for rid, g in chromo.genes.items()},
+            "accepted": accepted,
+            "validation_metadata": validation_metadata or {},
+        }
+        (iter_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+
+    def _log_validation(self, rule_id: str | None, chain_names: list[str], meta: dict) -> None:
+        """Compact quality-validation log line (B3): passes_all + failure reason."""
+        if not self.config.verbose or not meta:
+            return
+        v = self.validator
+        passes = meta.get("passes_all")
+        if passes is False:
+            sbert = meta.get("sbert_step")
+            ppl = meta.get("perplexity_ratio")
+            ic = meta.get("inline_code_retention", 1.0)
+            kw = meta.get("keyword_retention", 1.0)
+            if not meta.get("instruction_adherent", True):
+                reason = "instruction_adherent=False"
+            elif sbert is not None and v is not None and sbert < v.sbert_threshold:
+                reason = f"sbert_step<thr ({sbert:.2f}<{v.sbert_threshold:.2f})"
+            elif ppl is not None and v is not None and ppl > v.perplexity_threshold:
+                reason = f"perplexity>thr ({ppl:.2f}>{v.perplexity_threshold:.2f})"
+            elif ic < 1.0:
+                reason = f"inline_code_retention<1.0 ({ic:.2f})"
+            elif v is not None and kw < v.keyword_threshold:
+                reason = f"keyword_retention<thr ({kw:.2f}<{v.keyword_threshold:.2f})"
+            else:
+                reason = "unknown"
+        else:
+            reason = "passed"
+        rule_short = (rule_id or "?").replace("codeguard-", "cg-")
+        self._log(
+            f"   Validation [rule={rule_short}, mut={'+'.join(chain_names) or '?'}]: "
+            f"passes_all={passes} REASON={reason} | "
+            f"adherent={meta.get('instruction_adherent')} "
+            f"sbert_step={meta.get('sbert_step')} sbert_cum={meta.get('sbert_cum')} "
+            f"ppl={meta.get('perplexity_ratio')} "
+            f"inline_code={meta.get('inline_code_retention')} "
+            f"keywords={meta.get('keyword_retention')}"
+        )
+
+    def _save_chromosome_snapshot(self, iteration: int, snap: dict) -> None:
+        """Dump the single chromosome-archive snapshot (schema 3).
+
+        Written under ``archive_snapshots/iterNNNN.json`` as a list of full
+        chromosomes (not per-rule archives). Each gene gets a ``text_ref``
+        pointing at ``mutated_rules/iter{iteration_added:03d}/<rule>.md`` (all of
+        an entry's genes were written there on accept)."""
+        output_dir = self.config.output_dir
+        if not output_dir:
+            return
+        from pathlib import Path
+        snap_dir = Path(output_dir) / "archive_snapshots"
+        snap_dir.mkdir(parents=True, exist_ok=True)
+
+        def _with_refs(entry: dict) -> dict:
+            e = dict(entry)
+            it = e.get("iteration_added", 0)
+            genes = {}
+            for rid, g in (e.get("genes") or {}).items():
+                gg = dict(g)
+                short = rid.replace("codeguard-", "cg-")
+                gg["text_ref"] = f"mutated_rules/iter{it:03d}/{short}.md"
+                genes[rid] = gg
+            e["genes"] = genes
+            return e
+
+        payload = {
+            "iter": iteration,
+            "schema_version": 3,
+            "cap": snap.get("cap"),
+            "restart_h": snap.get("restart_h"),
+            "origin": snap.get("origin"),
+            "n_inserts": snap.get("n_inserts"),
+            "n_rejected": snap.get("n_rejected"),
+            "n_dup_rejected": snap.get("n_dup_rejected"),
+            "restart_history": snap.get("restart_history", []),
+            "chromosomes": [_with_refs(e) for e in snap.get("entries", [])],
+        }
+        with open(snap_dir / f"iter{iteration:04d}.json", "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
 
     def _log(self, message: str) -> None:
         """Print if verbose mode enabled."""
@@ -534,403 +572,7 @@ class HillClimber:
 
         return response.content, response.latency_ms, response.input_tokens, response.output_tokens
     
-    def _apply_targeted_mutation(
-        self,
-        pwr: "PromptWithRules",  # type: ignore
-        target_rule_id: str,
-        pre_mutated_text: str,
-    ) -> str:
-        """Reassemble combined_rules with only target_rule_id replaced by pre_mutated_text.
 
-        The mutation is pre-computed once per iteration so all prompts within
-        the same iteration receive the identical mutation of the target rule.
-        Non-target rules use their original text. The separator matches the one
-        used in RuleLoader.combine_rules.
-
-        Args:
-            pwr: Prompt with its per-rule texts in individual_rules.
-            target_rule_id: The single rule to replace.
-            pre_mutated_text: Already-mutated text for target_rule_id.
-
-        Returns:
-            Combined rule text with the target rule replaced.
-            Returns pwr.combined_rules unchanged if individual_rules is not
-            populated or target_rule_id is not in this prompt's rules.
-        """
-        SEPARATOR = "\n\n---\n\n"
-
-        # If individual_rules not populated (legacy), return unchanged
-        if not pwr.individual_rules:
-            return pwr.combined_rules
-
-        # target rule not applicable to this prompt — leave unchanged
-        if target_rule_id not in pwr.individual_rules:
-            return pwr.combined_rules
-
-        parts: list[str] = []
-        for rule_id in pwr.rule_ids:
-            if rule_id == target_rule_id:
-                parts.append(pre_mutated_text)
-            else:
-                parts.append(pwr.individual_rules.get(rule_id, ""))
-
-        return SEPARATOR.join(parts)
-
-    def _evaluate_with_per_prompt_rules(
-        self,
-        prompts_with_rules: list["PromptWithRules"], # type: ignore
-        target_rule_id: str | None = None,
-        mutator_fn: Callable[[str], str] | None = None,
-        iteration: int | None = None,
-        phase: str = "baseline",
-        selected_mutator: Mutator | None = None,
-        parent_text_override: str | None = None,
-        mutation_chain: list[str] | None = None,
-    ) -> tuple[AggregatedFitness, list[EvaluationResult]]:
-        """Evaluate prompts where each has its own rules.
-
-        All LLM code-generation calls are completed first, then a single
-        Semgrep subprocess is run on the full batch.
-
-        Args:
-            prompts_with_rules: List of PromptWithRules with pre-combined rules.
-            mutator_fn: Optional function to mutate each rule before use.
-            iteration: Current iteration number (for mutation tracking).
-            phase: Phase name ('baseline' or 'mutation').
-
-        Returns:
-            Tuple of (aggregated_fitness, individual_results, sample_mutation_changes).
-            sample_mutation_changes: changes from the first prompt that had the target rule applied.
-        """
-        # Import here to avoid circular dependency
-        from ..evaluation.rule_mapping import PromptWithRules
-
-        # ------------------------------------------------------------------
-        # Pre-compute a single mutation for the entire iteration.
-        # All prompts that have target_rule_id will receive the identical
-        # mutated text.
-        # ------------------------------------------------------------------
-        pre_mutated_text: str | None = None
-        pre_mutation_changes: list[str] = []
-        pre_validation_metadata: dict[str, Any] = {}
-
-        if target_rule_id is not None and mutator_fn is not None:
-            # Parent-text resolution order:
-            #   1. parent_text_override (EA path — explicit parent from archive)
-            #   2. raw text from first matching prompt (baseline / fallback)
-            if parent_text_override is not None:
-                original_text: str | None = parent_text_override
-            else:
-                original_text = next(
-                    (
-                        pwr.individual_rules[target_rule_id]
-                        for pwr in prompts_with_rules
-                        if target_rule_id in pwr.individual_rules
-                    ),
-                    None,
-                )
-            # Pick the mutator for this iteration (pool-selected or self.mutator)
-            iter_mutator = selected_mutator if selected_mutator is not None else self.mutator
-            if original_text:
-                mutation_result = iter_mutator.mutate(original_text)
-                # Skip-on-identity: a mutation that produced no change is a no-op.
-                # Skip the expensive code-generation + Semgrep evaluation entirely;
-                # the EA / random-baseline runners treat a None mutated-text as a
-                # no-op iteration (mark the mutator tried, no archive insert).
-                if mutation_result.mutated == original_text:
-                    self._log("   ⏭️  Identity mutation (no change) — skipping code-gen/Semgrep")
-                    return None, [], mutation_result.changes, {}, None
-                # Post-hoc validation (informational only — never refuses the mutation)
-                if self.validator is not None and self.config.enable_validation:
-                    self.validator.validate(mutation_result)
-                    pre_validation_metadata = mutation_result.metadata.get("quality", {})
-                    
-                    # Cumulative drift: SBERT vs the raw on-disk original rule.
-                    # The parent (parent_text_override) may already be drifted
-                    # (depth>0 in the EA), so sbert_cum is informative even when
-                    # the latest mutation was an identity.
-                    raw_original = next(
-                        (
-                            pwr.individual_rules[target_rule_id]
-                            for pwr in prompts_with_rules
-                            if target_rule_id in pwr.individual_rules
-                        ),
-                        None,
-                    )
-                    if raw_original is not None:
-                        orig_prose = self.validator._extract_prose_text(raw_original)
-                        cand_prose = self.validator._extract_prose_text(mutation_result.mutated)
-                        sbert_cum = self.validator._compute_sbert_similarity(orig_prose, cand_prose)
-                        pre_validation_metadata["sbert_cum"] = sbert_cum
-                    # B3: enriched validation log with iter, rule, mutator, REASON
-                    _passes = pre_validation_metadata.get("passes_all")
-                    if _passes is False:
-                        _sbert_v = pre_validation_metadata.get("sbert_step")
-                        _ppl_v = pre_validation_metadata.get("perplexity_ratio")
-                        _ic = pre_validation_metadata.get("inline_code_retention", 1.0)
-                        _kw = pre_validation_metadata.get("keyword_retention", 1.0)
-                        _val = self.validator
-                        if not pre_validation_metadata.get("instruction_adherent", True):
-                            _reason = "instruction_adherent=False"
-                        elif _sbert_v is not None and _val is not None and _sbert_v < _val.sbert_threshold:
-                            _reason = f"sbert_step<threshold ({_sbert_v:.2f} < {_val.sbert_threshold:.2f})"
-                        elif _ppl_v is not None and _val is not None and _ppl_v > _val.perplexity_threshold:
-                            _reason = f"perplexity_ratio>threshold ({_ppl_v:.2f} > {_val.perplexity_threshold:.2f})"
-                        elif _ic < 1.0:
-                            _reason = f"inline_code_retention<1.0 ({_ic:.2f})"
-                        elif _val is not None and _kw < _val.keyword_threshold:
-                            _reason = f"keyword_retention<threshold ({_kw:.2f} < {_val.keyword_threshold:.2f})"
-                        else:
-                            _reason = "unknown"
-                    else:
-                        _reason = "passed"
-                    _mut_name = iter_mutator.name if iter_mutator is not None else "?"
-                    _rule_short = (target_rule_id or "?").replace("codeguard-", "cg-")
-                    self._log(
-                        f"   Validation [iter={iteration}, rule={_rule_short}, mut={_mut_name}]:\n"
-                        f"     passes_all={_passes}  REASON={_reason}\n"
-                        f"     adherent={pre_validation_metadata.get('instruction_adherent')}  "
-                        f"sbert_step={pre_validation_metadata.get('sbert_step')}  "
-                        f"sbert_cum={pre_validation_metadata.get('sbert_cum')}  "
-                        f"ppl={pre_validation_metadata.get('perplexity_ratio')}  "
-                        f"inline_code={pre_validation_metadata.get('inline_code_retention')}  "
-                        f"keywords={pre_validation_metadata.get('keyword_retention')}"
-                    )
-                pre_mutated_text = mutation_result.mutated
-                pre_mutation_changes = mutation_result.changes
-
-        # ------------------------------------------------------------------
-        # Phase 1 — Generate code for every prompt (sequential LLM calls)
-        # ------------------------------------------------------------------
-        # Each item: (code, gen_latency_ms, input_tokens, output_tokens,
-        #             test_prompt, pwr, mutated_rule_file, rule_ids)
-        generated: list[tuple[str, float, int, int, TestPrompt, Any, str | None, list[str]]] = []
-        # Per-prompt Semgrep result (cached or fresh) and per-sample analysis time.
-        semgrep_results: list[Any] = [None] * len(prompts_with_rules)
-        analysis_latency_per_sample: list[float] = [0.0] * len(prompts_with_rules)
-        # Indices that need a fresh Semgrep invocation this phase.
-        fresh_indices: list[int] = []
-        # Cache key per prompt (kept to populate the cache after Semgrep).
-        cache_keys: list[tuple[str, str] | None] = [None] * len(prompts_with_rules)
-        # Whether each prompt was served from the eval cache (True/False) or
-        # cache is disabled (None).  Written to intermediate result files.
-        cache_hit_flags: list[bool | None] = [None] * len(prompts_with_rules)
-
-        cache_enabled = self.config.enable_eval_cache
-
-        for idx, pwr in enumerate(prompts_with_rules):
-            if phase != "baseline":
-                _stop = getattr(self, "_should_stop_fn", None)
-                if _stop is not None and _stop():
-                    from .ea_optimizer import WallTimeStop
-                    raise WallTimeStop()
-            rule_text = pwr.combined_rules if pwr.combined_rules else None
-            mutated_rule_file = None
-
-            if rule_text and mutator_fn:
-                if target_rule_id is not None and pre_mutated_text is not None:
-                    rule_text = self._apply_targeted_mutation(pwr, target_rule_id, pre_mutated_text)
-                else:
-                    rule_text = mutator_fn(rule_text)
-                # Only save when the target rule is present in this prompt
-                rule_was_mutated = (
-                    target_rule_id is None
-                    or (target_rule_id in pwr.rule_ids and bool(pwr.individual_rules))
-                )
-                if rule_was_mutated:
-                    tc_id = pwr.metadata.get('test_case_id', f'case_{idx}')
-                    # Save only the mutated target rule when a single rule is
-                    # targeted. With no single target rule, fall back to the
-                    # combined text because there is no single rule to isolate.
-                    save_text = (
-                        pre_mutated_text
-                        if target_rule_id is not None and pre_mutated_text is not None
-                        else rule_text
-                    )
-                    mutated_rule_file = self._save_mutated_rule(
-                        save_text, tc_id, idx, iteration, pwr.rule_ids, target_rule_id,
-                        mutation_changes=pre_mutation_changes,
-                        validation_metadata=pre_validation_metadata,
-                        parent_text=parent_text_override,
-                        mutation_chain=mutation_chain,
-                    )
-
-            test_prompt = TestPrompt(
-                prompt=pwr.prompt,
-                language=pwr.language,
-                cwe_id=pwr.cwe_id,
-                metadata=pwr.metadata,
-            )
-
-            tc_id = pwr.metadata.get('test_case_id', f'case_{idx}')
-
-            cache_hit = None
-            if cache_enabled:
-                rule_hash = hashlib.sha256((rule_text or "").encode("utf-8")).hexdigest()
-                key = (str(tc_id), rule_hash)
-                cache_keys[idx] = key
-                cache_hit = self._eval_cache.get(key)
-
-            if cache_hit is not None:
-                self._eval_cache_hits += 1
-                cache_hit_flags[idx] = True
-                code = cache_hit["code"]
-                gen_latency = cache_hit["gen_latency_ms"]
-                semgrep_results[idx] = cache_hit["semgrep_result"]
-                analysis_latency_per_sample[idx] = cache_hit["analysis_latency_ms"]
-                generated.append((code, gen_latency, 0, 0, test_prompt, pwr, mutated_rule_file, pwr.rule_ids))
-            else:
-                self._eval_cache_misses += 1
-                if cache_enabled:
-                    cache_hit_flags[idx] = False
-                # Heartbeat for every freshly generated prompt. Indexed by prompt
-                # position so the marker never goes missing when the first or last
-                # prompt happens to be served from the cache.
-                self._log(f"   [{idx+1}/{len(prompts_with_rules)}] Generating code for TC#{tc_id}...")
-                code, gen_latency, in_tok, out_tok = self._generate_code(rule_text, test_prompt)
-                generated.append((code, gen_latency, in_tok, out_tok, test_prompt, pwr, mutated_rule_file, pwr.rule_ids))
-                fresh_indices.append(idx)
-
-        # ------------------------------------------------------------------
-        # Phase 2 — Batch Semgrep on fresh (cache-missed) samples only
-        # ------------------------------------------------------------------
-        if fresh_indices:
-            self._log(
-                f"   ⚡ Running Semgrep batch on {len(fresh_indices)} samples "
-                f"({len(generated) - len(fresh_indices)} reused from cache)..."
-            )
-            fresh_samples = [(generated[i][0], generated[i][4].language) for i in fresh_indices]
-            analysis_start = time.perf_counter()
-            fresh_semgrep = run_semgrep_batch_dir(fresh_samples)
-            total_analysis_ms = (time.perf_counter() - analysis_start) * 1000
-            per_sample_ms = total_analysis_ms / max(len(fresh_samples), 1)
-            for i, sres in zip(fresh_indices, fresh_semgrep):
-                semgrep_results[i] = sres
-                analysis_latency_per_sample[i] = per_sample_ms
-                # Populate cache for this (tc_id, rule_hash) → reused next iteration
-                if cache_enabled and cache_keys[i] is not None:
-                    self._eval_cache[cache_keys[i]] = { # type: ignore
-                        "code": generated[i][0],
-                        "gen_latency_ms": generated[i][1],
-                        "semgrep_result": sres,
-                        "analysis_latency_ms": per_sample_ms,
-                    }
-        else:
-            self._log(
-                f"   ⚡ Semgrep: all {len(generated)} samples reused from cache — skipping batch"
-            )
-
-        # ------------------------------------------------------------------
-        # Phase 3 — Compute fitness and persist results
-        # ------------------------------------------------------------------
-        results: list[EvaluationResult] = []
-        fitness_results: list[FitnessResult] = []
-        # Collect log lines keyed by index so we can re-emit fresh-first.
-        tc_log_lines: dict[int, str] = {}
-        # Per-prompt records for the intermediate/{iter_id}.jsonl dump
-        # (one JSONL per EA / random / baseline iteration).
-        intermediate_records: list[dict] = []
-
-        for idx, (semgrep_result, item) in enumerate(zip(semgrep_results, generated)):
-            code, gen_latency, in_tok, out_tok, test_prompt, pwr, mutated_rule_file, rule_ids = item
-
-            fitness = calculate_fitness(semgrep_result, self.config.fitness_strategy)
-
-            # Composite fitness: always populate when evaluator is wired
-            tc_id = test_prompt.metadata.get('test_case_id', f'case_{idx}')
-            if self.composite_evaluator is not None:
-                baseline = self._baseline_fitness_per_case.get(str(tc_id))
-                baseline_score = baseline.weighted_score if baseline is not None else 0.0
-                composite_result = self.composite_evaluator.evaluate(
-                    semgrep_score=fitness.weighted_score,
-                    baseline_score=baseline_score,
-                    generated_code=code,
-                    test_case_id=tc_id,
-                    lang=test_prompt.language,   # bd-03k.2: per-case CodeBLEU grammar
-                )
-                # f1 objective = semgrep_delta. For a "minimize vulnerabilities"
-                # run we negate it so the EA's maximize/Pareto logic is unchanged
-                # (higher f1 ⇒ fewer vulns than baseline). Default ("maximize")
-                # leaves the sign untouched, preserving all prior behavior.
-                _delta = composite_result.semgrep_delta
-                if self.config.objective_direction == "minimize":
-                    _delta = -_delta
-                fitness.composite_score = _delta
-                fitness.code_divergence = composite_result.code_divergence
-                fitness.details["composite"] = composite_result.components
-
-            fitness_results.append(fitness)
-
-            eval_result = EvaluationResult(
-                prompt=test_prompt,
-                generated_code=code,
-                fitness=fitness,
-                generation_latency_ms=gen_latency,
-                analysis_latency_ms=analysis_latency_per_sample[idx],
-                input_tokens=in_tok,
-                output_tokens=out_tok,
-            )
-            results.append(eval_result)
-
-            record = self._build_intermediate_record(
-                eval_result, idx, phase, mutated_rule_file, rule_ids, target_rule_id,
-                eval_cache_hit=cache_hit_flags[idx],
-            )
-            if record is not None:
-                intermediate_records.append(record)
-
-            # Build per-TC log line (deferred — printed in fresh-first order below).
-            # Token counts are accumulated into self._total_input_tokens /
-            # _total_output_tokens and persisted to the summary JSON; not printed
-            # per-iteration to keep the log readable.
-            if fitness.composite_score is not None:
-                tc_log_lines[idx] = (
-                    f"       → TC#{tc_id}: Vulns={fitness.raw_count} "
-                    f"Score={fitness.weighted_score:.3f}, "
-                    f"Δ={fitness.composite_score:+.3f}, "
-                    f"Div={fitness.code_divergence:.3f}"
-                )
-            else:
-                tc_log_lines[idx] = (
-                    f"       → TC#{tc_id}: Score={fitness.weighted_score:.3f}, "
-                    f"Vulns={fitness.raw_count}"
-                )
-
-        # Emit affected (fresh-generated) prompts first, then a blank line,
-        # then the cached prompts — so the new results are always at the top.
-        fresh_set = set(fresh_indices)
-        for idx in fresh_indices:
-            self._log(tc_log_lines[idx])
-        if fresh_indices and len(fresh_indices) < len(generated):
-            self._log("")
-        for idx in range(len(generated)):
-            if idx not in fresh_set:
-                self._log(tc_log_lines[idx])
-
-        # When a single rule is targeted (round_robin / D-UCB / EA / random_baseline),
-        # restrict f2 / f3 denominators to the prompts whose rule set actually
-        # contains that rule — otherwise the breadth/depth signals get diluted
-        # by unaffected prompts. greedy_batch and the initial baseline mutate
-        # everywhere (or nothing), so the global denominator is correct there.
-        affected_indices = (
-            [i for i, pwr in enumerate(prompts_with_rules) if target_rule_id in pwr.rule_ids]
-            if target_rule_id is not None
-            else None
-        )
-        aggregated = aggregate_fitness(
-            fitness_results,
-            self.config.fitness_strategy,
-            affected_indices=affected_indices,
-        )
-
-        # Mutation changes were pre-computed once for the whole iteration
-        sample_changes = pre_mutation_changes
-
-        # Pack this iteration's per-prompt records into intermediate/{iter_id}.jsonl.
-        if intermediate_records:
-            self._save_intermediate_iter_jsonl(phase, intermediate_records)
-
-        return aggregated, results, sample_changes, pre_validation_metadata, pre_mutated_text # type: ignore
 
     def optimize_per_prompt_rules(
         self,
@@ -952,7 +594,6 @@ class HillClimber:
         Returns:
             HillClimbResult with optimization results.
         """
-        self._should_stop_fn = should_stop_fn
         start_time = time.perf_counter()
         self._total_llm_calls = 0
         self._total_input_tokens = 0
@@ -984,199 +625,204 @@ class HillClimber:
             short = rid.replace('codeguard-', 'cg-')
             self._log(f"   • {short} — applies to {n_prompts}/{len(prompts_with_rules)} prompts")
 
+        # ── Build the rule-set search space (genome definition) ─────────────
+        rule_originals: dict[str, str] = {}
+        for pwr in prompts_with_rules:
+            for rid, text in pwr.individual_rules.items():
+                rule_originals.setdefault(rid, text)
+        missing = [rid for rid in all_rule_ids if rid not in rule_originals]
+        if missing:
+            raise RuntimeError(
+                f"{len(missing)} rule(s) missing individual_rules text: {missing[:3]}"
+            )
+        space = RuleSetSpace(all_rule_ids=list(all_rule_ids), originals=rule_originals)
+        origin = space.origin()
+
         ######################################
-        # Evaluate original rules (baseline) #
+        # Evaluate baseline (origin chromosome) #
         ######################################
-        self._log("\n📊 Evaluating with original rules...")
+        self._log("\n📊 Evaluating baseline (origin chromosome)...")
         try:
-            original_fitness, original_results, _, _, _ = self._evaluate_with_per_prompt_rules( # type: ignore
-                prompts_with_rules, target_rule_id=None, mutator_fn=None,
-                iteration=None, phase="baseline"
+            original_fitness, original_results, _reused, _rerun = self._evaluate_chromosome(
+                origin, space, prompts_with_rules, iter_id="baseline",
             )
         except Exception as e:
             if "rate_limit" in str(e).lower() or "429" in str(e):
                 self._log(f"\n⚠️  Rate limit hit during baseline evaluation")
-                raise
             raise
 
         _orig_raw = sum(r.raw_count for r in original_fitness.individual_results)
-        self._log(f"   Original fitness: {original_fitness.total_fitness:.1f} "
+        self._log(f"   Baseline fitness: {original_fitness.total_fitness:.1f} "
                   f"({original_fitness.num_vulnerable}/{original_fitness.num_prompts} vulnerable, "
                   f"{_orig_raw} raw findings)")
 
-        # Index baseline per-case fitness and reference code for composite delta computation
+        # Index baseline per-case fitness + reference code for composite deltas.
         if self.composite_evaluator is not None:
             for idx, (eval_r, pwr) in enumerate(zip(original_results, prompts_with_rules)):
                 tc_id = pwr.metadata.get('test_case_id', f'case_{idx}')
                 self._baseline_fitness_per_case[str(tc_id)] = eval_r.fitness
-                self.composite_evaluator.reference_codes[str(tc_id)] = eval_r.generated_code
-            # Baseline vs itself = zero delta. Reset so the EA archive seeds at
-            # (f1, f2, f3) = (0, 0, 0) — the correct origin — rather than the
-            # absolute baseline fitness.
+                self.composite_evaluator.set_reference(tc_id, eval_r.generated_code)
             original_fitness.total_semgrep_delta = 0.0
             original_fitness.total_code_divergence = 0.0
+
+        # Origin objectives are (0,0,0) by construction (baseline vs itself).
+        origin.f1 = origin.f2 = origin.f3 = 0.0
+        origin.fitness = original_fitness
 
         # Store "original" as the combined rules (truncated — for metadata only)
         original_rule = "\n---\n".join(
             pwr.combined_rules for pwr in prompts_with_rules if pwr.combined_rules
         )[:5000] + "..."
 
-        # ──────────────────────────────────────────────────────────────────
-        # Dispatch to the EA / random_baseline runner — the only two
-        # supported optimizers.
-        # ──────────────────────────────────────────────────────────────────
         if self.config.optimizer not in ("ea", "random_baseline"):
             raise ValueError(
                 f"Unknown optimizer {self.config.optimizer!r}; "
                 f"expected 'ea' or 'random_baseline'"
             )
         return self._run_ea_or_random(
+            space=space,
+            origin=origin,
             prompts_with_rules=prompts_with_rules,
-            all_rule_ids=all_rule_ids,
             original_fitness=original_fitness,
             original_rule=original_rule,
             start_time=start_time,
+            should_stop_fn=should_stop_fn,
         )
 
     def _run_ea_or_random(
         self,
         *,
+        space: RuleSetSpace,
+        origin: RuleSetChromosome,
         prompts_with_rules: list["PromptWithRules"],  # type: ignore
-        all_rule_ids: list[str],
         original_fitness: AggregatedFitness,
         original_rule: str,
         start_time: float,
+        should_stop_fn: "Callable[[], bool] | None" = None,
     ) -> HillClimbResult:
-        """Dispatch wrapper for optimizer="ea" or "random_baseline".
-
-        Builds the evaluate_fn closure, calls the runner from
-        ``ea_optimizer.py``, then maps the result back into HillClimbResult so
-        downstream serialisation (hillclimb_summary_*.json) keeps working.
-        """
+        """Dispatch to the chromosome EA / random-walk runner and map the result
+        back into HillClimbResult so downstream serialisation keeps working."""
         from .ea_optimizer import run_ea, run_random_baseline
 
-        # Per-rule original texts (first occurrence wins; rules are stable)
-        rule_originals: dict[str, str] = {}
-        for pwr in prompts_with_rules:
-            for rid, text in pwr.individual_rules.items():
-                rule_originals.setdefault(rid, text)
-        # Defensive: every all_rule_ids entry must have an original text
-        missing = [rid for rid in all_rule_ids if rid not in rule_originals]
-        if missing:
-            raise RuntimeError(
-                f"EA dispatch: {len(missing)} rule(s) missing individual_rules text: {missing[:3]}"
+        def evaluate_chromosome_fn(chromo: RuleSetChromosome, iter_id: str):
+            return self._evaluate_chromosome(
+                chromo, space, prompts_with_rules,
+                iter_id=iter_id, should_stop_fn=should_stop_fn,
             )
 
-        def evaluate_fn(
-            target_rule_id: str,
-            parent_text: str,
-            mutator: Mutator,
-            iteration: int,
-            phase: str,
-            mutation_chain: list[str],
-        ) -> tuple[AggregatedFitness, list[EvaluationResult], list[str], dict[str, Any], "str | None"]:
-            """Closure: invokes the per-prompt eval pipeline with EA parent text."""
-            return self._evaluate_with_per_prompt_rules(  # type: ignore[return-value]
-                prompts_with_rules,
-                target_rule_id=target_rule_id,
-                mutator_fn=lambda _t, _m=mutator: _m.mutate(_t).mutated,
-                iteration=iteration,
-                phase=phase,
-                selected_mutator=mutator,
-                parent_text_override=parent_text,
-                mutation_chain=mutation_chain,
+        def save_move_fn(*, iteration, child, space, move_type, rule_id, chain_names,
+                         changes, validation_metadata=None, accepted=None):
+            self._save_chromosome_move(
+                iteration, child, space, move_type, rule_id, chain_names, changes,
+                validation_metadata=validation_metadata, accepted=accepted,
             )
 
-        seed = self.pool.seed  # share seed with mutator pool for full-run reproducibility
+        def validate_move_fn(rule_id, parent_text, mutated_text, chain_names, changes):
+            """Run the quality validator on one mutation (observational — never
+            refuses). Returns the quality dict (+ cumulative SBERT vs the original
+            rule) or {} when validation is disabled."""
+            if self.validator is None or not self.config.enable_validation:
+                return {}
+            from ..mutation.base import MutationResult
+            mr = MutationResult(original=parent_text, mutated=mutated_text,
+                                mutation_type="+".join(chain_names) or "chromosome_move",
+                                changes=list(changes))
+            self.validator.validate(mr)
+            meta = dict(mr.metadata.get("quality", {}))
+            original_text = space.originals.get(rule_id)
+            if original_text is not None:
+                orig_prose = self.validator._extract_prose_text(original_text)
+                cand_prose = self.validator._extract_prose_text(mutated_text)
+                meta["sbert_cum"] = self.validator._compute_sbert_similarity(orig_prose, cand_prose)
+            self._log_validation(rule_id, chain_names, meta)
+            return meta
 
-        # Open iterations.jsonl writer; pass it + the archive-snapshot writer
-        # as callbacks so the runners stay output-dir agnostic. try/finally
-        # guarantees the file handle closes even on rate-limit / OOM mid-run.
+        def snapshot_fn(iteration, snap):
+            self._save_chromosome_snapshot(iteration, snap)
+
+        seed = self.pool.seed  # share seed with the mutator pool for reproducibility
+
         self._open_iterations_writer()
         try:
             if self.config.optimizer == "ea":
-                ea_result = run_ea(
+                run_result = run_ea(
+                    space=space, origin=origin,
                     prompts_with_rules=prompts_with_rules,
-                    all_rule_ids=all_rule_ids,
-                    rule_originals=rule_originals,
-                    baseline_fitness=original_fitness,
                     mutators=self.pool.mutators,
-                    evaluate_fn=evaluate_fn,
+                    evaluate_chromosome_fn=evaluate_chromosome_fn,
                     iteration_result_factory=IterationResult,
-                    per_rule_result_factory=PerRuleResult,
                     max_iterations=self.config.max_iterations,
                     archive_cap=self.config.archive_cap,
                     restart_h=self.config.restart_h,
                     max_depth=self.config.max_depth_ea,
-                    seed=seed,
-                    log=self._log,
+                    ea_n_mutations=self.config.ea_n_mutations,
+                    order_move_weight=self.config.order_move_weight,
+                    reverse_move_weight=self.config.reverse_move_weight,
+                    seed=seed, log=self._log,
                     iter_record_fn=self._append_iteration_record,
-                    archive_snapshot_fn=self._save_archive_snapshot,
-                    should_stop_fn=getattr(self, "_should_stop_fn", None),
+                    archive_snapshot_fn=snapshot_fn,
+                    save_move_fn=save_move_fn,
+                    validate_move_fn=validate_move_fn,
+                    should_stop_fn=should_stop_fn,
                 )
             else:  # "random_baseline"
-                ea_result = run_random_baseline(
+                run_result = run_random_baseline(
+                    space=space, origin=origin,
                     prompts_with_rules=prompts_with_rules,
-                    all_rule_ids=all_rule_ids,
-                    rule_originals=rule_originals,
                     mutators=self.pool.mutators,
-                    evaluate_fn=evaluate_fn,
+                    evaluate_chromosome_fn=evaluate_chromosome_fn,
                     iteration_result_factory=IterationResult,
-                    per_rule_result_factory=PerRuleResult,
                     max_iterations=self.config.max_iterations,
                     max_mutations_per_iter=self.config.max_mutations_per_iter,
-                    seed=seed,
-                    log=self._log,
+                    max_depth=self.config.max_depth_ea,
+                    seed=seed, log=self._log,
                     iter_record_fn=self._append_iteration_record,
-                    should_stop_fn=getattr(self, "_should_stop_fn", None),
+                    save_move_fn=save_move_fn,
+                    validate_move_fn=validate_move_fn,
+                    should_stop_fn=should_stop_fn,
                 )
         finally:
             self._close_iterations_writer()
 
         total_time = time.perf_counter() - start_time
-        best_fitness = ea_result.best_fitness or original_fitness
+        best = run_result.best_chromosome
+        best_fitness = run_result.best_fitness or original_fitness
 
         self._log(
             f"\n📦 {self.config.optimizer} run complete: "
-            f"{len(ea_result.iterations)} iterations, "
-            f"best f1={best_fitness.total_semgrep_delta:+.2f} "
-            f"(rule={ea_result.best_rule_id}), "
-            f"{sum(1 for r in ea_result.per_rule_results if r.is_improvement)} accepted insertions"
+            f"{len(run_result.iterations)} iterations, best f1={best.f1:+.2f} "
+            f"(mutated={sorted(best.mutated_rule_ids())}), {run_result.n_accepted} accepted"
         )
 
-        # best_rule is a sentinel — the full archive text lives in
-        # compounding_state.<rule_id>.current_entries[i].rule_text after the
-        # snapshot fix in pareto_archive.py.
         result = HillClimbResult(
             original_rule=original_rule,
             best_rule=(
-                f"[{self.config.optimizer}: best in rule={ea_result.best_rule_id} "
-                f"— full archive in compounding_state.{ea_result.best_rule_id}]"
-                if ea_result.best_rule_id else
-                "[per-rule Pareto archives — see compounding_state]"
+                f"[{self.config.optimizer}: chromosome {best.cid} — "
+                f"mutated {sorted(best.mutated_rule_ids())}; see compounding_state]"
             ),
             original_fitness=original_fitness,
             best_fitness=best_fitness,
-            iterations=ea_result.iterations,
+            iterations=run_result.iterations,
             total_time_seconds=total_time,
             total_llm_calls=self._total_llm_calls,
             total_input_tokens=self._total_input_tokens,
             total_output_tokens=self._total_output_tokens,
             config=self.config,
-            per_rule_results=ea_result.per_rule_results,
-            per_rule_best_delta=ea_result.per_rule_best_delta,
-            per_rule_best_code_divergence=ea_result.per_rule_best_code_divergence,
             pool_arm_stats={
                 "strategy": self.config.optimizer,
-                "mutator_stats": ea_result.mutator_stats,
-                # restart_reason_counts is an EA-only concept (no restarts in
-                # the random baseline) — omit it for random_baseline.
+                "mutator_stats": run_result.mutator_stats,
                 **(
-                    {"restart_reason_counts": ea_result.restart_reason_counts}
+                    {"restart_reason_counts": run_result.restart_reason_counts}
                     if self.config.optimizer == "ea" else {}
                 ),
+                "best_chromosome": {
+                    "chromosome_id": best.cid,
+                    "mutated_rule_ids": sorted(best.mutated_rule_ids()),
+                    "order_priority": dict(best.order_priority),
+                    "f1": best.f1, "f2": best.f2, "f3": best.f3,
+                },
             },
-            compounding_state=ea_result.archives_snapshot,  # archives keyed by rule_id
+            compounding_state=run_result.archive_snapshot,  # single chromosome archive
             eval_cache_stats={
                 "enabled": self.config.enable_eval_cache,
                 "hits": self._eval_cache_hits,
@@ -1190,111 +836,228 @@ class HillClimber:
 
         return result
 
-    def _save_mutated_rule(
+    
+
+    # ==================================================================
+    # Chromosome evaluation seam (pure render → score; no mutation, no
+    # archive, no mutated-rule-file writes — those live in the runner).
+    # ==================================================================
+
+    def _evaluate_chromosome(
         self,
-        mutated_text: str,
-        test_case_id: str | int,
-        index: int,
-        iteration: int | None,
-        original_rule_ids: list[str],
-        target_rule_id: str | None = None,
-        mutation_changes: list[str] | None = None,
-        validation_metadata: dict | None = None,
-        parent_text: str | None = None,
-        mutation_chain: list[str] | None = None,
-    ) -> str:
-        """Save the mutated rule to an iteration subdirectory and return its path.
+        chromo: RuleSetChromosome,
+        space: RuleSetSpace,
+        prompts_with_rules: list["PromptWithRules"],  # type: ignore
+        *,
+        iter_id: str,
+        should_stop_fn: "Callable[[], bool] | None" = None,
+    ) -> tuple[AggregatedFitness, list[EvaluationResult], int, int]:
+        """Render every prompt from ``chromo`` and score the whole chromosome.
 
-        Structure written (once per iteration/rule combination):
-            mutated_rules/
-              iter001/
-                cg-0-file-handling-and-uploads.md   ← clean rule text only
-                meta.json                            ← changes, validation, context
-              iter002/
-                ...
+        For each prompt the rule block is rendered from the chromosome's alleles
+        in the chromosome's global order (``space.render_prompt``); the eval cache
+        is keyed on ``(tc_id, space.prompt_signature(...))`` so prompts whose
+        rendered rule set is unchanged from a prior evaluation reuse the cached
+        (code, Semgrep) result. Objectives are aggregated over the whole
+        chromosome, with f2/f3 scoped to the AFFECTED prompts (those containing a
+        mutated gene or a reordered rule).
 
-        The file is written only on the first call for a given (iteration,
-        target_rule_id) pair.  Subsequent calls for the same pair (different
-        test-case prompts that share the same rule) return the existing path
-        without re-writing.
-
-        Returns:
-            Relative path to the saved rule file, e.g.
-            ``"mutated_rules/iter001/cg-0-file-handling-and-uploads.md"``.
+        Returns ``(aggregated_fitness, per_prompt_results, n_reused, n_rerun)``.
+        Pure: no mutation, no validation, no archive, no mutated_rules/ writes.
         """
-        output_dir = self.config.output_dir
-        if not output_dir:
-            return "[not_saved]"
+        mutated = chromo.mutated_rule_ids()
+        cache_enabled = self.config.enable_eval_cache
 
-        iter_name = f"iter{iteration:03d}" if iteration is not None else "baseline"
-        rule_short = (
-            target_rule_id.replace("codeguard-", "cg-")
-            if target_rule_id
-            else f"all_{len(original_rule_ids)}_rules"
+        # Each item: (code, gen_latency_ms, input_tokens, output_tokens, test_prompt, pwr)
+        generated: list[tuple[str, float, int, int, TestPrompt, Any]] = []
+        semgrep_results: list[Any] = [None] * len(prompts_with_rules)
+        analysis_latency_per_sample: list[float] = [0.0] * len(prompts_with_rules)
+        fresh_indices: list[int] = []
+        cache_keys: list[tuple[str, str] | None] = [None] * len(prompts_with_rules)
+        cache_hit_flags: list[bool | None] = [None] * len(prompts_with_rules)
+
+        # ---- Phase 1: render + generate (cache short-circuits unaffected prompts)
+        for idx, pwr in enumerate(prompts_with_rules):
+            if iter_id != "baseline" and should_stop_fn is not None and should_stop_fn():
+                from .ea_optimizer import WallTimeStop
+                raise WallTimeStop()
+
+            assembled = space.render_prompt(chromo, pwr.rule_ids)
+            rule_text = assembled if assembled else None  # empty ⇒ baseline system prompt
+            test_prompt = TestPrompt(
+                prompt=pwr.prompt, language=pwr.language,
+                cwe_id=pwr.cwe_id, metadata=pwr.metadata,
+            )
+            tc_id = pwr.metadata.get("test_case_id", f"case_{idx}")
+
+            cache_hit = None
+            if cache_enabled:
+                sig = space.prompt_signature(chromo, pwr.rule_ids)
+                key = (str(tc_id), sig)
+                cache_keys[idx] = key
+                cache_hit = self._eval_cache.get(key)
+
+            if cache_hit is not None:
+                self._eval_cache_hits += 1
+                cache_hit_flags[idx] = True
+                generated.append((cache_hit["code"], cache_hit["gen_latency_ms"],
+                                  0, 0, test_prompt, pwr))
+                semgrep_results[idx] = cache_hit["semgrep_result"]
+                analysis_latency_per_sample[idx] = cache_hit["analysis_latency_ms"]
+            else:
+                self._eval_cache_misses += 1
+                if cache_enabled:
+                    cache_hit_flags[idx] = False
+                self._log(f"   [{idx+1}/{len(prompts_with_rules)}] Generating code for TC#{tc_id}...")
+                code, gen_latency, in_tok, out_tok = self._generate_code(rule_text, test_prompt)
+                generated.append((code, gen_latency, in_tok, out_tok, test_prompt, pwr))
+                fresh_indices.append(idx)
+
+        # ---- Phase 2: batch Semgrep on fresh (cache-missed) samples only
+        if fresh_indices:
+            self._log(
+                f"   ⚡ Running Semgrep batch on {len(fresh_indices)} samples "
+                f"({len(generated) - len(fresh_indices)} reused from cache)..."
+            )
+            fresh_samples = [(generated[i][0], generated[i][4].language) for i in fresh_indices]
+            analysis_start = time.perf_counter()
+            fresh_semgrep = run_semgrep_batch_dir(fresh_samples)
+            per_sample_ms = ((time.perf_counter() - analysis_start) * 1000) / max(len(fresh_samples), 1)
+            for i, sres in zip(fresh_indices, fresh_semgrep):
+                semgrep_results[i] = sres
+                analysis_latency_per_sample[i] = per_sample_ms
+                if cache_enabled and cache_keys[i] is not None:
+                    self._eval_cache[cache_keys[i]] = {  # type: ignore[index]
+                        "code": generated[i][0],
+                        "gen_latency_ms": generated[i][1],
+                        "semgrep_result": sres,
+                        "analysis_latency_ms": per_sample_ms,
+                    }
+        else:
+            self._log(f"   ⚡ Semgrep: all {len(generated)} samples reused from cache — skipping batch")
+
+        # ---- Phase 3: fitness + per-prompt records
+        results: list[EvaluationResult] = []
+        fitness_results: list[FitnessResult] = []
+        tc_log_lines: dict[int, str] = {}
+        intermediate_records: list[dict] = []
+
+        for idx, (semgrep_result, item) in enumerate(zip(semgrep_results, generated)):
+            code, gen_latency, in_tok, out_tok, test_prompt, pwr = item
+            fitness = calculate_fitness(semgrep_result, self.config.fitness_strategy)
+            tc_id = test_prompt.metadata.get("test_case_id", f"case_{idx}")
+
+            if self.composite_evaluator is not None:
+                baseline = self._baseline_fitness_per_case.get(str(tc_id))
+                baseline_score = baseline.weighted_score if baseline is not None else 0.0
+                composite_result = self.composite_evaluator.evaluate(
+                    semgrep_score=fitness.weighted_score,
+                    baseline_score=baseline_score,
+                    generated_code=code,
+                    test_case_id=tc_id,
+                    lang=test_prompt.language,
+                )
+                _delta = composite_result.semgrep_delta
+                if self.config.objective_direction == "minimize":
+                    _delta = -_delta
+                fitness.composite_score = _delta
+                fitness.code_divergence = composite_result.code_divergence
+                fitness.details["composite"] = composite_result.components
+
+            fitness_results.append(fitness)
+            eval_result = EvaluationResult(
+                prompt=test_prompt, generated_code=code, fitness=fitness,
+                generation_latency_ms=gen_latency,
+                analysis_latency_ms=analysis_latency_per_sample[idx],
+                input_tokens=in_tok, output_tokens=out_tok,
+            )
+            results.append(eval_result)
+
+            record = self._build_chromosome_prompt_record(
+                eval_result, idx, iter_id, pwr, chromo,
+                eval_cache_hit=cache_hit_flags[idx],
+            )
+            if record is not None:
+                intermediate_records.append(record)
+
+            if fitness.composite_score is not None:
+                tc_log_lines[idx] = (
+                    f"       → TC#{tc_id}: Vulns={fitness.raw_count} "
+                    f"Score={fitness.weighted_score:.3f}, "
+                    f"Δ={fitness.composite_score:+.3f}, Div={fitness.code_divergence:.3f}"
+                )
+            else:
+                tc_log_lines[idx] = (
+                    f"       → TC#{tc_id}: Score={fitness.weighted_score:.3f}, "
+                    f"Vulns={fitness.raw_count}"
+                )
+
+        # Fresh-first logging (new results at the top, reused below)
+        fresh_set = set(fresh_indices)
+        for idx in fresh_indices:
+            self._log(tc_log_lines[idx])
+        if fresh_indices and len(fresh_indices) < len(generated):
+            self._log("")
+        for idx in range(len(generated)):
+            if idx not in fresh_set:
+                self._log(tc_log_lines[idx])
+
+        # AFFECTED subset for f2/f3: prompts containing a mutated gene OR a rule
+        # with a non-zero priority offset (a potential reorder). Empty ⇒ global
+        # denominator (baseline / origin), matching aggregate_fitness's fallback.
+        affected_indices = [
+            i for i, pwr in enumerate(prompts_with_rules)
+            if (mutated & set(pwr.rule_ids))
+            or any(chromo.order_priority.get(r, 0) for r in pwr.rule_ids)
+        ]
+        aggregated = aggregate_fitness(
+            fitness_results,
+            self.config.fitness_strategy,
+            affected_indices=affected_indices or None,
         )
 
-        iter_dir = output_dir / "mutated_rules" / iter_name
-        iter_dir.mkdir(parents=True, exist_ok=True)
+        if intermediate_records:
+            self._save_intermediate_iter_jsonl(iter_id, intermediate_records)
 
-        rule_file = iter_dir / f"{rule_short}.md"
-        rel_path = f"mutated_rules/{iter_name}/{rule_short}.md"
+        n_rerun = len(fresh_indices)
+        n_reused = len(generated) - n_rerun
+        return aggregated, results, n_reused, n_rerun
 
-        # Write only once per (iteration, rule) — subsequent TCs share the same mutation
-        if not rule_file.exists():
-            rule_file.write_text(mutated_text, encoding="utf-8")
-
-            # bd-3wa: mutation_identity = True iff the mutated text is
-            # byte-identical to its parent (the EA's try_add rejects this, but
-            # the event is still observable for analysis).
-            mutation_identity = (
-                parent_text is not None and mutated_text == parent_text
-            )
-            meta = {
-                "iteration": iteration,
-                "mutation_chain": mutation_chain or [],
-                "target_rule_id": target_rule_id,
-                "mutation_identity": mutation_identity,
-                "mutation_changes": mutation_changes or [],
-            }
-            (iter_dir / "meta.json").write_text(
-                json.dumps(meta, indent=2), encoding="utf-8"
-            )
-
-        return rel_path
-    
-    def _build_intermediate_record(
+    def _build_chromosome_prompt_record(
         self,
         result: EvaluationResult,
         index: int,
         iter_id: str,
-        mutated_rule_file: str | None,
-        original_rule_ids: list[str],
-        target_rule_id: str | None = None,
+        pwr: "PromptWithRules",  # type: ignore
+        chromo: RuleSetChromosome,
         eval_cache_hit: bool | None = None,
     ) -> dict | None:
-        """Build one per-prompt evaluation record for intermediate/{iter_id}.jsonl.
+        """One per-prompt evaluation record for intermediate/{iter_id}.jsonl (schema 3).
 
-        Scalar / structured metadata first; ``generated_code`` (the only large,
-        non-recoverable blob) comes last. The prompt text is intentionally NOT
-        stored — it is identical across all iterations and recoverable from the
-        rules-map (``run_config.json[args].rules_map``) keyed by ``test_case_id``.
+        ``rules_used`` now describes the whole chromosome as it applies to this
+        prompt: the mutated genes, this prompt's render order, whether the prompt
+        was affected, and the chromosome id (links to the archive snapshot).
         """
         if not self.config.output_dir:
             return None
 
+        mutated = sorted(chromo.mutated_rule_ids())
+        render_order = chromo.render_order(pwr.rule_ids)
+        prompt_affected = bool(set(pwr.rule_ids) & set(mutated)) or any(
+            chromo.order_priority.get(r, 0) for r in pwr.rule_ids
+        )
         return {
             "iter_id": iter_id,
             "index": index,
-            "test_case_id": result.prompt.metadata.get('test_case_id', f'case_{index}'),
+            "test_case_id": result.prompt.metadata.get("test_case_id", f"case_{index}"),
             "language": result.prompt.language,
             "cwe_id": result.prompt.cwe_id,
             "rules_used": {
-                "original_rule_ids": original_rule_ids,
-                "target_rule_id": target_rule_id,
-                "rule_was_applicable": (
-                    target_rule_id in original_rule_ids if target_rule_id else None
-                ),
-                "mutated_rule_file": mutated_rule_file,
+                "original_rule_ids": list(pwr.rule_ids),
+                "mutated_rule_ids": mutated,
+                "render_order": render_order,
+                "prompt_affected": prompt_affected,
+                "chromosome_id": chromo.cid,
             },
             "fitness": {
                 "raw_count": result.fitness.raw_count,
@@ -1315,7 +1078,6 @@ class HillClimber:
             "llm_calls_so_far": self._total_llm_calls,
             "input_tokens_so_far": self._total_input_tokens,
             "output_tokens_so_far": self._total_output_tokens,
-            # generated_code last (large, and the only field not recoverable elsewhere).
             "generated_code": result.generated_code,
         }
 

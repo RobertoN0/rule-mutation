@@ -2,8 +2,8 @@
 Composite fitness evaluator for the SBST hill-climbing optimizer.
 
 Computes two signals per test case, which the (1+1) EA aggregates into the
-three objectives of a per-rule Pareto archive (see ``ea_optimizer`` /
-``pareto_archive``):
+three objectives of the full-chromosome Pareto archive (see ``ea_optimizer`` /
+``chromosome``):
 
     semgrep_delta   : float   — semgrep_score - baseline_score (effectiveness)
     code_divergence : float   — 1 - CodeBLEU(generated, reference)  [0, 1]
@@ -107,6 +107,14 @@ class CompositeFitnessEvaluator:
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    def set_reference(self, test_case_id: str | int, code: str) -> None:
+        """Register the iter-0 reference code for a test case.
+
+        Used instead of writing ``self.reference_codes[...]`` from outside, so
+        the evaluator owns its own state (loose coupling — see D15 in
+        CHROMOSOME_RESTRUCTURE_PLAN.md)."""
+        self.reference_codes[str(test_case_id)] = code
 
     def evaluate(
         self,
