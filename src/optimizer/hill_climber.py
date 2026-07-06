@@ -908,10 +908,14 @@ class HillClimber:
                 self._eval_cache_misses += 1
                 if cache_enabled:
                     cache_hit_flags[idx] = False
-                self._log(f"   [{idx+1}/{len(prompts_with_rules)}] Generating code for TC#{tc_id}...")
                 code, gen_latency, in_tok, out_tok = self._generate_code(rule_text, test_prompt)
                 generated.append((code, gen_latency, in_tok, out_tok, test_prompt, pwr))
                 fresh_indices.append(idx)
+
+        # One line instead of one-per-prompt: how many prompts ran vs reused.
+        n_total = len(prompts_with_rules)
+        n_fresh = len(fresh_indices)
+        self._log(f"   🤖 {n_total} prompts: generated {n_fresh}, reused {n_total - n_fresh} from cache")
 
         # ---- Phase 2: batch Semgrep on fresh (cache-missed) samples only
         if fresh_indices:
@@ -992,15 +996,19 @@ class HillClimber:
                     f"Vulns={fitness.raw_count}"
                 )
 
-        # Fresh-first logging (new results at the top, reused below)
+        # Fresh (changed) prompts: one line each — these are what moved this iter.
+        # Cached (unchanged) prompts: a single roll-up line instead of one per TC.
         fresh_set = set(fresh_indices)
         for idx in fresh_indices:
             self._log(tc_log_lines[idx])
-        if fresh_indices and len(fresh_indices) < len(generated):
-            self._log("")
-        for idx in range(len(generated)):
-            if idx not in fresh_set:
-                self._log(tc_log_lines[idx])
+        reused_idx = [i for i in range(len(generated)) if i not in fresh_set]
+        if reused_idx:
+            reused_vulns = sum(fitness_results[i].raw_count for i in reused_idx)
+            reused_vuln_prompts = sum(1 for i in reused_idx if fitness_results[i].raw_count > 0)
+            self._log(
+                f"   ♻️  {len(reused_idx)} prompts reused from cache — "
+                f"vuln_prompts={reused_vuln_prompts}, vulns={reused_vulns}"
+            )
 
         # AFFECTED subset for f2/f3: prompts containing a mutated gene OR a rule
         # with a non-zero priority offset (a potential reorder). Empty ⇒ global
@@ -1015,6 +1023,33 @@ class HillClimber:
             self.config.fitness_strategy,
             affected_indices=affected_indices or None,
         )
+
+        # ---- Per-iteration metric sweep: proportions + movement at a glance --
+        cur_vulns = sum(fr.raw_count for fr in fitness_results)
+        cur_vuln_prompts = sum(1 for fr in fitness_results if fr.raw_count > 0)
+        base = self._baseline_fitness_per_case
+        if iter_id != "baseline" and base:
+            base_vulns = 0
+            base_vuln_prompts = 0
+            for i in range(len(fitness_results)):
+                tc = str(generated[i][4].metadata.get("test_case_id", ""))
+                b = base.get(tc)
+                if b is not None:
+                    base_vulns += b.raw_count
+                    base_vuln_prompts += 1 if b.raw_count > 0 else 0
+            self._log(
+                f"   📊 vuln_prompts={cur_vuln_prompts}/{len(fitness_results)} "
+                f"(Δ{cur_vuln_prompts - base_vuln_prompts:+d}) | "
+                f"vulns={cur_vulns} (Δ{cur_vulns - base_vulns:+d}) | "
+                f"f1={aggregated.total_semgrep_delta:+.2f} "
+                f"f2={aggregated.proportion_divergent:.3f} "
+                f"f3={aggregated.conditional_mean_divergence:.3f}"
+            )
+        else:
+            self._log(
+                f"   📊 baseline: vuln_prompts={cur_vuln_prompts}/{len(fitness_results)} | "
+                f"vulns={cur_vulns}"
+            )
 
         if intermediate_records:
             self._save_intermediate_iter_jsonl(iter_id, intermediate_records)

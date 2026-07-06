@@ -177,16 +177,15 @@ echo "=== GPU Check ==="
 nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv
 echo ""
 
-# Output dir: tag the optimizer (and cap for EA) so EA / random / sweep runs don't mingle.
-# OUTPUT_BASE lets a curated set (e.g. the final experiments) land in its own directory
-# instead of the shared results/ pool. Default preserves prior behaviour.
+# Output dir naming policy: job<ID>_<strategy>_<lang>_s<seed>_<monthday>.
+# Run-specific knobs (archive cap, restart h, n_cases) live in run_config.json,
+# not the directory name — the name stays uniform across strategies so result sets
+# are never confused. OUTPUT_BASE lets a curated set land in its own directory.
 OUTPUT_BASE=${OUTPUT_BASE:-experiments/results}
 DATE=$(date +%m%d)
-if [ "$OPTIMIZER" = "ea" ]; then
-    OUTPUT_DIR="${OUTPUT_BASE}/job${SLURM_JOB_ID}_ea_cap${ARCHIVE_CAP}_h${RESTART_H}_${N_CASES}_${DATE}"
-else
-    OUTPUT_DIR="${OUTPUT_BASE}/job${SLURM_JOB_ID}_rand_${N_CASES}_${DATE}"
-fi
+STRAT_TAG=$([ "$OPTIMIZER" = "ea" ] && echo "ea" || echo "rand")
+LANG_TAG=${LANGUAGES:-all}
+OUTPUT_DIR="${OUTPUT_BASE}/job${SLURM_JOB_ID}_${STRAT_TAG}_${LANG_TAG}_s${SEED}_${DATE}"
 mkdir -p "$OUTPUT_DIR"
 mkdir -p logs
 

@@ -231,8 +231,12 @@ def run_ea(
         # ---- 3. identity moves consume the slot but are not evaluated -------
         if is_identity:
             archive._attempts_since_insert += 1
-            log(f"   ⏭️  Iteration {i+1}: identity {move_type} "
-                f"({'+'.join(chain_names) or rule_id}) — skipping eval")
+            # Own header block (leading blank line) so it reads as a distinct
+            # iteration rather than being squished onto the previous one.
+            log(f"\n⏭️  Iteration {i+1}/{max_iterations} — identity {move_type} "
+                f"rule={(rule_id or '-').replace('codeguard-', 'cg-')} "
+                f"mutator={'+'.join(chain_names) or rule_id} "
+                f"— no change vs parent, slot consumed (no eval)")
             # Record the (unchanged) chromosome: an identity candidate equals its
             # parent, so chromosome_id = parent.cid (never null) with f1=None.
             _emit_record(iter_record_fn, i + 1, "ea", parent, child=parent, move_type=move_type,
@@ -244,6 +248,15 @@ def run_ea(
 
         space.stamp(child)
 
+        # ---- 4. header → validation → evaluate ------------------------------
+        # Header first so both the validation line and the per-prompt generation
+        # lines nest under this iteration. Validation is computed before code
+        # generation, so its log line must precede the generation lines.
+        log(f"\n🧬 Iteration {i+1}/{max_iterations} — {move_type} "
+            f"rule={(rule_id or '-').replace('codeguard-', 'cg-')} "
+            f"mutator={'+'.join(chain_names) or '-'} depth={gene_depth} "
+            f"parent_f1={parent.f1:+.2f} front={len(archive)}")
+
         # Optional quality validation of the mutation (observational; never refuses).
         validation_metadata: dict = {}
         if move_type == "mutate" and validate_move_fn is not None:
@@ -252,11 +265,6 @@ def run_ea(
                 chain_names, changes,
             )
 
-        # ---- 4. evaluate the whole chromosome -------------------------------
-        log(f"\n🧬 Iteration {i+1}/{max_iterations} — {move_type} "
-            f"rule={(rule_id or '-').replace('codeguard-', 'cg-')} "
-            f"chain={'+'.join(chain_names) or '-'} depth={gene_depth} "
-            f"parent_f1={parent.f1:+.2f} front={len(archive)}")
         try:
             agg, _results, n_reused, n_rerun = evaluate_chromosome_fn(child, f"ea_iter{i+1:04d}")
         except WallTimeStop:
@@ -277,7 +285,10 @@ def run_ea(
 
         # ---- 5. offer to the archive ----------------------------------------
         parent_f1 = parent.f1
+        front_before = {e.cid for e in archive.entries}
+        size_before = len(archive)
         accepted, reason = archive.try_add(child, iteration=i + 1)
+        evicted = front_before - {e.cid for e in archive.entries}
         if accepted:
             n_accepted += 1
             if chain_names:
@@ -285,7 +296,12 @@ def run_ea(
                 if child.f1 > parent_f1:
                     mutator_stats[chain_names[-1]]["archive_adds_f1"] += 1
             log(f"   ✅ archive add: f1={child.f1:+.2f} f2={child.f2:.3f} f3={child.f3:.3f} "
-                f"(front={len(archive)}, cid={child.cid})")
+                f"(front={len(archive)}/{archive.cap}, cid={child.cid})")
+            if evicted:
+                log(f"   ⤷ evicted from front (dominated or cap-overflow): "
+                    f"{', '.join(sorted(evicted))}")
+            if len(archive) < size_before:
+                log(f"   ↧ front shrank {size_before} → {len(archive)}")
         else:
             log(f"   ✗ rejected ({reason}): f1={child.f1:+.2f} f2={child.f2:.3f} f3={child.f3:.3f} "
                 f"[front={len(archive)}/{archive.cap}, "
@@ -488,8 +504,12 @@ def run_random_baseline(
         # E2: identity is measured against the ORIGINAL — a no-op chain must not
         # advance the walk (and must not revert an already-mutated gene).
         if new_text == space.originals[rid]:
-            log(f"   ⏭️  Iteration {i+1}: identity chain on "
-                f"{rid.replace('codeguard-', 'cg-')} — skipping")
+            # Own header block (leading blank line) so it reads as a distinct
+            # iteration rather than being squished onto the previous one.
+            log(f"\n⏭️  Iteration {i+1}/{max_iterations} — identity chain "
+                f"rule={rid.replace('codeguard-', 'cg-')} "
+                f"chain={'+'.join(chain_names)} "
+                f"— chain was a no-op vs original, walk not advanced (no eval)")
             for name in chain_names:
                 mutator_stats[name]["applications"] += 1
             _emit_record(iter_record_fn, i + 1, "random_baseline", parent=None, child=current,
