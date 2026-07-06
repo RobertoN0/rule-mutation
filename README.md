@@ -140,9 +140,10 @@ Each script writes a `summary.md` + CSVs + PNGs into `<run_dir>/analysis/` (or a
 4. **Validate** mutation quality (SBERT similarity, instruction adherence, security-keyword retention) — *informational and post-hoc*: every candidate is recorded, none are rejected (the validator never gates the search).
 5. **Generate** code with the configured backend on the original vs. mutated rule — Qwen2.5-Coder-32B-Instruct on DelftBlue, or Claude / OpenAI locally.
 6. **Score** each prompt by Semgrep finding count + code-divergence via CodeBLEU.
-7. **Optimize** with one of two interchangeable search strategies (`--optimizer`):
-   - **`ea`** — a (1+1) EA with a per-rule 3-objective **Pareto archive** (total Semgrep delta, proportion of divergent prompts, mean conditional divergence).
-   - **`random_baseline`** — a stateless per-iteration multi-mutation sampler (the ablation: same budget, no archive, no acceptance test, no state).
+7. **Optimize** with one of two interchangeable search strategies (`--optimizer`)
+   over **full rule-set chromosomes** (per-gene rule alleles + a global rule-order gene):
+   - **`ea`** — a (1+1) EA over a single 3-objective **Pareto archive of full chromosomes** (total Semgrep delta, proportion of divergent prompts, mean conditional divergence); each move mutates one gene on the parent chromosome so rule changes stack.
+   - **`random_baseline`** — a persistent single-chromosome random walk (the ablation: same budget, no archive, no acceptance test; each iteration applies a 1..K chain to a rule's *original* allele and carries the chromosome forward).
 
 ### Mutation strategies
 
@@ -204,7 +205,7 @@ Reproduce any run with `python scripts/experiments/rerun_from_config.py <run_dir
 ```
 ├── src/
 │   ├── mutation/          # 8 mutators + MutatorPool + MutationQualityValidator + ParsedRule
-│   ├── optimizer/         # (1+1) EA + Pareto archive (ea_optimizer.py, pareto_archive.py)
+│   ├── optimizer/         # chromosome + single Pareto archive (chromosome.py), EA + random runners (ea_optimizer.py)
 │   │                      #   + stateless random baseline; HillClimber orchestration
 │   ├── evaluation/        # Semgrep runner, CodeBLEU code-divergence, fitness, rule/dataset loading
 │   ├── llm_backends/      # Claude / OpenAI / DelftBlue-local backends

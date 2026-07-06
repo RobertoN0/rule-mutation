@@ -112,24 +112,26 @@ deprecated no-op for CLI/config back-compat.)
 A hit skips both code generation and Semgrep — safe under `temperature=0` greedy
 decoding. Reported in `hillclimb_summary` as `eval_cache_stats`.
 
-#### `ea_optimizer.py` — the two runners
+#### `ea_optimizer.py` — the two runners (over full chromosomes)
 
-- `run_ea(...)` — the (1+1) EA over per-rule Pareto archives. Records `mutation_chain` = the parent's lineage + this iteration's mutator (last element); `mutator_stats` use **last-mutator credit** `{attempts, archive_adds, archive_adds_f1}`.
-- `run_random_baseline(...)` — the stateless sampler. Records `mutation_chain` = the `n` sampled mutators; `mutator_stats` use **whole-chain credit** `{applications, applications_f1_advancing}` (every mutator in a chain whose final candidate beat baseline is credited).
-- `_ChainMutator` — applies an ordered list of mutators as one cumulative mutation (used by the random baseline).
+- `run_ea(...)` — the (1+1) EA over the single chromosome archive. Each iteration samples a parent chromosome, mutates one gene on its current allele (a 1..`ea_n_mutations` chain), evaluates the whole rule set, and offers the child by Pareto dominance. Records `mutation_chain` = this step's mutator(s), plus `chromosome_id`/`parent_chromosome_id`/`mutated_rule_ids`/`gene_depth`; `mutator_stats` use **last-mutator credit** `{attempts, archive_adds, archive_adds_f1}`. Order/reverse moves are gated (`order_move_weight`/`reverse_move_weight`).
+- `run_random_baseline(...)` — the persistent single-chromosome walk. Each iteration picks a rule, applies a 1..K chain to that rule's **original** allele, overwrites the gene in the carried-forward chromosome, and evaluates. Records `mutation_chain` = the `n` sampled mutators; `mutator_stats` use **whole-chain credit** `{applications, applications_f1_advancing}`.
+- `_apply_chain` — applies an ordered list of mutators cumulatively; `_choose_and_build_move` selects a move (mutate/order/revert) and builds the child chromosome.
 
-#### `pareto_archive.py` — `ParetoArchive` (EA only)
+#### `chromosome.py` — `RuleSetChromosome`, `RuleSetSpace`, `ChromosomeArchive`
 
-Per-rule archive over the three maximised objectives. Each `ArchiveEntry` carries
-its `rule_text`, the three objective values, `depth` (mutations from the
-original), `attempted_children` (mutators already tried on it), and
-`mutation_path` (the lineage). `try_add` rejects dominated candidates and
-identity candidates (byte-identical to an existing entry), evicting the
-lowest-sum entry on cap overflow. Restart triggers (each snapshots the prior
-state into `restart_history` before reseeding from the original): `stagnation`
-(`restart_h` non-inserting attempts), `depth_saturated` (all entries at
-`max_depth`), `mutator_exhausted` (all entries tried every mutator),
-`fully_exhausted` (mixed).
+A **chromosome** stores only its overrides: `genes` (mutated rules → `GeneState`
+with text + `mutation_path`/`depth`) and `order_priority` (per-rule global
+priority offsets; default 0 ⇒ each prompt renders in its original retrieval
+order). `RuleSetSpace` owns the originals + the prompt separator and provides
+`allele`, `render_prompt`, `prompt_signature` (the cache key: ordered
+`(rule_id, sha(text))`), and `chromosome_id` (content hash). The single
+`ChromosomeArchive` holds non-dominated chromosomes over (f1, f2, f3): `try_add`
+rejects candidates dominated by the **origin** (always a virtual member, held
+aside and never evicted) or any front member, and duplicates by `chromosome_id`,
+evicting the lowest-sum member on cap overflow. On stagnation `restart` **re-opens
+exploration** (clears the exhausted-move sets) rather than wiping the front. The
+origin is always available as a parent, so a fresh lineage can always start.
 
 ---
 
@@ -158,7 +160,20 @@ state into `restart_history` before reseeding from the original): `stagnation`
 
 ## Output schema
 
-`run_config.json` carries `schema_version: 2`. A run directory:
+> **Schema 3 (chromosome runs).** New runs carry `schema_version: 3` — a clean
+> break from the schema-2 per-rule layout described below. Under schema 3:
+> `iterations.jsonl` records add `chromosome_id`, `parent_chromosome_id`,
+> `move_type`, `mutated_rule_ids`, `gene_depth`, `n_prompts_rerun/reused`,
+> `validation_metadata`; `archive_snapshots/iterNNNN.json` is a single
+> `{iter, cap, restart_h, origin, chromosomes:[...]}` list (not per-rule);
+> `mutated_rules/iterNNN/` is written **every evaluated iteration** (with an
+> `accepted` flag in `meta.json`); `intermediate/*` `rules_used` carries
+> `mutated_rule_ids` + `render_order` + `chromosome_id` instead of a single
+> `target_rule_id`. Full spec + rationale in
+> [CHROMOSOME_RESTRUCTURE_PLAN.md](CHROMOSOME_RESTRUCTURE_PLAN.md §8). The
+> schema-2 description below is retained for the older `experiments/final/` runs.
+
+`run_config.json` carries `schema_version: 2` (schema-2 runs). A run directory:
 
 ```
 {output_dir}/
