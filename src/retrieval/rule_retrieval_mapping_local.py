@@ -14,7 +14,7 @@ Output format is compatible with run_with_rules_map.py --rules-map.
 
 Prerequisites
 ─────────────
-  conda activate sbst
+  source .venv/bin/activate
   # Model must be pre-cached in /scratch/$USER/models
 
 Usage
@@ -22,7 +22,7 @@ Usage
   # On a SLURM GPU node (recommended):
   sbatch scripts/slurm/slurm_rule_retrieval_local.sh
 
-  # Direct (on a GPU node with sbst env active):
+  # Direct (on a GPU node with the .venv active):
   python src/retrieval/rule_retrieval_mapping_local.py --limit-per-cwe 5
 
   # Expand coverage, skipping already-mapped prompts:

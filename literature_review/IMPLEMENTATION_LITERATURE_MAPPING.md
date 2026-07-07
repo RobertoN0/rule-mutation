@@ -356,7 +356,7 @@ The following details are inside individual mutators and, while not load-bearing
 To keep the search focused, the following are **deliberately** uncited and should stay uncited — engineering details or thesis-specific conventions for which no literature is expected:
 
 - Directory layout, file naming, SLURM scripting conventions.
-- Conda environment, HF cache path, `activate_sbst.sh`.
+- Python `.venv` environment, HF cache path, env activation.
 - Logging format, `bd` (beads) tracker usage, experiment-results archiving.
 - `mask_inline_code` placeholder tokens, restore-map implementation (§3.3).
 - The decision to cache SBERT embeddings or lazy-load models.
