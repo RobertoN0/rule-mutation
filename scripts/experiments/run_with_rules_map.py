@@ -388,16 +388,6 @@ def main():
         ),
     )
     parser.add_argument(
-        "--ea-n-mutations",
-        type=int,
-        default=1,
-        help=(
-            "EA: mutators applied per text move (default 1 = Design A / local search). "
-            ">1 = Design B: sample a 1..n chain per move to match the random baseline, "
-            "isolating selection as the only variable."
-        ),
-    )
-    parser.add_argument(
         "--order-move-weight",
         type=float,
         default=0.0,
@@ -409,6 +399,20 @@ def main():
         default=0.0,
         help="EA: probability weight of the reverse (restore-gene-to-original) move "
              "(default 0 = off).",
+    )
+    parser.add_argument(
+        "--objective-mode",
+        choices=["divergence", "option_b"],
+        default="divergence",
+        help="Archive objective set: 'divergence' (f2=proportion_divergent, "
+             "f3=conditional_mean_divergence) or 'option_b' (f2=rule_fidelity, "
+             "f3=-parsimony). 'option_b' requires --enable-validation.",
+    )
+    parser.add_argument(
+        "--ea-from-original",
+        action="store_true",
+        help="EA: re-derive each mutate move from the ORIGINAL rule text and replace "
+             "the gene (memoryless, like random) instead of stacking on the incumbent.",
     )
     parser.add_argument(
         "--archive-cap",
@@ -439,8 +443,9 @@ def main():
         type=int,
         default=4,
         help=(
-            "random_baseline only: max chain length K (default: 4). Each iteration "
-            "samples n in [1, K] distinct mutators and applies them to the original rule."
+            "Max chain length K, shared by BOTH arms (default: 4). Each move samples "
+            "n in [1, K] distinct mutators; random applies them to the original rule, "
+            "EA stacks them on the parent's current allele (see run_ea)."
         ),
     )
     parser.add_argument(
@@ -715,6 +720,12 @@ def main():
         backend=backend_for_mutator,
     )
 
+    # option_b objectives use SBERT rule-fidelity as f2 → validation is mandatory.
+    if args.objective_mode == "option_b" and not args.enable_validation:
+        print("❌ --objective-mode option_b requires --enable-validation "
+              "(rule fidelity is computed from SBERT).")
+        sys.exit(1)
+
     # Create validator if enabled
     validator = None
     if args.enable_validation:
@@ -759,9 +770,12 @@ def main():
         restart_h=args.restart_h,
         max_depth_ea=args.max_depth_ea,
         max_mutations_per_iter=args.max_mutations_per_iter,
-        ea_n_mutations=args.ea_n_mutations,
+        # EA and random share one K (see --max-mutations-per-iter).
+        ea_n_mutations=args.max_mutations_per_iter,
         order_move_weight=args.order_move_weight,
         reverse_move_weight=args.reverse_move_weight,
+        objective_mode=args.objective_mode,
+        ea_from_original=args.ea_from_original,
         objective_direction=args.objective_direction,
     )
 
@@ -890,9 +904,10 @@ def main():
                 "restart_h":              args.restart_h,
                 "max_depth_ea":           args.max_depth_ea,
                 "max_mutations_per_iter": args.max_mutations_per_iter,
-                "ea_n_mutations":         args.ea_n_mutations,
                 "order_move_weight":      args.order_move_weight,
                 "reverse_move_weight":    args.reverse_move_weight,
+                "objective_mode":         args.objective_mode,
+                "ea_from_original":       args.ea_from_original,
                 "enable_validation":      args.enable_validation,
                 "enable_perplexity":      getattr(args, "enable_perplexity", False),
                 "enable_eval_cache":     not args.no_eval_cache,

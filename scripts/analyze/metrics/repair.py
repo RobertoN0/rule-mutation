@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from statistics import median
 
+import labels
 import loaders as L
 from metrics import outcomes as O
 
@@ -34,10 +35,11 @@ from metrics import outcomes as O
 # (`qwen_class` in baseline_common_<lang>.csv), NOT the Qwen-Llama intersection.
 # Each model is paired with its own baseline; the column is switchable so a later
 # Llama run can key on `llama_class` without touching callers.
-#   NEVER      — never vulnerable across the 40 baseline runs (the floor)
-#   PERSISTENT — vulnerable in >=80% of runs even with the rule present
-#   VARIABLE   — the finding comes and goes across seeds (the borderline band)
-#   RULE_FIXED — vulnerable without the rule but rarely with it
+#   ALWAYS_SAFE          — never vulnerable across the 40 baseline runs (the floor)
+#   ALWAYS_VULNERABLE    — vulnerable in >=80% of runs even with the rule present
+#   SOMETIMES_VULNERABLE — the finding comes and goes across seeds (borderline band)
+#   FIXED_BY_RULES       — vulnerable without the rule but rarely with it
+# Canonical tokens + report display labels live in ``labels.py``.
 
 _LANG_ALIASES = {"python": "python", "py": "python", "java": "java", "ja": "java"}
 DEFAULT_SUBSET_DIR = Path("experiments/analysis/bl40_final_full_analysis")
@@ -50,7 +52,8 @@ def load_subset_classes(language: str, subset_dir: Path = DEFAULT_SUBSET_DIR,
     """tid -> per-model baseline class from baseline_common_<lang>.csv.
 
     ``class_col`` selects the model column (default ``qwen_class``). Values are
-    'NEVER' | 'PERSISTENT' | 'VARIABLE' | 'RULE_FIXED'.
+    normalised to the canonical tokens in ``labels.ALL`` (legacy tokens from an
+    old CSV are mapped through ``labels.normalize`` on read).
     """
     lang = _LANG_ALIASES.get(language.lower(), language.lower())
     path = Path(subset_dir) / f"baseline_common_{lang}.csv"
@@ -59,7 +62,7 @@ def load_subset_classes(language: str, subset_dir: Path = DEFAULT_SUBSET_DIR,
         return out
     with open(path) as fh:
         for row in csv.DictReader(fh):
-            out[str(row["tid"])] = row.get(class_col, "")
+            out[str(row["tid"])] = labels.normalize(row.get(class_col, ""))
     return out
 
 
@@ -147,11 +150,11 @@ def in_subset(row: TaskRow, subset: str) -> bool:
     if subset == "movable":
         return row.before_raw > 0
     if subset == "persistent":
-        return row.klass == "PERSISTENT"
+        return row.klass == labels.ALWAYS_VULNERABLE
     if subset == "variable":
-        return row.klass in ("VARIABLE", "RULE_FIXED")
+        return row.klass in (labels.SOMETIMES_VULNERABLE, labels.FIXED_BY_RULES)
     if subset == "never":
-        return row.klass == "NEVER"
+        return row.klass == labels.ALWAYS_SAFE
     raise ValueError(f"unknown subset {subset!r}")
 
 

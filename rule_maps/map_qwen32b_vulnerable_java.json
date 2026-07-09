@@ -38,7 +38,7 @@
       "java": 229,
       "python": 351
     },
-    "filter": "language=java, qwen_class != NEVER (source: baseline_common_java.csv)"
+    "filter": "language=java, qwen_class != ALWAYS_SAFE (source: baseline_common_java.csv)"
   },
   "rule_frequency": {
     "codeguard-0-api-web-services": 5,

@@ -81,8 +81,16 @@ class ChromosomeRunResult:
 # Move helpers (EA)
 # ============================================================================
 
-def _untried_mutators(parent: RuleSetChromosome, rid: str, mutators: list[Mutator]) -> list[Mutator]:
-    return [m for m in mutators if ("mut", rid, m.name) not in parent.tried]
+def _unused_mutators(parent: RuleSetChromosome, rid: str, mutators: list[Mutator]) -> list[Mutator]:
+    """Mutators not yet in ``rid``'s cumulative ``mutation_path``.
+
+    Enforces "each mutator at most once per rule": re-applying the same operator
+    to a rule just re-does the same class of transformation (a wasted eval), so a
+    gene's reachable variants are the distinct-mutator subsets. 
+    """
+    g = parent.genes.get(rid)
+    used = set(g.mutation_path) if g else set()
+    return [m for m in mutators if m.name not in used]
 
 
 def _eligible_genes(
@@ -90,23 +98,44 @@ def _eligible_genes(
     all_rule_ids: list[str],
     mutators: list[Mutator],
     max_depth: int,
-    ea_n_mutations: int,
 ) -> list[str]:
     """Rules that still admit a text-mutation move on ``parent``.
 
-    A gene is eligible when its depth is below ``max_depth`` and (for the
-    single-mutation default) it has ≥1 untried mutator. For multi-mutation
-    (Design B) any below-cap gene is eligible — chains are re-drawable, and the
-    archive's cid dedup rejects exact repeats.
+    A gene is eligible when its depth is below ``max_depth`` and it still has ≥1
+    unused mutator. With the no-repeat rule the two limits coincide once every
+    mutator has been applied, so a gene saturates naturally at ``len(mutators)``.
     """
     out: list[str] = []
     for rid in all_rule_ids:
         if parent.gene_depth(rid) >= max_depth:
             continue
-        if ea_n_mutations == 1 and not _untried_mutators(parent, rid, mutators):
+        if not _unused_mutators(parent, rid, mutators):
             continue
         out.append(rid)
     return out
+
+
+def _mutate_candidates(
+    parent: RuleSetChromosome,
+    all_rule_ids: list[str],
+    mutators: list[Mutator],
+    max_depth: int,
+) -> tuple[list[str], list[str]]:
+    """Split the genes a mutate move may act on by what happens to them.
+
+    * ``stackable`` — depth < max_depth and ≥1 unused mutator → stack a fresh chain.
+    * ``saturated`` — a *mutated* gene with no room left → revert to original.
+
+    Together they span every rule (an unmutated rule is always stackable), so the
+    mutate move's uniform pick can land on a saturated gene and ablate it rather
+    than skipping it — a deterministic test of whether its stacked mutations still
+    earn their place (vs the old code, where a saturated gene was only ever reset
+    by a lucky reverse-move draw).
+    """
+    stackable = _eligible_genes(parent, all_rule_ids, mutators, max_depth)
+    stack_set = set(stackable)
+    saturated = [r for r in sorted(parent.mutated_rule_ids()) if r not in stack_set]
+    return stackable, saturated
 
 
 def _apply_chain(mutators: list[Mutator], text: str) -> tuple[str, list[str], list[str]]:
@@ -120,6 +149,22 @@ def _apply_chain(mutators: list[Mutator], text: str) -> tuple[str, list[str], li
         names.append(m.name)
         changes.extend(res.changes)
     return cur, names, changes
+
+
+def _objectives(agg: AggregatedFitness, objective_mode: str) -> tuple[float, float, float]:
+    """Map an AggregatedFitness to the archive's (f1, f2, f3) triple.
+
+    All three are MAXIMIZED by the archive; f1 is always vulnerability reduction.
+    - ``divergence`` (default): f2 = proportion_divergent, f3 = conditional_mean_divergence
+      (behavioral-change axes, now on a fixed all-prompts denominator).
+    - ``option_b``: f2 = rule_fidelity (max — keep rules faithful to the original),
+      f3 = −parsimony (minimize # mutated rules; negated so the maximizing archive
+      prefers the smaller edit).
+    """
+    f1 = agg.total_semgrep_delta
+    if objective_mode == "option_b":
+        return f1, agg.rule_fidelity, -float(agg.parsimony)
+    return f1, agg.proportion_divergent, agg.conditional_mean_divergence
 
 
 # ============================================================================
@@ -141,6 +186,8 @@ def run_ea(
     ea_n_mutations: int = 1,
     order_move_weight: float = 0.0,
     reverse_move_weight: float = 0.0,
+    objective_mode: str = "divergence",
+    from_original: bool = False,
     seed: int | None,
     log: Callable[[str], None],
     iter_record_fn: Callable[[dict], None] | None = None,
@@ -153,12 +200,15 @@ def run_ea(
     """(1+1) EA over a single full-chromosome Pareto archive.
 
     Each iteration: pick a parent chromosome from the archive (origin always
-    available), pick a move (text-mutate one gene, or — when enabled — reorder /
+    available), pick a move (text-mutate one gene, or reorder /
     revert a gene), build the child chromosome, evaluate the WHOLE chromosome,
     and offer it to the archive by Pareto dominance over (f1, f2, f3).
 
-    ``ea_n_mutations`` = mutators applied per text move (default 1 = Design A;
-    >1 samples a 1..n chain to match the random baseline's move — Design B).
+    ``ea_n_mutations`` = max mutators applied per text move (K). A move samples a
+    1..K chain of *distinct, unused* mutators for the chosen gene (K=1 ⇒ a single
+    mutator — the local-search special case). No mutator is ever applied twice to
+    the same rule (see ``_unused_mutators``). Drive K from the same knob as the
+    random baseline's chain length so the two arms share one move budget.
     ``order_move_weight`` / ``reverse_move_weight`` gate the order/reverse moves
     (0 by default). RNG draws use one seeded ``random.Random`` for reproducibility.
     """
@@ -175,7 +225,12 @@ def run_ea(
     mutate_weight = max(0.0, 1.0 - order_move_weight - reverse_move_weight)
 
     def _is_eligible(parent: RuleSetChromosome) -> bool:
-        if _eligible_genes(parent, space.all_rule_ids, mutators, max_depth, ea_n_mutations):
+        # from_original: any rule can always be re-derived from the original, so a
+        # mutate move is always available.
+        if from_original:
+            return True
+        stackable, saturated = _mutate_candidates(parent, space.all_rule_ids, mutators, max_depth)
+        if stackable or saturated:
             return True
         if reverse_move_weight > 0 and parent.mutated_rule_ids():
             return True
@@ -212,7 +267,7 @@ def run_ea(
         # ---- 2. choose + build a move ---------------------------------------
         move = _choose_and_build_move(
             parent, space, prompts_with_rules, mutators, rng, max_depth, ea_n_mutations,
-            mutate_weight, order_move_weight, reverse_move_weight,
+            mutate_weight, order_move_weight, reverse_move_weight, from_original,
         )
         if move is None:
             # Parent had no realizable move (should be filtered by eligibility);
@@ -242,7 +297,8 @@ def run_ea(
             _emit_record(iter_record_fn, i + 1, "ea", parent, child=parent, move_type=move_type,
                          rule_id=rule_id, chain_names=chain_names, agg=None, accepted=False,
                          identity=True, gene_depth=gene_depth, n_reused=0, n_rerun=0,
-                         eligible=len(space.all_rule_ids), restarts=restarts_this_iter)
+                         eligible=len(space.all_rule_ids), restarts=restarts_this_iter,
+                         objective_mode=objective_mode)
             last_completed = i + 1
             continue
 
@@ -278,9 +334,7 @@ def run_ea(
                 break
             raise
 
-        child.f1, child.f2, child.f3 = (
-            agg.total_semgrep_delta, agg.proportion_divergent, agg.conditional_mean_divergence,
-        )
+        child.f1, child.f2, child.f3 = _objectives(agg, objective_mode)
         child.fitness = agg
 
         # ---- 5. offer to the archive ----------------------------------------
@@ -330,7 +384,8 @@ def run_ea(
                      rule_id=rule_id, chain_names=chain_names, agg=agg, accepted=accepted,
                      identity=False, gene_depth=gene_depth, n_reused=n_reused, n_rerun=n_rerun,
                      eligible=len(space.all_rule_ids), restarts=restarts_this_iter,
-                     parent_f1=parent_f1, validation_metadata=validation_metadata)
+                     parent_f1=parent_f1, validation_metadata=validation_metadata,
+                     objective_mode=objective_mode)
 
         if (i + 1) % snapshot_every == 0 and archive_snapshot_fn is not None:
             archive_snapshot_fn(i + 1, archive.snapshot())
@@ -365,15 +420,20 @@ def _choose_and_build_move(
     mutate_weight: float,
     order_weight: float,
     reverse_weight: float,
+    from_original: bool = False,
 ):
     """Pick a move type by weight and build the child chromosome.
 
     Returns ``(child, move_key, move_type, rule_id, chain_names, changes,
     is_identity)`` or ``None`` when no move is realizable. ``move_key`` is the
     hashable token recorded in ``parent.tried``.
+
+    ``from_original`` = memoryless per-gene EA: a mutate move re-derives the chosen
+    rule from its ORIGINAL text (like the random baseline) and REPLACES the gene,
+    so accepted mutations do not stack. Order/reverse moves are unaffected.
     """
-    move_type = _weighted_move_type(rng, parent, space, mutators, max_depth, ea_n_mutations,
-                                    mutate_weight, order_weight, reverse_weight)
+    move_type = _weighted_move_type(rng, parent, space, mutators, max_depth,
+                                    mutate_weight, order_weight, reverse_weight, from_original)
     if move_type is None:
         return None
 
@@ -390,27 +450,52 @@ def _choose_and_build_move(
         is_identity = not _order_changes_any_prompt(parent, child, prompts_with_rules)
         return child, ("order", rid, op), "order", rid, [], [f"{op}:{rid}"], is_identity
 
-    # text mutation (default)
-    genes = _eligible_genes(parent, space.all_rule_ids, mutators, max_depth, ea_n_mutations)
-    if not genes:
+    # from_original: pick any rule, draw a fresh 1..K distinct-mutator chain, apply
+    # it to the ORIGINAL text, and REPLACE the gene (no stacking, no saturation).
+    if from_original:
+        rid = rng.choice(space.all_rule_ids)
+        k_cap = max(1, min(ea_n_mutations, len(mutators)))
+        chosen = rng.sample(mutators, rng.randint(1, k_cap))
+        new_text, names, changes = _apply_chain(chosen, space.originals[rid])
+        cur = space.allele(parent, rid)
+        if new_text == cur:                              # no change vs parent → identity
+            return parent, ("mut", rid, tuple(names)), "mutate", rid, names, changes, True
+        if new_text == space.originals[rid]:             # chain reproduced original → revert
+            child = parent.with_reverted(rid)
+        else:
+            child = parent.with_gene_from_original(rid, new_text, names)
+        return child, ("mut", rid, tuple(names)), "mutate", rid, names, changes, False
+
+    # text move (stacking): pick uniformly across all genes. A gene with room gets a
+    # fresh 1..K chain of distinct, unused mutators stacked on its CURRENT allele; a
+    # saturated gene (no room left) is reverted to original instead — an ablation
+    # of its stacked mutations, kept or dropped by the archive's dominance check.
+    stackable, saturated = _mutate_candidates(parent, space.all_rule_ids, mutators, max_depth)
+    candidates = stackable + saturated
+    if not candidates:
         return None
-    rid = rng.choice(genes)
+    rid = rng.choice(candidates)
+    if rid in saturated:
+        child = parent.with_reverted(rid)
+        return child, ("rev", rid), "reverse", rid, [], [f"reverted {rid} (saturated)"], False
+    avail = _unused_mutators(parent, rid, mutators)
     depth = parent.gene_depth(rid)
-    if ea_n_mutations == 1:
-        chosen = [rng.choice(_untried_mutators(parent, rid, mutators))]
-    else:
-        room = max(1, min(ea_n_mutations, max_depth - depth, len(mutators)))
-        chosen = rng.sample(mutators, rng.randint(1, room))
+    room = max(1, min(ea_n_mutations, max_depth - depth, len(avail)))
+    chosen = rng.sample(avail, rng.randint(1, room))
     new_text, names, changes = _apply_chain(chosen, space.allele(parent, rid))
     is_identity = new_text == space.allele(parent, rid)
     child = parent if is_identity else parent.with_gene_chain(rid, new_text, names)
     return child, ("mut", rid, tuple(names)), "mutate", rid, names, changes, is_identity
 
 
-def _weighted_move_type(rng, parent, space, mutators, max_depth, ea_n_mutations,
-                        mutate_weight, order_weight, reverse_weight):
+def _weighted_move_type(rng, parent, space, mutators, max_depth,
+                        mutate_weight, order_weight, reverse_weight, from_original=False):
     """Choose an available move type by weight; fall back to any available one."""
-    can_mutate = bool(_eligible_genes(parent, space.all_rule_ids, mutators, max_depth, ea_n_mutations))
+    if from_original:
+        can_mutate = True  # any rule can always be re-derived from its original
+    else:
+        stackable, saturated = _mutate_candidates(parent, space.all_rule_ids, mutators, max_depth)
+        can_mutate = bool(stackable or saturated)
     can_reverse = reverse_weight > 0 and bool(parent.mutated_rule_ids())
     can_order = order_weight > 0
     options = []
@@ -462,6 +547,7 @@ def run_random_baseline(
     max_iterations: int,
     max_mutations_per_iter: int,
     max_depth: int,
+    objective_mode: str = "divergence",
     seed: int | None,
     log: Callable[[str], None],
     iter_record_fn: Callable[[dict], None] | None = None,
@@ -515,7 +601,7 @@ def run_random_baseline(
             _emit_record(iter_record_fn, i + 1, "random_baseline", parent=None, child=current,
                          move_type="mutate", rule_id=rid, chain_names=chain_names, agg=None,
                          accepted=False, identity=True, gene_depth=current.gene_depth(rid),
-                         n_reused=0, n_rerun=0)
+                         n_reused=0, n_rerun=0, objective_mode=objective_mode)
             continue
 
         child = space.stamp(current.with_gene_from_original(rid, new_text, chain_names))
@@ -543,9 +629,7 @@ def run_random_baseline(
                 break
             raise
 
-        child.f1, child.f2, child.f3 = (
-            agg.total_semgrep_delta, agg.proportion_divergent, agg.conditional_mean_divergence,
-        )
+        child.f1, child.f2, child.f3 = _objectives(agg, objective_mode)
         child.fitness = agg
         current = child  # carry forward — always persisted
 
@@ -571,7 +655,8 @@ def run_random_baseline(
         _emit_record(iter_record_fn, i + 1, "random_baseline", parent=None, child=child,
                      move_type="mutate", rule_id=rid, chain_names=chain_names, agg=agg,
                      accepted=True, identity=False, gene_depth=child.gene_depth(rid),
-                     n_reused=n_reused, n_rerun=n_rerun, validation_metadata=validation_metadata)
+                     n_reused=n_reused, n_rerun=n_rerun, validation_metadata=validation_metadata,
+                     objective_mode=objective_mode)
         last_completed = i + 1
 
     # best includes the origin floor (f1 >= 0): if no walk step beat baseline,
@@ -599,13 +684,22 @@ def _emit_record(
     iter_record_fn, iteration, strategy, parent, child, move_type, rule_id, chain_names,
     agg, accepted, identity, gene_depth, n_reused, n_rerun,
     eligible: int = 0, restarts: list | None = None, parent_f1: float | None = None,
-    validation_metadata: dict | None = None,
+    validation_metadata: dict | None = None, objective_mode: str = "divergence",
 ):
     if iter_record_fn is None:
         return
-    f1 = agg.total_semgrep_delta if agg is not None else None
-    f2 = agg.proportion_divergent if agg is not None else None
-    f3 = agg.conditional_mean_divergence if agg is not None else None
+    # f1/f2/f3 are the objectives the archive actually used (mode-mapped), so the
+    # front analysis matches the search. The raw component metrics are recorded
+    # alongside regardless of mode, so the two objective sets stay cross-comparable.
+    if agg is not None:
+        f1, f2, f3 = _objectives(agg, objective_mode)
+        prop_div = agg.proportion_divergent
+        cond_div = agg.conditional_mean_divergence
+        fidelity = agg.rule_fidelity
+        parsimony = agg.parsimony
+    else:
+        f1 = f2 = f3 = None
+        prop_div = cond_div = fidelity = parsimony = None
     p_f1 = parent_f1 if parent_f1 is not None else (parent.f1 if parent is not None else None)
     rec = {
         "iter": iteration,
@@ -620,7 +714,12 @@ def _emit_record(
         "mutation_identity": identity,
         "mutated_rule_ids": sorted(child.mutated_rule_ids()) if child is not None else [],
         "gene_depth": gene_depth,
+        "objective_mode": objective_mode,
         "f1": f1, "f2": f2, "f3": f3,
+        "proportion_divergent": prop_div,
+        "conditional_mean_divergence": cond_div,
+        "rule_fidelity": fidelity,
+        "parsimony": parsimony,
         "f1_advance": bool(accepted and f1 is not None and p_f1 is not None and f1 > p_f1),
         "accepted": accepted,
         "n_prompts_rerun": n_rerun,

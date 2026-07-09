@@ -38,7 +38,7 @@
       "java": 229,
       "python": 351
     },
-    "filter": "language=python, qwen_class != NEVER (source: baseline_common_python.csv)"
+    "filter": "language=python, qwen_class != ALWAYS_SAFE (source: baseline_common_python.csv)"
   },
   "rule_frequency": {
     "codeguard-0-additional-cryptography": 13,

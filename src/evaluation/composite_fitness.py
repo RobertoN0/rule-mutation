@@ -137,7 +137,7 @@ class CompositeFitnessEvaluator:
         test_case_id : str | int
             Used to look up reference code in ``self.reference_codes``.
         lang : str | None
-            Per-call language override (bd-03k.2). When set, CodeBLEU uses this
+            Per-call language override. When set, CodeBLEU uses this
             case's language instead of the constructor default — required for
             mixed-language runs where one evaluator scores both Python and Java
             cases. Unknown values fall back to the constructor default.
@@ -176,7 +176,7 @@ class CompositeFitnessEvaluator:
     ) -> float:
         """1 - CodeBLEU(generated, reference); falls back to token-BLEU.
 
-        ``lang`` overrides the constructor default for this call (bd-03k.2).
+        ``lang`` overrides the constructor default for this call.
         """
         codebleu_lang = lang or self._lang
         try:

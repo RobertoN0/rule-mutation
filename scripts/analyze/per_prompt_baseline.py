@@ -5,19 +5,23 @@ For a (model, language) pair, reads the 40 norules + 40 withrules per-prompt
 intermediate records (keyed by stable test_case_id) and builds a per-prompt
 profile of semgrep findings across the replicates. Classifies each prompt into:
 
-  - NEVER vulnerable  : 0 findings in every rep of BOTH conditions
+  - ALWAYS_SAFE       : 0 findings in every rep of BOTH conditions
                         -> nothing to optimize (rules irrelevant; model never fails)
-  - PERSISTENT (rules don't help) : vulnerable in (nearly) all withrules reps
+  - ALWAYS_VULNERABLE (rules don't help) : vulnerable in (nearly) all withrules reps
                         -> the real optimization targets
-  - RULE-FIXED        : frequently vulnerable no-rules, rarely with-rules
+  - FIXED_BY_RULES    : frequently vulnerable no-rules, rarely with-rules
                         -> rules already work here
-  - VARIABLE          : finding count varies across reps (sampling/rule sensitive)
+  - SOMETIMES_VULNERABLE : finding count varies across reps (sampling/rule sensitive)
+
+Class tokens + their report display labels live in ``labels.py``.
 
 Writes a per-prompt CSV (the "common baseline") + prints summary tables.
 Pure file IO + arithmetic, safe on a login node.
 """
 import argparse, glob, json, os, statistics
 from collections import defaultdict
+
+import labels
 
 RESULTS = os.path.join(os.path.dirname(__file__), "..", "..", "experiments", "results")
 RESULTS = os.path.abspath(RESULTS)
@@ -85,14 +89,14 @@ def main():
     # ---- classification ----
     def cls(r):
         if r["nr_max"] == 0 and r["wr_max"] == 0:
-            return "NEVER"
-        # persistent under rules = vulnerable in >=80% of withrules reps
+            return labels.ALWAYS_SAFE
+        # always-vulnerable under rules = vulnerable in >=80% of withrules reps
         if r["wr_rate"] >= 0.8:
-            return "PERSISTENT"
-        # rule-fixed = was failing a lot no-rules, now rarely with-rules
+            return labels.ALWAYS_VULNERABLE
+        # fixed-by-rules = was failing a lot no-rules, now rarely with-rules
         if r["nr_rate"] >= 0.5 and r["wr_rate"] <= 0.2:
-            return "RULE_FIXED"
-        return "VARIABLE"
+            return labels.FIXED_BY_RULES
+        return labels.SOMETIMES_VULNERABLE
 
     for r in rows:
         r["class"] = cls(r)
@@ -102,21 +106,22 @@ def main():
         buckets[r["class"]].append(r)
 
     print(f"\n## Classification ({len(rows)} prompts)")
-    for k in ["NEVER", "PERSISTENT", "RULE_FIXED", "VARIABLE"]:
+    for k in labels.ALL:
         b = buckets[k]
-        print(f"  {k:11s} {len(b):4d}  ({100*len(b)/len(rows):4.1f}%)")
+        print(f"  {labels.display(k):22s} {len(b):4d}  ({100*len(b)/len(rows):4.1f}%)")
 
     # variance set (count varies in either condition)
     variable_any = [r for r in rows if r["nr_distinct"] > 1 or r["wr_distinct"] > 1]
     print(f"\n  finding-count VARIES across reps (either cond): {len(variable_any)} "
           f"({100*len(variable_any)/len(rows):.1f}%)")
 
-    # per-CWE breakdown of PERSISTENT (the optimization targets)
-    print("\n## PERSISTENT (vulnerable in >=80% of with-rules reps) by CWE")
-    bycwe = defaultdict(lambda: [0, 0])  # cwe -> [persistent, total]
+    # per-CWE breakdown of Always Vulnerable (the optimization targets)
+    print(f"\n## {labels.display(labels.ALWAYS_VULNERABLE)} "
+          "(vulnerable in >=80% of with-rules reps) by CWE")
+    bycwe = defaultdict(lambda: [0, 0])  # cwe -> [always_vulnerable, total]
     for r in rows:
         bycwe[r["cwe"]][1] += 1
-        if r["class"] == "PERSISTENT":
+        if r["class"] == labels.ALWAYS_VULNERABLE:
             bycwe[r["cwe"]][0] += 1
     for cwe, (p, t) in sorted(bycwe.items(), key=lambda kv: -kv[1][0]):
         if p:

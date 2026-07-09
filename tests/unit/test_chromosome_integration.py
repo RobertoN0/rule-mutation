@@ -178,7 +178,9 @@ def test_validation_metadata_flows_when_enabled(tmp_path: Path):
         hc.optimize_per_prompt_rules(_prompts())
 
     iters = [json.loads(l) for l in (tmp_path / "iterations.jsonl").read_text().splitlines() if l]
-    real = [it for it in iters if not it["mutation_identity"]]
+    # Only text mutations carry validation metadata; saturated-gene reverts
+    # (move_type "reverse") restore the original text, which needs no adherence check.
+    real = [it for it in iters if it["move_type"] == "mutate" and not it["mutation_identity"]]
     assert real and all(it["validation_metadata"].get("passes_all") is True for it in real)
     assert all("sbert_cum" in it["validation_metadata"] for it in real)
     # mutated_rules meta.json also carries it

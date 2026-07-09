@@ -130,8 +130,19 @@ class AggregatedFitness:
     when `affected_indices` is unspecified at aggregation time."""
 
     num_prompts_affected: int = 0
-    """Size of the AFFECTED subset used as the f2 denominator. Equals num_prompts
-    when no filter was supplied at aggregation time."""
+    """Size of the AFFECTED subset (prompts touching a mutated/reordered rule).
+    Reported for analysis; no longer the f2 denominator (that is now num_prompts)."""
+
+    # ---- Chromosome-level option-B objectives (attached by _evaluate_chromosome,
+    # not computed here — they need the alleles + SBERT validator, not per-prompt
+    # results). Defaults leave the divergence-mode path untouched. --------------
+    rule_fidelity: float = 1.0
+    """Mean SBERT similarity of the chromosome's MUTATED rules vs their originals
+    (1.0 when nothing is mutated). Option-B f2 axis — maximized."""
+
+    parsimony: int = 0
+    """Number of mutated rules in the chromosome. Option-B f3 axis — minimized
+    (stored negated when routed to an objective, so the maximizing archive works)."""
 
 
 def calculate_fitness(
@@ -225,7 +236,13 @@ def aggregate_fitness(
         total_div_affected = total_code_divergence
         n_div_affected = n_divergent
 
-    proportion_div = (n_div_affected / n_affected) if n_affected > 0 else 0.0
+    # f2 denominator is the FULL prompt set (fixed), not the affected subset:
+    # an unaffected prompt can never diverge (it renders identically to baseline),
+    # so n_div_affected == global divergent count, and dividing by n gives a
+    # chromosome-comparable global proportion. The affected-subset denominator was
+    # a per-rule artifact that made f2 chromosome-dependent (incomparable across
+    # the archive) and let subset shifts change f2 with no code change.
+    proportion_div = (n_div_affected / n) if n > 0 else 0.0
     conditional_mean_div = (total_div_affected / n_div_affected) if n_div_affected > 0 else 0.0
 
     return AggregatedFitness(

@@ -146,6 +146,16 @@ class HillClimbConfig:
     """EA: probability weight for the reverse (restore-gene-to-original) move
     (gated off = 0)."""
 
+    objective_mode: str = "divergence"
+    """Archive objective set: 'divergence' (f2=proportion_divergent,
+    f3=conditional_mean_divergence) or 'option_b' (f2=rule_fidelity,
+    f3=−parsimony). 'option_b' requires enable_validation (SBERT fidelity)."""
+
+    ea_from_original: bool = False
+    """EA: if True, a mutate move re-derives the chosen rule from its ORIGINAL text
+    and replaces the gene (memoryless, like random) instead of stacking on the
+    incumbent. Isolates the archive/selection from the stacking operator."""
+
     enable_eval_cache: bool = True
     """Reuse cached (code, Semgrep result) for prompts whose assembled rule
     text is identical to a previously evaluated one.
@@ -665,8 +675,12 @@ class HillClimber:
             original_fitness.total_semgrep_delta = 0.0
             original_fitness.total_code_divergence = 0.0
 
-        # Origin objectives are (0,0,0) by construction (baseline vs itself).
-        origin.f1 = origin.f2 = origin.f3 = 0.0
+        # Origin objectives depend on the objective mode: divergence → (0,0,0);
+        # option_b → (0, fidelity=1.0, −parsimony=0). The do-nothing anchor must
+        # keep perfect fidelity so a mutated chromosome can't trivially dominate it
+        # on the fidelity axis.
+        from .ea_optimizer import _objectives
+        origin.f1, origin.f2, origin.f3 = _objectives(original_fitness, self.config.objective_mode)
         origin.fitness = original_fitness
 
         # Store "original" as the combined rules (truncated — for metadata only)
@@ -758,6 +772,8 @@ class HillClimber:
                     ea_n_mutations=self.config.ea_n_mutations,
                     order_move_weight=self.config.order_move_weight,
                     reverse_move_weight=self.config.reverse_move_weight,
+                    objective_mode=self.config.objective_mode,
+                    from_original=self.config.ea_from_original,
                     seed=seed, log=self._log,
                     iter_record_fn=self._append_iteration_record,
                     archive_snapshot_fn=snapshot_fn,
@@ -775,6 +791,7 @@ class HillClimber:
                     max_iterations=self.config.max_iterations,
                     max_mutations_per_iter=self.config.max_mutations_per_iter,
                     max_depth=self.config.max_depth_ea,
+                    objective_mode=self.config.objective_mode,
                     seed=seed, log=self._log,
                     iter_record_fn=self._append_iteration_record,
                     save_move_fn=save_move_fn,
@@ -842,6 +859,27 @@ class HillClimber:
     # Chromosome evaluation seam (pure render → score; no mutation, no
     # archive, no mutated-rule-file writes — those live in the runner).
     # ==================================================================
+
+    def _chromosome_fidelity(self, chromo: RuleSetChromosome, space: RuleSetSpace) -> float:
+        """Mean SBERT similarity of each MUTATED rule's current text vs its original.
+
+        1.0 when nothing is mutated. Uses the same prose-extraction + SBERT path as
+        the per-move ``sbert_cum`` so the objective is consistent with the validation
+        numbers. Returns 1.0 if the validator is absent — ``objective_mode=option_b``
+        enforces ``enable_validation`` upstream, so that path always has a validator.
+        """
+        mutated = chromo.mutated_rule_ids()
+        if not mutated or self.validator is None:
+            return 1.0
+        sims: list[float] = []
+        for rid in sorted(mutated):
+            orig = space.originals.get(rid)
+            if orig is None:
+                continue
+            orig_prose = self.validator._extract_prose_text(orig)
+            cand_prose = self.validator._extract_prose_text(space.allele(chromo, rid))
+            sims.append(self.validator._compute_sbert_similarity(orig_prose, cand_prose))
+        return sum(sims) / len(sims) if sims else 1.0
 
     def _evaluate_chromosome(
         self,
@@ -912,7 +950,6 @@ class HillClimber:
                 generated.append((code, gen_latency, in_tok, out_tok, test_prompt, pwr))
                 fresh_indices.append(idx)
 
-        # One line instead of one-per-prompt: how many prompts ran vs reused.
         n_total = len(prompts_with_rules)
         n_fresh = len(fresh_indices)
         self._log(f"   🤖 {n_total} prompts: generated {n_fresh}, reused {n_total - n_fresh} from cache")
@@ -996,8 +1033,6 @@ class HillClimber:
                     f"Vulns={fitness.raw_count}"
                 )
 
-        # Fresh (changed) prompts: one line each — these are what moved this iter.
-        # Cached (unchanged) prompts: a single roll-up line instead of one per TC.
         fresh_set = set(fresh_indices)
         for idx in fresh_indices:
             self._log(tc_log_lines[idx])
@@ -1023,6 +1058,11 @@ class HillClimber:
             self.config.fitness_strategy,
             affected_indices=affected_indices or None,
         )
+        # Chromosome-level option-B objectives (pure functions of the chromosome,
+        # independent of the per-prompt eval): parsimony = # mutated rules;
+        # rule_fidelity = mean SBERT of mutated rules vs originals (1.0 if none).
+        aggregated.parsimony = len(mutated)
+        aggregated.rule_fidelity = self._chromosome_fidelity(chromo, space)
 
         # ---- Per-iteration metric sweep: proportions + movement at a glance --
         cur_vulns = sum(fr.raw_count for fr in fitness_results)
@@ -1037,13 +1077,16 @@ class HillClimber:
                 if b is not None:
                     base_vulns += b.raw_count
                     base_vuln_prompts += 1 if b.raw_count > 0 else 0
+            # Raw component metrics (mode-independent, explicit labels). The actual
+            # archive objectives (f1/f2/f3, which vary by objective_mode) are logged
+            # on the "archive add" line in the runner.
             self._log(
                 f"   📊 vuln_prompts={cur_vuln_prompts}/{len(fitness_results)} "
                 f"(Δ{cur_vuln_prompts - base_vuln_prompts:+d}) | "
                 f"vulns={cur_vulns} (Δ{cur_vulns - base_vulns:+d}) | "
-                f"f1={aggregated.total_semgrep_delta:+.2f} "
-                f"f2={aggregated.proportion_divergent:.3f} "
-                f"f3={aggregated.conditional_mean_divergence:.3f}"
+                f"Δvuln={aggregated.total_semgrep_delta:+.2f} "
+                f"div_prop={aggregated.proportion_divergent:.3f} "
+                f"fidelity={aggregated.rule_fidelity:.3f} pars={aggregated.parsimony}"
             )
         else:
             self._log(

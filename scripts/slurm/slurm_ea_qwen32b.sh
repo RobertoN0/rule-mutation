@@ -74,8 +74,18 @@ set -e
 OPTIMIZER=${OPTIMIZER:-ea}                # "ea" | "random_baseline"
 ARCHIVE_CAP=${ARCHIVE_CAP:-6}             # Pareto archive size per rule (EA)
 RESTART_H=${RESTART_H:-8}                 # stagnation threshold (EA)
-MAX_DEPTH_EA=${MAX_DEPTH_EA:-4}           # per-entry depth cap (EA)
-MAX_MUTATIONS_PER_ITER=${MAX_MUTATIONS_PER_ITER:-4}  # chain length K (random_baseline)
+MAX_DEPTH_EA=${MAX_DEPTH_EA:-4}           # per-gene depth cap (EA)
+# Single chain-length knob K, shared by BOTH arms (one move budget).
+MAX_MUTATIONS_PER_ITER=${MAX_MUTATIONS_PER_ITER:-4}  # chain length K (random + EA)
+# Gated exploratory moves (EA only): probability weight, 0 = off.
+ORDER_MOVE_WEIGHT=${ORDER_MOVE_WEIGHT:-0.0}      # rule-reorder move
+REVERSE_MOVE_WEIGHT=${REVERSE_MOVE_WEIGHT:-0.0}  # restore-gene-to-original move
+# Archive objectives: "divergence" (f2/f3 = code divergence) | "option_b"
+# (f2 = rule fidelity, f3 = -parsimony). option_b requires ENABLE_VALIDATION=1.
+OBJECTIVE_MODE=${OBJECTIVE_MODE:-divergence}
+# EA mutate base: 1 = re-derive from original (memoryless, like random); 0 = stack.
+EA_FROM_ORIGINAL=${EA_FROM_ORIGINAL:-0}
+FROM_ORIGINAL_FLAG=$([ "$EA_FROM_ORIGINAL" = "1" ] && echo "--ea-from-original" || echo "")
 
 # ─────── Standard config (unchanged) ────────────────────────────────────────
 N_CASES=${N_CASES:-16}
@@ -123,6 +133,11 @@ if [ "$OPTIMIZER" = "ea" ]; then
     echo "  Archive cap:     $ARCHIVE_CAP"
     echo "  Restart h:       $RESTART_H"
     echo "  Max depth (EA):  $MAX_DEPTH_EA"
+    echo "  Max chain K:     $MAX_MUTATIONS_PER_ITER"
+    echo "  Order weight:    $ORDER_MOVE_WEIGHT"
+    echo "  Reverse weight:  $REVERSE_MOVE_WEIGHT"
+    echo "  Objective mode:  $OBJECTIVE_MODE"
+    echo "  From original:   $EA_FROM_ORIGINAL"
 else
     echo "  Max chain K:     $MAX_MUTATIONS_PER_ITER"
 fi
@@ -246,6 +261,10 @@ python scripts/experiments/run_with_rules_map.py \
     --restart-h "$RESTART_H" \
     --max-depth-ea "$MAX_DEPTH_EA" \
     --max-mutations-per-iter "$MAX_MUTATIONS_PER_ITER" \
+    --order-move-weight "$ORDER_MOVE_WEIGHT" \
+    --reverse-move-weight "$REVERSE_MOVE_WEIGHT" \
+    --objective-mode "$OBJECTIVE_MODE" \
+    $FROM_ORIGINAL_FLAG \
     $VALIDATION_FLAG \
     $NO_EVAL_CACHE_FLAG \
     --objective-direction "$OBJECTIVE_DIRECTION" \
