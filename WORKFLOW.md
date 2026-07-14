@@ -6,13 +6,13 @@ reproduction guide see [REPLICATION.md](REPLICATION.md); for internals see
 
 The pipeline runs the same way locally on an API backend (Claude / OpenAI, no
 GPU) and on a GPU host with a local model. Both write the same
-`schema_version: 2` output, so the same analysis scripts read both.
+`schema_version: 4` output.
 
 ---
 
 ## 1. Running experiments
 
-The entrypoint is `scripts/experiments/run_with_rules_map.py`. Choose a backend
+The entrypoint is `scripts/experiments/run_experiment.py`. Choose a backend
 (`--backend`), a model (`--model`), a search strategy (`--optimizer`), and a
 rule map.
 
@@ -21,21 +21,23 @@ rule map.
 ```bash
 source .venv/bin/activate        # or prefix commands with `uv run`
 
-python scripts/experiments/run_with_rules_map.py \
+python scripts/experiments/run_experiment.py \
   --backend claude --model claude-haiku-4-5 --optimizer ea \
   --rules-map rule_maps/map_qwen32b_python_java.json \
   --n-cases 8 --iterations 25 \
-  --archive-cap 6 --restart-h 8 --max-depth-ea 4 \
+  --archive-cap 6 --restart-h 8 --max-depth 4 \
+  --ea-init-samples 10 --ea-injection-every 10 --random-max-changes 10 \
   --mutators synonym_replacement add_random_word verb_weakening \
              section_reorder_shuffle section_reorder_degrade \
              negation_injection voice_change paraphrase \
-  --enable-validation --mutation-max-retries 2 \
+  --enable-validation \
   --languages python --seed 42 \
   --output-dir experiments/results/local_ea
 ```
 
-Swap `--optimizer random_baseline` (with `--max-mutations-per-iter K`) for the
-ablation. Drop `--enable-validation` to skip the quality recording.
+Swap `--optimizer random_search` for the i.i.d. baseline (same sampler, no
+archive). `--enable-validation` is **required** on real runs (it computes the f2
+rule-fidelity objective); only `--dry-run` may omit it.
 
 ### Choosing the model
 
@@ -56,14 +58,18 @@ The chosen model is recorded in `run_config.json` and `hillclimb_summary_*.json`
 |---|---|
 | `--backend {claude,openai,delftblue}` | code-generation provider |
 | `--model NAME` | model within the provider (default resolved per backend) |
-| `--optimizer {ea,random_baseline}` | search strategy |
+| `--optimizer {ea,random_search}` | search strategy |
+| `--objective-direction {minimize,maximize}` | `minimize` (default) = repair; `maximize` = secondary adversarial direction |
 | `--rules-map PATH` | prompt → rule-IDs map (pre-computed maps in `rule_maps/`) |
 | `--n-cases N`, `--languages …` | size + language filter of the prompt set |
-| `--iterations T` | search budget (one code-gen call per iteration) |
+| `--iterations T` | evaluation budget (identities retry without consuming it; wall-time bounds real runs) |
 | `--selection {first,random}` | take the first N cases, or a seeded random N |
-| `--archive-cap`, `--restart-h`, `--max-depth-ea` | EA archive knobs |
-| `--max-mutations-per-iter K` | random-baseline chain-length cap |
-| `--enable-validation`, `--mutation-max-retries` | observational quality recording |
+| `--archive-cap`, `--restart-h`, `--max-depth` | archive + depth-cap knobs |
+| `--random-max-changes K` | shared sampler's changes-per-sample cap (default 10) |
+| `--ea-init-samples`, `--ea-injection-every`, `--ea-move`, `--ea-n-mutations` | EA init/injection/move knobs |
+| `--ea-origin-parent` / `--no-ea-origin-parent` | keep the origin as a sampleable local-move parent (default on) |
+| `--archive-admission {neutral_drift,strict_repair}` | archive admission policy (default neutral_drift) |
+| `--enable-validation` | quality recording; **required** on real runs (feeds f2 fidelity) |
 | `--seed N` | reproducibility |
 | `--dry-run` | wire a mock backend (no API calls) to check the plumbing |
 
@@ -80,7 +86,7 @@ N_CASES=2 N_ITERATIONS=10 LANGUAGES=python OPTIMIZER=ea \
 
 # Multi-seed batch — paired EA vs random across seeds × languages (12 jobs)
 for SEED in 1 7 123; do
-  for OPT in ea random_baseline; do
+  for OPT in ea random_search; do
     for LANG in python java; do
       SEED=$SEED OPTIMIZER=$OPT N_CASES=25 N_ITERATIONS=200 LANGUAGES=$LANG SELECTION=random \
         sbatch --time=12:00:00 --job-name="${OPT}_${LANG}_s${SEED}" \
@@ -149,66 +155,34 @@ back to the SLURM wrapper's env vars (`--as delftblue` to force that form).
 
 ## 4. Understanding results
 
-### The three objectives (all maximised, over the prompts that use the rule)
+### The three objectives (conservative set, all maximised over the whole chromosome)
 
-- **f1 = `total_semgrep_delta`** — extra Semgrep findings vs. baseline (primary).
-- **f2 = `proportion_divergent`** — fraction of affected prompts whose generated code changed (`code_divergence > 0`).
-- **f3 = `conditional_mean_divergence`** — mean code divergence among those that changed.
+- **f1 = `total_semgrep_delta`** — vulnerability reduction vs. baseline under `--objective-direction minimize` (higher = safer); the primary signal.
+- **f2 = `rule_fidelity`** — mean SBERT similarity of each mutated rule to its original (1.0 = unchanged); needs `--enable-validation`.
+- **f3 = `−parsimony`** — negated count of text-mutated rules (fewer edits = higher).
+
+(The old divergence axes `proportion_divergent` / `conditional_mean_divergence`
+are still recorded per iteration as diagnostics but no longer steer the search.)
 
 f1's sign depends on `objective_direction` (f1 is negated at search time so the EA always
 maximises): under **minimize** (the repair runs) higher f1 = *safer* code (fewer findings);
-under **maximize** (legacy adversarial) higher f1 = *more vulnerable* code. f2/f3 capture
-whether the mutation changed the generated code *at all* — useful when Semgrep
+under **maximize** (the secondary adversarial direction) higher f1 = *more vulnerable* code.
+f2/f3 capture whether the mutation changed the generated code *at all* — useful when Semgrep
 finds nothing but the output still shifted.
 
-### Reading a run with the analysis toolkit
+### Analysis toolkit — work in progress
 
-```bash
-uv sync --extra dev --extra analysis     # combine extras (see the uv note in the README)
+A set of scripts under `scripts/analyze/` (needs `--extra analysis`) turns the
+raw run artifacts into figures and statistics. It is **being reworked for the
+repair/chromosome design**: the research-question mapping, the specific
+statistical tests, and the figure set are **not finalised**, so they are not
+documented here yet and are out of scope for the current code review. Until then,
+read the raw evidence directly — it is complete and stable (schema 4):
 
-# Per run: RQ1 (per-rule + per-prompt baseline-vs-best, Wilcoxon/McNemar),
-#          RQ2 (per-mutator effective rate + bootstrap CI), convergence, cost + hygiene
-python scripts/analyze/analyze_run.py experiments/results/<run>
-
-# Across runs: RQ3 (EA vs random, paired sign/Wilcoxon), multi-seed median+IQR
-python scripts/analyze/compare_runs.py experiments/results/
-
-# RESULTS FRAMING (bd-7kr): Cisco-style prompt headline + rule-prompt macro/micro backing view
-python scripts/analyze/outcome_distribution.py experiments/results/<run_or_parent> --out analysis_output/outcomes
-
-# RQ-AXIS TOOLKIT (schema-2 metrics package; each CLI = thin wrapper over metrics/ + viz/ + report/)
-# See scripts/analyze/README.md for the full guide. Per-rule fitness variation (f1 envelope per rule):
-python scripts/analyze/fitness_trajectories.py experiments/results/<run_or_parent> --source iterations
-# Merge a run's reports into one curated REPORT.md:
-python scripts/analyze/collect_reports.py experiments/results/<run>/analysis
-
-# RQ2 mutator effectiveness (bd-03k.1): lineage delta, position/order, LLM-vs-structural, best paths
-python scripts/analyze/analyze_mutators.py experiments/results/<runs_or_parent>
-
-# Security detail: per-CWE outcomes, which Semgrep checks a rephrasing added/removed, severity shifts
-python scripts/analyze/analyze_security.py experiments/results/<run_or_parent>
-
-# Search behaviour (RQ3): efficiency, restart reasons (bd-qfm gate), Pareto front, EA-vs-random
-python scripts/analyze/analyze_search.py experiments/results/<runs_or_parent>
-
-# Cost / operational: wall time, tokens, eval-cache, latency, budget-matched best-f1
-python scripts/analyze/analyze_cost.py experiments/results/<runs_or_parent>
-
-# Validation audit (only for --enable-validation runs): per-criterion fail rate,
-#   per-mutator pass rate, "what if we had gated" simulation
-python scripts/analyze/validation_audit.py experiments/results/<val_run>
-```
-
-The legacy per-run scripts write `summary.md` + CSVs + PNGs into `<run>/analysis/`.
-The schema-2 toolkit (`outcome_distribution` and the RQ-axis CLIs) writes per-run reports plus
-cross-run CSV/Markdown under the selected `--out` directory; layers live in
-`scripts/analyze/{metrics,viz,report}/` (pure compute / plotting / serialization). The
-`outcome_distribution` scopes are:
-
-- `prompt`: prompt-level headline, collapsed over all observed rephrasings of retrieved rules.
-- `applicable`: rule-prompt exposures where the rule was actually retrieved for the prompt.
-- `all_prompt_rules`: every mutated rule crossed with every prompt, treating non-applicable
-  pairs as unchanged; useful for compatibility with the first bd-7kr evidence table.
+- `iterations.jsonl` — the per-iteration trajectory (objectives, phase, move, acceptance).
+- `intermediate/*.jsonl` — the per-prompt evaluations (findings, generated code).
+- `archive_snapshots/` — the EA Pareto archive over time.
+- `hillclimb_summary_*.json` — run-level totals, mutator stats, eval-cache hygiene.
 
 ### Quick manual peek at the trajectory
 

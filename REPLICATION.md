@@ -84,11 +84,12 @@ covers Python + Java; `--languages python` keeps it small and cheap):
 ```bash
 # uv:           prefix with `uv run`
 # activated venv:  source .venv/bin/activate first
-python scripts/experiments/run_with_rules_map.py \
-  --backend claude --optimizer ea \
+python scripts/experiments/run_experiment.py \
+  --backend claude --optimizer ea --enable-validation \
   --rules-map rule_maps/map_qwen32b_python_java.json \
   --n-cases 2 --iterations 5 \
-  --archive-cap 6 --restart-h 8 --max-depth-ea 4 \
+  --archive-cap 6 --restart-h 8 --max-depth 4 \
+  --ea-init-samples 10 --ea-injection-every 10 --random-max-changes 10 \
   --mutators synonym_replacement add_random_word verb_weakening \
              section_reorder_shuffle section_reorder_degrade \
   --languages python --seed 42 \
@@ -96,15 +97,15 @@ python scripts/experiments/run_with_rules_map.py \
 ```
 
 This makes ~6 API calls (a baseline pass + 5 iterations, minus eval-cache hits)
-and writes a complete run directory (see §6). To run the random-baseline
-ablation instead, swap `--optimizer random_baseline` and replace the EA knobs
-with `--max-mutations-per-iter 4`.
+and writes a complete run directory (see §6). To run the i.i.d. baseline
+instead, swap `--optimizer random_search` (same sampler, no archive).
 
-To also record the (informational, post-hoc) quality-validation metadata — SBERT
-similarity, instruction adherence, keyword retention, etc. — add
-`--enable-validation`. Nothing is rejected; the metadata
-is written into `iterations.jsonl` and can be summarised with
-`scripts/analyze/validation_audit.py` (see §5).
+`--enable-validation` is **required** on every real run: it computes the f2
+rule-fidelity objective (SBERT similarity of each mutated rule to its original)
+and records the post-hoc quality metadata (instruction adherence, keyword
+retention, etc.) into `iterations.jsonl` — nothing is rejected. Only `--dry-run`
+may omit it. Summarise the metadata with `scripts/analyze/validation_audit.py`
+(see §5).
 
 Reproduce that exact run from its recorded config:
 
@@ -123,18 +124,17 @@ python scripts/experiments/rerun_from_config.py experiments/results/replication_
 
 ---
 
-## 5. Generate report figures
+## 5. Inspect the results
 
-```bash
-uv sync --extra analysis     # matplotlib + scipy (run on top of the base install)
-uv run python scripts/analyze/analyze_run.py experiments/results/replication_smoke
-```
+A completed run records everything needed for analysis directly on disk (see
+§6). The `iterations.jsonl` trajectory and the `intermediate/*.jsonl` per-prompt
+evaluations are plain JSON lines you can read without any extra tooling.
 
-Outputs land in `experiments/results/replication_smoke/analysis/` as a
-`summary.md`, CSV tables, and PNG figures. See
-[README.md → Analyze results](README.md#analyze-results) for the other scripts
-(`compare_runs.py` for cross-run comparison, `validation_audit.py` for
-`--enable-validation` runs).
+> **Analysis toolkit — work in progress.** Scripts under `scripts/analyze/`
+> (`--extra analysis`: `matplotlib`, `scipy`) turn runs into figures and
+> statistics, but they are being reworked for the repair/chromosome design and
+> are not finalised — out of scope for this reproduction. Read the raw artifacts
+> in the meantime.
 
 > `uv sync --extra analysis` replaces the resolved set, so it removes the `dev`
 > extras (pytest/ruff) if they were installed. To keep everything, sync all the
@@ -146,10 +146,10 @@ Outputs land in `experiments/results/replication_smoke/analysis/` as a
 
 ```
 experiments/results/<name>/
-├── run_config.json                  # every CLI arg + git SHA + schema_version: 2
+├── run_config.json                  # every CLI arg + git SHA + schema_version: 4
 ├── hillclimb_summary_*.json         # run-level totals, mutator stats, cache hygiene
 ├── iterations.jsonl                 # one record per search iteration (the trajectory)
-├── archive_snapshots/iterNNNN.json  # EA only — per-rule Pareto archive every 20 iters + final
+├── archive_snapshots/iterNNNN.json  # EA only — single chromosome Pareto archive every 20 iters + final
 ├── intermediate/                    # per-prompt evaluation records
 │   ├── baseline.jsonl
 │   └── {ea_iter0001,rand_iter0001,…}.jsonl

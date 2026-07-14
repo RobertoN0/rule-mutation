@@ -2,7 +2,7 @@
 
 **Search-Based Software Testing for LLM Security-Instruction Robustness**
 
-This MSc thesis framework measures how robust **[CodeGuard](https://github.com/cosai-oasis/project-codeguard) security coding guidelines** are to adversarial rephrasing. CodeGuard rules (shipped as the `project-codeguard/` git submodule) are the natural-language security instructions given to a code-generating LLM; this framework mutates those rules — weakening, obfuscating, or reordering them while preserving their apparent meaning — and measures whether the LLM then writes more vulnerable code, as detected by [Semgrep](https://github.com/semgrep/semgrep). A search algorithm drives the mutations toward the worst case for each rule.
+This MSc thesis framework studies how the **phrasing** of **[CodeGuard](https://github.com/cosai-oasis/project-codeguard) security coding guidelines** affects the security of LLM-generated code. CodeGuard rules (shipped as the `project-codeguard/` git submodule) are the natural-language security instructions given to a code-generating LLM. The framework applies **semantics-preserving mutations** to those rules — rewording, reordering, or restructuring them — and uses **Search-Based Software Testing** to find rule-set edits that lead the LLM to generate **fewer** vulnerabilities, as detected by [Semgrep](https://github.com/semgrep/semgrep). The search direction is **repair** (minimise vulnerable generation); an adversarial direction (maximise) is retained only for secondary experiments.
 
 ---
 
@@ -27,7 +27,7 @@ cd rule-mutation
 uv sync --extra dev          # core + pytest/ruff for development
 
 # 4. Verify
-uv run pytest tests/unit/ -q     # should report "181 passed"
+uv run pytest tests/unit/ -q     # should report "231 passed"
 ```
 
 ### Dependency extras
@@ -65,10 +65,10 @@ cp .env.example .env
 ```bash
 source .venv/bin/activate     # puts the venv's `semgrep` + `python` on PATH
 
-# Tiny smoke (≈ $0.05 with claude-haiku-4-5): 2 cases × 5 iterations
-python scripts/experiments/run_with_rules_map.py \
-  --backend claude --optimizer ea \
-  --n-cases 2 --iterations 5 --max-mutations-per-iter 4 \
+# Tiny smoke (≈ $0.10 with claude-haiku-4-5): 2 cases × 5 iterations
+python scripts/experiments/run_experiment.py \
+  --backend claude --optimizer ea --enable-validation \
+  --n-cases 2 --iterations 5 \
   --mutators synonym_replacement add_random_word verb_weakening \
              section_reorder_shuffle section_reorder_degrade \
   --seed 42 --languages python \
@@ -96,8 +96,8 @@ docker run --rm \
   --env-file .env \
   -v "$(pwd)/results:/app/results" \
   codeguard-sbst:replication \
-  python scripts/experiments/run_with_rules_map.py \
-    --backend claude --optimizer random_baseline \
+  python scripts/experiments/run_experiment.py \
+    --backend claude --optimizer random_search --enable-validation \
     --n-cases 2 --iterations 3 \
     --mutators synonym_replacement add_random_word verb_weakening \
     --seed 42 --languages python \
@@ -112,23 +112,16 @@ A run directory contains: `run_config.json`, `hillclimb_summary_*.json`, `iterat
 
 ## Analyze results
 
-Report figures + tables are produced by the scripts under `scripts/analyze/` (needs the `analysis` extra):
+Every run records the raw evidence needed for analysis — the per-iteration
+trajectory (`iterations.jsonl`), the per-prompt evaluations (`intermediate/`),
+the archive snapshots (EA), and the run summary. The exact fields are in
+[IMPLEMENTATION.md → Output schema](IMPLEMENTATION.md#output-schema).
 
-```bash
-uv sync --extra dev --extra analysis    # see the uv gotcha above
-
-# Single run → RQ1 (per-rule + per-prompt baseline-vs-best, Wilcoxon/McNemar),
-# RQ2 (per-mutator effective rate + bootstrap CI), convergence, cost + cache hygiene
-uv run python scripts/analyze/analyze_run.py experiments/results/local_smoke
-
-# Across runs → RQ3 (EA vs random, paired tests), multi-seed median+IQR
-uv run python scripts/analyze/compare_runs.py experiments/results/
-
-# Informational quality-validation audit (only for --enable-validation runs)
-uv run python scripts/analyze/validation_audit.py <run_dir>
-```
-
-Each script writes a `summary.md` + CSVs + PNGs into `<run_dir>/analysis/` (or a `--out` dir for `compare_runs.py`).
+> **Analysis toolkit — work in progress.** A set of scripts under
+> `scripts/analyze/` (needs the `analysis` extra: `matplotlib`, `scipy`) is being
+> reworked for the repair/chromosome design. Its figures, statistics, and the
+> research-question mapping are **not yet finalised** and are out of scope for the
+> current code review; they will be documented here once stable.
 
 ---
 
@@ -136,16 +129,20 @@ Each script writes a `summary.md` + CSVs + PNGs into `<run_dir>/analysis/` (or a
 
 1. **Select** test prompts from CyberSecEval.
 2. **Map** relevant CodeGuard rules to each prompt via AI-based retrieval (pre-computed maps in `rule_maps/`).
-3. **Mutate** the target rule with one of 8 adversarial strategies.
-4. **Validate** mutation quality (SBERT similarity, instruction adherence, security-keyword retention) — *informational and post-hoc*: every candidate is recorded, none are rejected (the validator never gates the search).
+3. **Mutate** rules in the chromosome with one of 8 semantics-preserving strategies.
+4. **Validate** mutation quality (SBERT similarity, instruction adherence, security-keyword retention).
 5. **Generate** code with the configured backend on the original vs. mutated rule — Qwen2.5-Coder-32B-Instruct on DelftBlue, or Claude / OpenAI locally.
 6. **Score** each prompt by Semgrep finding count + code-divergence via CodeBLEU.
 7. **Optimize** with one of two interchangeable search strategies (`--optimizer`)
-   over **full rule-set chromosomes** (per-gene rule alleles + a global rule-order gene):
-   - **`ea`** — a (1+1) EA over a single 3-objective **Pareto archive of full chromosomes** (total Semgrep delta, proportion of divergent prompts, mean conditional divergence); each move mutates one gene on the parent chromosome so rule changes stack.
-   - **`random_baseline`** — a persistent single-chromosome random walk (the ablation: same budget, no archive, no acceptance test; each iteration applies a 1..K chain to a rule's *original* allele and carries the chromosome forward).
+   over **full rule-set chromosomes** (per-gene rule alleles + a global rule-order gene),
+   scored on the conservative objectives (f1 = vulnerability reduction, f2 = rule fidelity, f3 = −parsimony):
+   - **`ea`** — a (1+1) EA over a single **Pareto archive of full chromosomes**, seeded with 10 random samples from the origin and topped up by a periodic random injection; each local move mutates one gene on a sampled parent (rule changes stack) or, with weight 0.1, reorders a rule.
+   - **`random_search`** — the i.i.d. baseline: every iteration is an independent random sample from the origin (best-of-budget, no archive, no carry-forward). Both arms share one random sampler, so under a matched seed they start from the same draws.
 
 ### Mutation strategies
+
+All 8 are **semantics-preserving** rephrasings (the search decides which edits
+help); none changes a rule's stated intent.
 
 **Function-based** (deterministic, no extra model request):
 
@@ -184,9 +181,9 @@ Experiments run on A100 GPU nodes with Qwen2.5-Coder-32B-Instruct loaded offline
 N_CASES=2 N_ITERATIONS=10 LANGUAGES=python OPTIMIZER=ea \
   sbatch --time=0:45:00 --job-name="ea_smoke" scripts/slurm/slurm_ea_qwen32b.sh
 
-# Multi-seed RQ3 batch — paired EA vs random across seeds and languages
+# Multi-seed batch — EA vs random across seeds and languages
 for SEED in 1 7 123; do
-  for OPT in ea random_baseline; do
+  for OPT in ea random_search; do
     for LANG in python java; do
       SEED=$SEED OPTIMIZER=$OPT N_CASES=25 N_ITERATIONS=200 LANGUAGES=$LANG SELECTION=random \
         sbatch --time=12:00:00 --job-name="${OPT}_${LANG}_s${SEED}" \
@@ -205,16 +202,16 @@ Reproduce any run with `python scripts/experiments/rerun_from_config.py <run_dir
 ```
 ├── src/
 │   ├── mutation/          # 8 mutators + MutatorPool + MutationQualityValidator + ParsedRule
-│   ├── optimizer/         # chromosome + single Pareto archive (chromosome.py), EA + random runners (ea_optimizer.py)
-│   │                      #   + stateless random baseline; HillClimber orchestration
+│   ├── optimizer/         # chromosome + single Pareto archive (chromosome.py), EA + i.i.d. random-search runners (search.py)
+│   │                      #   + shared random sampler; ExperimentEngine orchestration (engine.py)
 │   ├── evaluation/        # Semgrep runner, CodeBLEU code-divergence, fitness, rule/dataset loading
 │   ├── llm_backends/      # Claude / OpenAI / DelftBlue-local backends
 │   └── retrieval/         # prompt → CodeGuard-rule map builders (local + Anthropic; [retrieval] extra)
 ├── scripts/
-│   ├── experiments/       # run_with_rules_map.py (entrypoint); rerun_from_config.py (reproducer)
+│   ├── experiments/       # run_experiment.py (entrypoint); rerun_from_config.py (reproducer)
 │   ├── slurm/             # slurm_ea_qwen32b.sh (EA / random) + slurm_rule_retrieval_local.sh
-│   └── analyze/           # loaders, stats, analyze_run, compare_runs, validation_audit
-├── tests/unit/            # 181 unit tests
+│   └── analyze/           # analysis toolkit (WIP — being reworked for the repair design)
+├── tests/unit/            # 231 unit tests
 ├── project-codeguard/     # CodeGuard security rule library (git submodule)
 ├── rule_maps/             # Pre-computed prompt → rule-ID retrieval maps
 ├── literature_review/     # Paper PDFs + INDEX_AND_LINKS.md + analysis docs
@@ -236,10 +233,8 @@ Reproduce any run with `python scripts/experiments/rerun_from_config.py <run_dir
   | Document | Contents |
   |----------|----------|
   | [Index & Paper Links](literature_review/INDEX_AND_LINKS.md) | Papers — descriptions, links, local PDFs |
-  | [Full Analysis](literature_review/LITERATURE_REVIEW_ANALYSIS.md) | Per-paper summary, thesis relevance, implementation status |
   | [Thesis Relevance](literature_review/THESIS_RELEVANCE.md) | Quick map: paper → codebase component |
 
-  Key sources: LLMORPH (Cho et al., ASE 2025), AUGMENT (Chataigner et al., 2025), SBST MR selection (arXiv 2507.05565).
 
 ---
 
@@ -250,5 +245,5 @@ Reproduce any run with `python scripts/experiments/rerun_from_config.py <run_dir
 | [REPLICATION.md](REPLICATION.md) | Reviewer reproduction (API-only): prerequisites → smoke → reproducibility guarantees |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | High-level design: the pipeline, the two search strategies, the fitness model, data flow |
 | [IMPLEMENTATION.md](IMPLEMENTATION.md) | Module-by-module reference, output schema, extension points, dependencies |
-| [WORKFLOW.md](WORKFLOW.md) | Running experiments, result interpretation, analysis toolkit |
-| [literature_review/](literature_review/INDEX_AND_LINKS.md) | Paper index, analysis, thesis relevance |
+| [WORKFLOW.md](WORKFLOW.md) | Running experiments, result interpretation |
+| [literature_review/](literature_review/INDEX_AND_LINKS.md) | Paper index, thesis relevance |

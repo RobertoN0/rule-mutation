@@ -57,7 +57,7 @@ All LLM mutators strip frontmatter before the call and reattach it unchanged.
 Each mutation is applied **once** (no retry). If a mutation returns text
 identical to its parent, the EA marks that mutator tried for the parent and
 selects a different mutator within the same iteration — so no code generation
-is spent on a no-op (`ea_optimizer.py`).
+is spent on a no-op (`search.py`).
 
 #### `pool.py` — `MutatorPool`
 
@@ -94,29 +94,34 @@ original), `perplexity_ratio`, `inline_code_retention`, `keyword_retention`,
 
 ### `src/optimizer/` — search
 
-#### `hill_climber.py` — `HillClimber` orchestration
+#### `engine.py` — `ExperimentEngine` orchestration
 
-Owns the evaluation seam shared by both strategies. `optimize_per_prompt_rules()`:
+Owns the evaluation seam shared by both strategies. `run_search()`:
 
 1. **Baseline pass** — generate code for every prompt under the original rules, run a single batched Semgrep, record per-case baseline findings and reference code (for CodeBLEU).
-2. **Dispatch** — to `run_ea` or `run_random_baseline` (`ea_optimizer.py`) based on `config.optimizer`. Both call back into the same per-prompt evaluation closure.
+2. **Dispatch** — to `run_ea` or `run_random_search` (`search.py`) based on `config.optimizer`. Both call back into the same per-prompt evaluation closure.
 3. **Persist** — `iterations.jsonl` (per iteration, atomic append), `intermediate/{iter_id}.jsonl` (per prompt), `archive_snapshots/` (EA, every 20 iters), `mutated_rules/iterNNN/`, and the run summary.
 
-`HillClimbConfig` key fields: `max_iterations`, `optimizer` (`"ea"` default |
-`"random_baseline"`), `archive_cap` (6), `restart_h` (8), `max_depth_ea` (4),
-`max_mutations_per_iter` (4), `enable_validation`, `enable_eval_cache` (True),
-`fitness_strategy` (SEVERITY_WEIGHTED). (`mutation_max_retries` is retained as a
-deprecated no-op for CLI/config back-compat.)
+`SearchConfig` key fields: `max_iterations` (evaluation budget; identities
+retry without consuming it), `optimizer` (`"ea"` default | `"random_search"`),
+`objective_direction` (`"minimize"` default = repair), `archive_cap` (6),
+`restart_h` (8), `archive_admission` (`"neutral_drift"` default | `"strict_repair"`),
+`max_depth` (4), `random_max_changes` (10, the sampler's K), `ea_n_mutations`
+(1), `ea_init_samples` (10), `ea_injection_every` (10), `ea_move` (`"local"` |
+`"random_builder"`), `order_move_weight` (0.1), `ea_origin_parent` (True — the
+origin is a sampleable local-move parent), `enable_validation` (mandatory on real
+runs — feeds f2), `enable_eval_cache` (True). (The identity-retry safety cap is
+an internal constant, not a config field.)
 
 **Eval cache:** per prompt, keyed by `(test_case_id, sha256(assembled_rule_text))`.
 A hit skips both code generation and Semgrep — safe under `temperature=0` greedy
 decoding. Reported in `hillclimb_summary` as `eval_cache_stats`.
 
-#### `ea_optimizer.py` — the two runners (over full chromosomes)
+#### `search.py` — the two runners (over full chromosomes)
 
-- `run_ea(...)` — the (1+1) EA over the single chromosome archive. Each iteration samples a parent chromosome, mutates one gene on its current allele (a 1..`ea_n_mutations` chain), evaluates the whole rule set, and offers the child by Pareto dominance. Records `mutation_chain` = this step's mutator(s), plus `chromosome_id`/`parent_chromosome_id`/`mutated_rule_ids`/`gene_depth`; `mutator_stats` use **last-mutator credit** `{attempts, archive_adds, archive_adds_f1}`. Order/reverse moves are gated (`order_move_weight`/`reverse_move_weight`).
-- `run_random_baseline(...)` — the persistent single-chromosome walk. Each iteration picks a rule, applies a 1..K chain to that rule's **original** allele, overwrites the gene in the carried-forward chromosome, and evaluates. Records `mutation_chain` = the `n` sampled mutators; `mutator_stats` use **whole-chain credit** `{applications, applications_f1_advancing}`.
-- `_apply_chain` — applies an ordered list of mutators cumulatively; `_choose_and_build_move` selects a move (mutate/order/revert) and builds the child chromosome.
+- `run_ea(...)` — the (1+1) EA over the single chromosome archive, with three phases: **init** (`ea_init_samples` random samples from the origin), **injection** (an origin-based random sample every `ea_injection_every` iterations), and **ea** (a local move on a sampled parent — one untried mutator on its current allele, or with weight `order_move_weight` a render-changing order bump). Offers each child by the `archive_admission` policy. Records `phase`, `attempt`/`budget_consumed`, `mutation_chain`, `chromosome_id`/`parent_chromosome_id`/`mutated_rule_ids`/`gene_depth`, and `n_requested/attempted/effective_changes`; `mutator_stats` use **last-mutator credit** for local moves. Identity proposals are logged and retried without consuming budget (guarded by an internal safety cap).
+- `run_random_search(...)` — the i.i.d. baseline. Every budgeted iteration draws an independent sample from the origin via `build_random_chromosome`, evaluates it, and records it; no archive, no carry-forward. Best = best-of-budget (origin floor); `mutator_stats` use **whole-sample credit** `{applications, applications_f1_advancing}`.
+- `build_random_chromosome(...)` — the one shared sampler (random search + EA init/injection): stacks `n ∈ [1, K]` changes on a copy of a base, returning requested/attempted/effective counts. `_choose_and_build_move` builds an EA local move (mutate/order/revert); `_apply_chain` applies mutators cumulatively.
 
 #### `chromosome.py` — `RuleSetChromosome`, `RuleSetSpace`, `ChromosomeArchive`
 
@@ -128,10 +133,12 @@ order). `RuleSetSpace` owns the originals + the prompt separator and provides
 `(rule_id, sha(text))`), and `chromosome_id` (content hash). The single
 `ChromosomeArchive` holds non-dominated chromosomes over (f1, f2, f3): `try_add`
 rejects candidates dominated by the **origin** (always a virtual member, held
-aside and never evicted) or any front member, and duplicates by `chromosome_id`,
-evicting the lowest-sum member on cap overflow. On stagnation `restart` **re-opens
-exploration** (clears the exhausted-move sets) rather than wiping the front. The
-origin is always available as a parent, so a fresh lineage can always start.
+aside and never evicted) or any front member, and duplicates by `chromosome_id`.
+On cap overflow it evicts **lexicographically by f1** (lowest f1 first, ties →
+f2+f3, then oldest; the just-added child is protected). On stagnation `restart`
+**re-opens exploration** (clears the exhausted-move sets) rather than wiping the
+front. By default the origin is also a sampleable parent (`ea_origin_parent`), so
+a minimal single-rule lineage can always start.
 
 ---
 
@@ -160,27 +167,18 @@ origin is always available as a parent, so a fresh lineage can always start.
 
 ## Output schema
 
-> **Schema 3 (chromosome runs).** New runs carry `schema_version: 3` — a clean
-> break from the schema-2 per-rule layout described below. Under schema 3:
-> `iterations.jsonl` records add `chromosome_id`, `parent_chromosome_id`,
-> `move_type`, `mutated_rule_ids`, `gene_depth`, `n_prompts_rerun/reused`,
-> `validation_metadata`; `archive_snapshots/iterNNNN.json` is a single
-> `{iter, cap, restart_h, origin, chromosomes:[...]}` list (not per-rule);
-> `mutated_rules/iterNNN/` is written **every evaluated iteration** (with an
-> `accepted` flag in `meta.json`); `intermediate/*` `rules_used` carries
-> `mutated_rule_ids` + `render_order` + `chromosome_id` instead of a single
-> `target_rule_id`. Full spec + rationale in
-> [CHROMOSOME_RESTRUCTURE_PLAN.md](CHROMOSOME_RESTRUCTURE_PLAN.md §8). The
-> schema-2 description below is retained for the older `experiments/final/` runs.
+> **Schema 4.** Runs carry `schema_version: 4` (chromosome design). Its record
+> shape is described below; `rerun_from_config.py` and the analysis layer key off
+> this version and refuse older layouts.
 
-`run_config.json` carries `schema_version: 2` (schema-2 runs). A run directory:
+`run_config.json` carries `schema_version: 4`. A run directory:
 
 ```
 {output_dir}/
 ├── run_config.json                  # schema_version, all CLI args, argv, git_sha, slurm_job_id, hostname
 ├── hillclimb_summary_*.json         # run-level: provider/model, totals, pool_arm_stats, eval_cache_stats, run_config_ref
 ├── iterations.jsonl                 # one record per iteration (see below)
-├── archive_snapshots/iterNNNN.json  # EA only — {iter, config, archives{rule_id: {...}}} every 20 iters + final
+├── archive_snapshots/iterNNNN.json  # EA only — {iter, origin, chromosomes:[...]} every 20 iters + final
 ├── intermediate/{iter_id}.jsonl     # per-prompt evaluation records; iter_id ∈ {baseline, ea_iter0001, rand_iter0042}
 ├── mutated_rules/iterNNN/           # <rule>.md (mutated text) + meta.json
 ├── semgrep_debug/semgrep_debug.jsonl
@@ -191,37 +189,51 @@ origin is always available as a parent, so a fresh lineage can always start.
 
 ```jsonc
 {
-  "iter": 7, "timestamp": "…Z",
-  "strategy": "ea",                        // "ea" | "random_baseline"
+  "iter": 7,                               // evaluation-budget index (advances only on a scored candidate)
+  "attempt": 9, "attempt_in_iter": 1,      // global proposal id; retry # within this budget slot
+  "budget_consumed": true,                 // false for logged identity/no-op proposals
+  "timestamp": "…Z",
+  "strategy": "ea",                        // "ea" | "random_search"
+  "phase": "ea",                           // "init" | "injection" | "ea" | "random"
+  "chromosome_id": "7d22c933509b25ba", "parent_chromosome_id": "…",  // content hashes
+  "move_type": "mutate",                   // mutate | order | reverse | init_random | injection_random | sample
   "rule_id": "codeguard-0-…",
-  "mutation_chain": ["verb_weakening"],    // list[str]; EA: lineage; random: the n sampled mutators
+  "mutation_chain": ["verb_weakening"],    // list[str]; EA local: lineage; sampler: effective mutators
   "chain_length": 1,
-  "mutation_identity": false,              // candidate byte-identical to its source
-  "validation_passed": true,
-  "f1": 0.0, "f2": 0.0, "f3": 0.0,         // the three objectives (null if no candidate)
+  "n_requested_changes": 1,                // requested ≥ attempted ≥ effective
+  "n_attempted_changes": 1,
+  "n_effective_changes": 1,
+  "mutation_identity": false,
+  "mutated_rule_ids": ["codeguard-0-…"], "priority_rule_ids": [], "priority_offset_count": 0,
+  "objective_mode": "conservative", "archive_admission": "neutral_drift",
+  "f1": 0.0, "f2": 1.0, "f3": 0.0,         // conservative objectives (null if no candidate)
+  "rule_fidelity": 1.0, "parsimony": 1,    // f2 source, −f3
+  "proportion_divergent": 0.0, "conditional_mean_divergence": 0.0,  // recorded diagnostics (not objectives)
   "f1_advance": false,
   "accepted": true,                        // EA: try_add result; random: always true
-  "num_prompts_affected": 3,
-  "llm_calls_total": 31, "input_tokens_total": 105521, "output_tokens_total": 28119,
-  "validation_metadata": { … },            // {} unless --enable-validation
-  "selection_meta": { … }                  // EA: parent_iter/parent_depth/archive sizes/…; random: {}
+  "validation_metadata": { "codeguard-0-…": { … } },  // per changed gene; {} unless --enable-validation
+  "selection_meta": { … }                  // EA: parent_f1/n_eligible_rules/restarts; random: {}
 }
 ```
 
-**`archive_snapshots/iterNNNN.json`** — top-level `{iter, config, archives}`; the
-per-rule `config` (cap/restart_h/max_depth/n_mutators) is hoisted out once.
-Each archive entry carries `f1/f2/f3`, `depth`, `mutation_chain`,
-`iteration_added`, and a `rule_text_ref` pointing at the corresponding
-`mutated_rules/` file (null for the depth-0 seed = the original rule).
+**`archive_snapshots/iterNNNN.json`** — one **single chromosome archive**:
+top-level `{iter, schema_version, cap, restart_h, archive_admission, origin,
+n_inserts/n_rejected/…, restart_history, chromosomes:[…]}`. Each entry in
+`chromosomes` is a chromosome snapshot (`cid`, `f1/f2/f3`, `mutated_rule_ids`,
+`order_priority`, `iteration_added`, `parent_id`, and per-gene `genes` each with a
+`text_ref` into the matching `mutated_rules/iterNNN/` file).
 
 **`intermediate/{iter_id}.jsonl`** — per prompt: `test_case_id`, `language`,
-`cwe_id`, `rules_used`, `fitness{raw_count, weighted_score, check_ids,
+`cwe_id`, `rules_used` (`original_rule_ids`, `mutated_rule_ids`, `render_order`,
+`chromosome_id`), `fitness{raw_count, weighted_score, check_ids,
 composite_score, code_divergence, …}`, latencies, tokens, and `generated_code`
 (last). The prompt text is *not* stored — it is recoverable from the rules map
 keyed by `test_case_id`.
 
-**`mutated_rules/iterNNN/meta.json`** — `{iteration, mutation_chain (list),
-target_rule_id, mutation_identity, mutation_changes}`.
+**`mutated_rules/iterNNN/meta.json`** — `{iteration, chromosome_id, parent_id,
+move_type, changed_rule_id, chain, mutated_rule_ids, order_priority, changes,
+gene_paths, accepted, validation_metadata}`, alongside one `<rule>.md` per
+mutated rule (the rendered allele text).
 
 ---
 
@@ -229,7 +241,7 @@ target_rule_id, mutation_identity, mutation_changes}`.
 
 **New mutator** — subclass `Mutator`, implement `name` + `mutate()`; register an
 adherence check in `quality.py`; add it to the `--mutators` choices in
-`scripts/experiments/run_with_rules_map.py`.
+`scripts/experiments/run_experiment.py`.
 
 ```python
 from src.mutation.base import Mutator, MutationResult
@@ -252,8 +264,8 @@ class MyMutator(Mutator):
 ```
 
 **New objective / fitness component** — extend `AggregatedFitness` in
-`src/evaluation/fitness.py` and the archive's dominance check in
-`pareto_archive.py`.
+`src/evaluation/fitness.py` and the archive's `dominates()` check in
+`src/optimizer/chromosome.py`.
 
 **New backend** — implement `LLMBackend`, register it in
 `src/llm_backends/__init__.py`, and add a `--backend` choice.
