@@ -33,7 +33,7 @@ def _make_record(iter_n: int) -> dict:
 class TestAtomicAppend:
 
     def _make_writer_object(self, path: Path):
-        """Minimal object mimicking HillClimber._append_iteration_record."""
+        """Minimal object mimicking ExperimentEngine._append_iteration_record."""
         import fcntl
         import json
 

@@ -1,6 +1,6 @@
 """Unit tests for the full rule-set chromosome + rendering space.
 
-Covers gene/allele resolution, priority-offset ordering (D13), the four move
+Covers gene/allele resolution, priority-offset ordering (D13), the move
 builders, and the cache-signature / chromosome-id contracts. No LLM, no Semgrep.
 """
 from __future__ import annotations
@@ -72,14 +72,6 @@ class TestMoves:
         assert g2.gene_depth("a") == 2
         # parent unchanged (structural sharing is safe)
         assert g1.genes["a"].mutation_path == ["m1"]
-
-    def test_with_gene_from_original_overwrites(self, space):
-        o = space.origin()
-        g2 = o.with_gene("a", "A1", "m1").with_gene("a", "A2", "m2")
-        r = g2.with_gene_from_original("a", "Ax", ["n1", "n2"])
-        assert r.genes["a"].text == "Ax"
-        assert r.genes["a"].mutation_path == ["n1", "n2"]  # replaced, not stacked
-        assert r.gene_depth("a") == 2
 
     def test_with_reverted_drops_gene(self, space):
         o = space.origin()

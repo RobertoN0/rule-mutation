@@ -6,7 +6,7 @@ baseline. Exercises the real pipeline components shared by both the main pipelin
 and the replicate harness:
 
   * ``RuleLoader``                          — load + combine rule files
-  * ``HillClimber._build_system_prompt``    — the exact system prompt sent to the LLM
+  * ``ExperimentEngine._build_system_prompt``    — the exact system prompt sent to the LLM
 
 The companion ``scripts/validation/check_rules_in_prompt.py`` runs the same checks
 against the real CodeGuard rules + retrieval maps; these tests use small fixtures
@@ -18,7 +18,7 @@ import pytest
 
 from src.evaluation.rule_mapping import RuleLoader
 from src.mutation.base import Mutator, MutationResult
-from src.optimizer.hill_climber import HillClimber, HillClimbConfig
+from src.optimizer.engine import ExperimentEngine, SearchConfig
 
 SEP = "\n\n---\n\n"
 RULE_A = "RULE-ALPHA: always validate and parameterize SQL queries."
@@ -35,9 +35,9 @@ class _Noop(Mutator):
 
 
 @pytest.fixture
-def hc() -> HillClimber:
+def hc() -> ExperimentEngine:
     # llm_backend=None is safe: __init__ only stores it; we never call generate().
-    return HillClimber(llm_backend=None, mutator=_Noop(), config=HillClimbConfig())
+    return ExperimentEngine(llm_backend=None, mutator=_Noop(), config=SearchConfig())
 
 
 @pytest.fixture

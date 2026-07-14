@@ -1,4 +1,4 @@
-"""Tests for HillClimber._evaluate_chromosome — the pure render/score seam.
+"""Tests for ExperimentEngine._evaluate_chromosome — the pure render/score seam.
 
 Uses a deterministic fake backend + Semgrep stub (mirrors test_eval_cache.py) so
 we can count LLM/Semgrep calls and prove:
@@ -77,12 +77,12 @@ def _prompts():
 
 
 def _climber(backend, out_dir, cache=True):
-    from src.optimizer.hill_climber import HillClimber, HillClimbConfig
+    from src.optimizer.engine import ExperimentEngine, SearchConfig
     from src.evaluation.composite_fitness import CompositeFitnessEvaluator
     mutator = MagicMock(); mutator.name = "noop"; mutator.seed = 0
-    cfg = HillClimbConfig(max_iterations=0, output_dir=out_dir, verbose=False,
+    cfg = SearchConfig(max_iterations=0, output_dir=out_dir, verbose=False,
                           save_intermediate=False, enable_eval_cache=cache)
-    return HillClimber(backend, mutator, config=cfg,
+    return ExperimentEngine(backend, mutator, config=cfg,
                        composite_evaluator=CompositeFitnessEvaluator(reference_codes={}, lang="python"))
 
 
@@ -96,7 +96,7 @@ def test_renders_from_chromosome_and_reuses_unaffected(tmp_path: Path):
     hc = _climber(backend, tmp_path, cache=True)
     space, prompts = _space(), _prompts()
 
-    with patch("src.optimizer.hill_climber.run_semgrep_batch_dir", side_effect=_semgrep_stub):
+    with patch("src.optimizer.engine.run_semgrep_batch_dir", side_effect=_semgrep_stub):
         origin = space.origin()
         _agg, _res, reused0, rerun0 = hc._evaluate_chromosome(origin, space, prompts, iter_id="baseline")
         assert (rerun0, reused0) == (4, 0)
@@ -113,7 +113,7 @@ def test_whole_chromosome_reflects_all_mutated_genes(tmp_path: Path):
     backend = _FakeBackend()
     hc = _climber(backend, tmp_path, cache=True)
     space, prompts = _space(), _prompts()
-    with patch("src.optimizer.hill_climber.run_semgrep_batch_dir", side_effect=_semgrep_stub):
+    with patch("src.optimizer.engine.run_semgrep_batch_dir", side_effect=_semgrep_stub):
         hc._evaluate_chromosome(space.origin(), space, prompts, iter_id="baseline")
         # Mutate BOTH a (1 BAD) and c (2 BAD): p0=a→1, p1=a→1, p2=c→2, p3=0 ⇒ total 4
         child = space.stamp(
@@ -136,7 +136,7 @@ def test_cache_parity_on_vs_off(tmp_path: Path):
         backend = _FakeBackend()
         hc = _climber(backend, tmp_path / f"cache_{cache}", cache=cache)
         scores = []
-        with patch("src.optimizer.hill_climber.run_semgrep_batch_dir", side_effect=_semgrep_stub):
+        with patch("src.optimizer.engine.run_semgrep_batch_dir", side_effect=_semgrep_stub):
             for i, ch in enumerate(seq):
                 agg, res, *_ = hc._evaluate_chromosome(ch, space, prompts, iter_id=f"it{i}")
                 scores.append((
@@ -154,7 +154,7 @@ def test_cache_disabled_regenerates(tmp_path: Path):
     backend = _FakeBackend()
     hc = _climber(backend, tmp_path, cache=False)
     space, prompts = _space(), _prompts()
-    with patch("src.optimizer.hill_climber.run_semgrep_batch_dir", side_effect=_semgrep_stub):
+    with patch("src.optimizer.engine.run_semgrep_batch_dir", side_effect=_semgrep_stub):
         hc._evaluate_chromosome(space.origin(), space, prompts, iter_id="baseline")
         n = len(backend.calls)
         # same chromosome again — cache OFF ⇒ regenerate all rule-carrying prompts
@@ -166,7 +166,7 @@ def test_semgrep_batches_only_fresh(tmp_path: Path):
     backend = _FakeBackend()
     hc = _climber(backend, tmp_path, cache=True)
     space, prompts = _space(), _prompts()
-    with patch("src.optimizer.hill_climber.run_semgrep_batch_dir", side_effect=_semgrep_stub) as m:
+    with patch("src.optimizer.engine.run_semgrep_batch_dir", side_effect=_semgrep_stub) as m:
         hc._evaluate_chromosome(space.origin(), space, prompts, iter_id="baseline")
         first_batch = m.call_args[0][0]
         assert len(first_batch) == 4   # all 4 prompts fresh at baseline (incl. the rule-less one)
@@ -184,7 +184,7 @@ def test_empty_prompt_uses_baseline_system(tmp_path: Path):
     p = PromptWithRules(prompt="x", language="python", cwe_id=None,
                         rule_ids=[], combined_rules="", individual_rules={},
                         metadata={"test_case_id": "tc"})
-    with patch("src.optimizer.hill_climber.run_semgrep_batch_dir", side_effect=_semgrep_stub):
+    with patch("src.optimizer.engine.run_semgrep_batch_dir", side_effect=_semgrep_stub):
         _agg, res, _reused, _rerun = hc._evaluate_chromosome(space.origin(), space, [p], iter_id="baseline")
         assert res[0].fitness.raw_count == 0
         assert "=== CODING GUIDELINES ===" not in backend.calls[0]

@@ -13,8 +13,8 @@ from src.evaluation.fitness import AggregatedFitness
 from src.evaluation.rule_mapping import PromptWithRules
 from src.mutation.base import Mutator, MutationResult
 from src.optimizer.chromosome import RuleSetSpace
-from src.optimizer.ea_optimizer import run_ea
-from src.optimizer.hill_climber import IterationResult
+from src.optimizer.search import run_ea
+from src.optimizer.engine import IterationResult
 
 
 class FakeMutator(Mutator):
@@ -71,6 +71,9 @@ def _run(evaluate, **kw):
         mutators=[FakeMutator("m0"), FakeMutator("m1"), FakeMutator("m2")],
         evaluate_chromosome_fn=evaluate, iteration_result_factory=IterationResult,
         max_iterations=10, archive_cap=3, restart_h=8, max_depth=4, seed=42, log=_silent,
+        # Pure local-EA core by default: init/injection/order are exercised by
+        # their own dedicated tests below.
+        init_random_samples=0, random_injection_every=0, order_move_weight=0.0,
     )
     defaults.update(kw)
     return run_ea(**defaults)
@@ -97,7 +100,7 @@ class TestRunEA:
         assert res.best_chromosome.f1 == 1.0
         assert {"r1", "r2"} <= res.best_chromosome.mutated_rule_ids()
 
-    def test_records_have_schema3_fields(self):
+    def test_records_have_schema4_fields(self):
         recs, snaps = [], []
         def ev(chromo, iter_id):
             return _fit(float(len(chromo.mutated_rule_ids()))), [], 1, 2
@@ -106,6 +109,8 @@ class TestRunEA:
         assert recs and all(r["strategy"] == "ea" for r in recs)
         real = [r for r in recs if not r["mutation_identity"]]
         assert real and all("chromosome_id" in r and "mutated_rule_ids" in r for r in real)
+        assert all("attempt" in r and r["budget_consumed"] for r in real)
+        assert all("priority_rule_ids" in r and "priority_offset_count" in r for r in real)
         assert all(r["n_prompts_rerun"] == 2 and r["n_prompts_reused"] == 1 for r in real)
         assert snaps  # at least the final snapshot fired
 
@@ -125,9 +130,9 @@ class TestRunEA:
         b = _run(ev, seed=7)
         assert a.best_chromosome.cid == b.best_chromosome.cid
 
-    def test_design_b_multi_mutation_chain(self):
-        """ea_n_mutations>1 (Design B): a move applies a 1..n chain, so a gene can
-        reach depth>1 in a single move; respects the depth cap; still climbs."""
+    def test_multi_mutation_chain_ablation(self):
+        """ea_n_mutations>1 (ablation knob): a move applies a 1..n chain, so a gene
+        can reach depth>1 in a single move; respects the depth cap; still climbs."""
         seen_depths = []
         def ev(chromo, iter_id):
             for g in chromo.genes.values():
@@ -137,3 +142,94 @@ class TestRunEA:
         assert max(seen_depths, default=0) >= 2          # a multi-mutator chain landed
         assert max(seen_depths, default=0) <= 4          # depth cap respected
         assert res.best_chromosome.f1 > 0
+
+    def test_default_chain_length_is_one(self):
+        """Main design: every local text move applies exactly ONE mutator."""
+        recs = []
+        def ev(chromo, iter_id):
+            return _fit(float(len(chromo.mutated_rule_ids()))), [], 0, 0
+        _run(ev, iter_record_fn=recs.append, max_iterations=20, seed=5)
+        mutates = [r for r in recs if r["move_type"] == "mutate" and not r["mutation_identity"]]
+        assert mutates and all(r["chain_length"] == 1 for r in mutates)
+
+
+class TestInitAndInjection:
+    def test_init_phase_samples_from_origin_then_ea(self):
+        recs = []
+        def ev(chromo, iter_id):
+            return _fit(float(len(chromo.mutated_rule_ids()))), [], 0, 0
+        _run(ev, init_random_samples=4, max_iterations=12, seed=2,
+             iter_record_fn=recs.append)
+        assert [r["phase"] for r in recs[:4]] == ["init"] * 4
+        assert all(r["move_type"] == "init_random" for r in recs[:4])
+        origin_cid = _space().origin().cid
+        # init children are built from the ORIGIN, whatever the front holds
+        evaluated_init = [r for r in recs[:4] if not r["mutation_identity"]]
+        assert evaluated_init
+        assert all(r["parent_chromosome_id"] == origin_cid for r in recs[:4])
+        assert all(r["phase"] == "ea" for r in recs[4:])
+
+    def test_init_counts_against_budget(self):
+        recs = []
+        def ev(chromo, iter_id):
+            return _fit(1.0), [], 0, 0
+        res = _run(ev, init_random_samples=10, max_iterations=6, seed=2,
+                   iter_record_fn=recs.append)
+        assert len(recs) <= 6                       # init never exceeds the budget
+        assert all(r["phase"] == "init" for r in recs)
+
+    def test_injection_cadence(self):
+        recs = []
+        def ev(chromo, iter_id):
+            return _fit(float(len(chromo.mutated_rule_ids()))), [], 0, 0
+        _run(ev, init_random_samples=2, random_injection_every=3,
+             max_iterations=14, seed=4, iter_record_fn=recs.append)
+        phases = {r["iter"]: r["phase"] for r in recs}
+        # init at iters 1-2; ea steps 1..; every 3rd ea step is an injection:
+        # iters 5, 8, 11, 14
+        assert phases[1] == "init" and phases[2] == "init"
+        for it in (5, 8, 11, 14):
+            assert phases[it] == "injection", (it, phases)
+        for it in (3, 4, 6, 7, 9, 10, 12, 13):
+            assert phases[it] == "ea", (it, phases)
+
+    def test_injection_children_come_from_origin(self):
+        recs = []
+        def ev(chromo, iter_id):
+            return _fit(float(len(chromo.mutated_rule_ids()))), [], 0, 0
+        _run(ev, init_random_samples=2, random_injection_every=2,
+             max_iterations=16, seed=8, iter_record_fn=recs.append)
+        origin_cid = _space().origin().cid
+        inj = [r for r in recs if r["phase"] == "injection"]
+        assert inj
+        assert all(r["parent_chromosome_id"] == origin_cid for r in inj)
+        assert all(r["move_type"] == "injection_random" for r in inj)
+
+    def test_archive_never_wiped_by_injection(self):
+        """Injected candidates enter only via dominance; the front survives."""
+        def ev(chromo, iter_id):
+            n = len(chromo.mutated_rule_ids())
+            return _fit(float(n)), [], 0, 0
+        res = _run(ev, init_random_samples=3, random_injection_every=2,
+                   max_iterations=20, seed=6)
+        assert res.archive_snapshot["n_inserts"] >= 1
+        assert res.best_chromosome.f1 > 0
+
+
+class TestRandomBuilderMove:
+    def test_random_builder_moves_derive_from_archive_parents(self):
+        recs = []
+        def ev(chromo, iter_id):
+            return _fit(float(len(chromo.mutated_rule_ids()))), [], 0, 0
+        _run(ev, ea_move="random_builder", random_max_changes=3,
+             init_random_samples=2, max_iterations=15, seed=9,
+             iter_record_fn=recs.append)
+        moves = [r for r in recs if r["phase"] == "ea" and not r["mutation_identity"]]
+        assert moves and all(r["move_type"] == "random_builder" for r in moves)
+        assert all(1 <= r["n_changes"] <= 3 for r in moves)
+
+    def test_rejects_unknown_ea_move(self):
+        def ev(chromo, iter_id):
+            return _fit(0.0), [], 0, 0
+        with pytest.raises(ValueError, match="ea_move"):
+            _run(ev, ea_move="bogus")

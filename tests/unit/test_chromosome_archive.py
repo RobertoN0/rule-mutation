@@ -1,8 +1,9 @@
 """Unit tests for the single chromosome Pareto archive.
 
-Covers admission (dominance + origin-dominance + dedup), cap eviction with
-just-added-child protection, origin-aside parent sampling, option-b restart,
-and origin-inclusive best(). No LLM, no Semgrep.
+Covers admission (dominance + origin-dominance + dedup), lexicographic-f1 cap
+eviction with just-added-child protection, origin-aside parent sampling (incl.
+the ea_origin_parent knob), restart, and origin-inclusive best(). No LLM, no
+Semgrep.
 """
 from __future__ import annotations
 
@@ -73,18 +74,37 @@ class TestAdmission:
 
 # ---------------------------------------------------------------------------
 class TestCapEviction:
-    def test_cap_enforced_and_child_protected(self, space):
+    def test_cap_evicts_lowest_f1_not_lowest_sum(self, space):
+        """Lexicographic-f1 eviction protects the best repair.
+
+        X (high-f1/low-f3) and Y (low-f1/high-f3) have equal f1+f2+f3, so a raw
+        score_sum tie-break would evict the OLDER one — here X, the better
+        repair. Lexicographic f1 must evict Y (the lower-f1 member) instead.
+        """
         arc = _archive(space, cap=2)
-        # three mutually non-dominating trade-offs, ascending score_sum
-        A = _mk(space, "a", "A!", 1.0, 0.1, 0.1)  # sum 1.2  (lowest)
-        B = _mk(space, "b", "B!", 0.5, 0.9, 0.2)  # sum 1.6
-        C = _mk(space, "c", "C!", 0.7, 0.5, 0.9)  # sum 2.1
-        for i, c in enumerate((A, B, C)):
+        X = _mk(space, "a", "A!", 1.0, 0.3, 0.0)  # sum 1.3, HIGH f1
+        Y = _mk(space, "b", "B!", 0.1, 0.3, 0.9)  # sum 1.3, LOW f1
+        Z = _mk(space, "c", "C!", 0.5, 0.9, 0.5)  # protected just-added child
+        for i, c in enumerate((X, Y, Z)):
             arc.try_add(c, i + 1)
         cids = {e.cid for e in arc.entries}
         assert len(arc) == 2
-        assert A.cid not in cids       # lowest score_sum evicted
-        assert C.cid in cids           # just-added child never evicted
+        assert Y.cid not in cids       # lowest f1 evicted (not the older X)
+        assert X.cid in cids           # best repair survives
+        assert Z.cid in cids           # just-added child never evicted
+
+    def test_f1_tie_breaks_on_secondary_then_age(self, space):
+        """Equal f1 ⇒ evict the weaker f2+f3; equal there ⇒ the oldest."""
+        arc = _archive(space, cap=2)
+        P = _mk(space, "a", "A!", 0.5, 0.9, 0.1)  # f1 tie, f2+f3 = 1.0
+        Q = _mk(space, "b", "B!", 0.5, 0.2, 0.5)  # f1 tie, f2+f3 = 0.7 → evicted
+        R = _mk(space, "c", "C!", 0.7, 0.3, 0.3)  # protected just-added child
+        for i, c in enumerate((P, Q, R)):
+            arc.try_add(c, i + 1)
+        cids = {e.cid for e in arc.entries}
+        assert len(arc) == 2
+        assert Q.cid not in cids       # equal f1, lower f2+f3 evicted
+        assert P.cid in cids
 
 
 # ---------------------------------------------------------------------------
@@ -105,6 +125,18 @@ class TestParentSampling:
     def test_none_when_nothing_eligible(self, space):
         arc = _archive(space)
         assert arc.sample_parent(is_eligible=lambda c: False) is None
+
+    def test_include_origin_false_excludes_origin(self, space):
+        """ea_origin_parent=off ⇒ the origin is not a sampleable parent."""
+        arc = _archive(space)
+        entry = _mk(space, "a", "A!", 1.0, 0.1, 0.1)
+        arc.try_add(entry, 1)
+        # only front members are drawn; the origin is skipped
+        p = arc.sample_parent(is_eligible=lambda c: True, include_origin=False)
+        assert p is entry
+        # with an empty front and origin excluded, there is nothing to sample
+        empty = _archive(space)
+        assert empty.sample_parent(is_eligible=lambda c: True, include_origin=False) is None
 
 
 # ---------------------------------------------------------------------------
