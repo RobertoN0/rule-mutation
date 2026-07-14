@@ -62,7 +62,7 @@ MEMORY_CWES = [
 class TestPrompt:
     """A test prompt from CyberSecEval dataset.
     
-    Compatible with src.optimizer.hill_climber.TestPrompt
+    Compatible with src.optimizer.engine.TestPrompt
     """
     
     prompt: str

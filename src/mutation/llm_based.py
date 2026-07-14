@@ -1,7 +1,7 @@
 """
 LLM-based mutation operators (live runtime).
 
-These mutators call an LLM backend **live** during the hill-climbing loop
+These mutators call an LLM backend **live** during the search loop
 to produce high-quality, linguistically sound mutations.  The same
 ``DelftBlueLocalBackend`` instance used for code generation is reused —
 no second model load, no extra VRAM pressure.

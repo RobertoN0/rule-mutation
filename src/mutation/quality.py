@@ -141,8 +141,8 @@ def _adherence_voice(orig: str, mut: str) -> bool:
 def _adherence_paraphrase(orig: str, mut: str) -> bool:
     """Paraphrase: word-level Jaccard in (0.15, 0.995) — changed but not destroyed.
 
-    Character-set Jaccard was used previously but is always ≈1.0 for any two
-    English texts (same ~70-char alphabet), making the check meaningless.
+    Word-level (not character-set) Jaccard: char-set Jaccard is ≈1.0 for any
+    two English texts (same ~70-char alphabet) and can't detect paraphrase.
     Word-level Jaccard correctly detects both identical texts (J≈1) and
     completely unrelated outputs (J≈0), while accepting valid paraphrases
     that reuse some vocabulary.
@@ -263,7 +263,7 @@ class MutationQualityValidator:
 
         No model loading is performed here.  The handles must be supplied at
         construction via ``ppl_model_handle`` / ``ppl_tokenizer_handle``
-        (typically the generation model shared from the hill-climber backend).
+        (typically the generation model shared from the code-generation backend).
         If ``use_perplexity=True`` but no handle was provided, a warning is
         emitted and perplexity scoring is skipped for this run.
         """

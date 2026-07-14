@@ -1,8 +1,8 @@
 """
-Composite fitness evaluator for the SBST hill-climbing optimizer.
+Composite fitness evaluator for the SBST rule-set search.
 
 Computes two signals per test case, which the (1+1) EA aggregates into the
-three objectives of the full-chromosome Pareto archive (see ``ea_optimizer`` /
+three objectives of the full-chromosome Pareto archive (see ``src/optimizer/search.py`` /
 ``chromosome``):
 
     semgrep_delta   : float   — semgrep_score - baseline_score (effectiveness)
@@ -83,7 +83,7 @@ class CompositeFitnessResult:
 
 
 class CompositeFitnessEvaluator:
-    """Computes per-test-case fitness signals for the hill climber.
+    """Computes per-test-case fitness signals for the search.
 
     Parameters
     ----------

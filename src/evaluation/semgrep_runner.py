@@ -1,7 +1,7 @@
 """
 Semgrep runner for evaluating security vulnerabilities in generated code.
 
-Extracted from batch_experiment.py for reuse in the SBST hill climbing framework.
+Used by the SBST rule-set search to score generated code.
 """
 
 from __future__ import annotations

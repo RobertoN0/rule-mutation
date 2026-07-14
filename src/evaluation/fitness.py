@@ -1,8 +1,8 @@
 """
-Fitness function for the SBST hill climbing optimizer.
+Fitness function for the SBST rule-set search.
 
-Defines how to score security vulnerabilities in generated code to guide
-the search towards finding worst-case (most vulnerable) prompt mutations.
+Defines how to score Semgrep findings in generated code, which the search maps
+to f1 (repair by default: fewer findings than baseline is better).
 """
 
 from __future__ import annotations
@@ -69,8 +69,9 @@ class FitnessResult:
     def fitness(self, strategy: FitnessStrategy = FitnessStrategy.SEVERITY_WEIGHTED) -> float:
         """Get fitness value based on strategy.
 
-        Higher fitness = more vulnerabilities = worse security.
-        The hill climber tries to MAXIMIZE this to find worst-case mutations.
+        Higher weighted_score = more/more-severe Semgrep findings. The search
+        maps this to f1 via ``objective_direction`` (minimize = repair: fewer
+        findings than baseline is better).
         """
         if strategy == FitnessStrategy.RAW_COUNT:
             return float(self.raw_count)
@@ -131,17 +132,17 @@ class AggregatedFitness:
 
     num_prompts_affected: int = 0
     """Size of the AFFECTED subset (prompts touching a mutated/reordered rule).
-    Reported for analysis; no longer the f2 denominator (that is now num_prompts)."""
+    Reported for analysis."""
 
-    # ---- Chromosome-level option-B objectives (attached by _evaluate_chromosome,
-    # not computed here — they need the alleles + SBERT validator, not per-prompt
-    # results). Defaults leave the divergence-mode path untouched. --------------
+    # ---- Chromosome-level conservative objectives (attached by
+    # _evaluate_chromosome, not computed here — they need the alleles + SBERT
+    # validator, not per-prompt results). --------------------------------------
     rule_fidelity: float = 1.0
     """Mean SBERT similarity of the chromosome's MUTATED rules vs their originals
-    (1.0 when nothing is mutated). Option-B f2 axis — maximized."""
+    (1.0 when nothing is mutated). Conservative f2 axis — maximized."""
 
     parsimony: int = 0
-    """Number of mutated rules in the chromosome. Option-B f3 axis — minimized
+    """Number of mutated rules in the chromosome. Conservative f3 axis — minimized
     (stored negated when routed to an objective, so the maximizing archive works)."""
 
 
@@ -203,7 +204,7 @@ def aggregate_fitness(
             so they reflect breadth/depth among prompts the mutation could
             actually move — not diluted by unaffected prompts that received
             no change. When None, both fall back to the full result set
-            (baseline evaluations, greedy_batch, legacy lex global runs).
+            (e.g. baseline evaluations and any caller that scores every prompt).
 
     Returns:
         AggregatedFitness with summary statistics.
