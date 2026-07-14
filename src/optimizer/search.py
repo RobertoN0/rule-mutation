@@ -1,19 +1,32 @@
 """
-(1+1) EA over a single full-chromosome Pareto archive + a stateful random-walk
-baseline.
+Search algorithms over full rule-set chromosomes: a (1+1) EA with random
+initialization + periodic random injection, and an i.i.d. random-search baseline.
 
 The unit of search is the whole rule set (a :class:`RuleSetChromosome`): rule-text
 alleles + a global rule-ordering policy. Both runners share one evaluation seam —
 ``evaluate_chromosome_fn(chromosome, iter_id) -> (AggregatedFitness, results,
-n_reused, n_rerun)`` — a closure provided by :class:`HillClimber` that renders every
-prompt from the chromosome and scores the whole rule set.
+n_reused, n_rerun)`` — a closure provided by the engine that renders every prompt
+from the chromosome and scores the whole rule set.
+
+Objectives — the "conservative" set (adopted 2026-07-10), all MAXIMIZED by the
+Pareto archive:
+    f1 = vulnerability reduction (severity-weighted Semgrep delta; sign set by
+         the engine's ``objective_direction``)
+    f2 = rule fidelity (mean SBERT similarity of mutated rules vs originals)
+    f3 = −parsimony (negated count of mutated rules — prefer the smaller edit)
 
 Top-level entry points
 ----------------------
-* :func:`run_ea`             — (1+1) EA over one :class:`ChromosomeArchive`
-* :func:`run_random_baseline` — persistent single-chromosome random walk (no archive)
-
-See ``CHROMOSOME_RESTRUCTURE_PLAN.md`` for the design + decision ledger.
+* :func:`run_ea` — (1+1) EA over one :class:`ChromosomeArchive`. It starts with
+  ``init_random_samples`` independent random chromosomes offered to the archive
+  and, every ``random_injection_every``-th iteration thereafter, injects one fresh
+  random chromosome built from the origin. All other iterations take a small local
+  step on an archive parent.
+* :func:`run_random_search` — every iteration is an INDEPENDENT random
+  chromosome built from the origin; best-of-budget (no carry-forward, no archive).
+* :func:`build_random_chromosome` — the one shared sampler behind random search,
+  EA initialization, and EA injection, so "initialized exactly like random"
+  holds by construction.
 """
 
 from __future__ import annotations
@@ -28,7 +41,7 @@ from ..mutation import Mutator
 from .chromosome import ChromosomeArchive, RuleSetChromosome, RuleSetSpace
 
 if TYPE_CHECKING:
-    from .hill_climber import IterationResult
+    from .engine import IterationResult
 
 
 class WallTimeStop(BaseException):
@@ -38,9 +51,24 @@ class WallTimeStop(BaseException):
     Subclasses ``BaseException`` (not ``Exception``) on purpose: the evaluation
     hot path wraps eval in ``except Exception`` (rate-limit handling) and must
     NOT swallow the stop. Raised from a controlled checkpoint (the per-prompt
-    loop in ``HillClimber._evaluate_chromosome``), never from the async signal
+    loop in the engine's ``_evaluate_chromosome``), never from the async signal
     handler. The runners catch it and fall through to finalization.
     """
+
+
+class IdentityRetryLimitExceeded(RuntimeError):
+    """Raised when one budgeted evaluation cannot produce a non-identity.
+
+    Identity/no-op attempts sit outside the evaluation budget, so an all-no-op
+    mutator configuration would otherwise loop forever without advancing the
+    budget. This internal guard turns that degenerate case into a loud failure.
+    """
+
+
+# Internal safety cap on consecutive identity proposals per pending evaluation.
+# Not an experiment knob — a run never hits it under a non-degenerate mutator
+# pool; it only prevents a silent infinite loop on a misconfigured pool.
+_IDENTITY_RETRY_LIMIT = 100
 
 
 # Seam contract: (chromosome, iter_id) -> (fitness, per_prompt_results, n_reused, n_rerun)
@@ -60,12 +88,12 @@ def _utcnow() -> str:
 
 @dataclass
 class ChromosomeRunResult:
-    """What a runner returns to :class:`HillClimber`."""
+    """What a runner returns to the engine."""
 
     iterations: list["IterationResult"]
     archive_snapshot: dict[str, Any]
-    """Final single-archive snapshot (EA) or ``{}`` (random). Stored on
-    HillClimbResult.compounding_state."""
+    """Final single-archive snapshot (EA) or ``{}`` (random search). Stored on
+    SearchResult.compounding_state."""
 
     best_chromosome: RuleSetChromosome
     best_fitness: AggregatedFitness | None
@@ -77,8 +105,37 @@ class ChromosomeRunResult:
     restart_reason_counts: dict[str, int] = field(default_factory=dict)
 
 
+@dataclass
+class RandomBuildResult:
+    """One shared-sampler proposal with requested/attempted/effective accounting."""
+
+    child: RuleSetChromosome
+    n_requested_changes: int
+    n_attempted_changes: int
+    n_effective_changes: int
+    attempted_operators: list[str]
+    attempted_mutators: list[str]
+    effective_mutators: list[str]
+    changes: list[str]
+
+
 # ============================================================================
-# Move helpers (EA)
+# Objectives (conservative set — the only objective mapping)
+# ============================================================================
+
+def _objectives(agg: AggregatedFitness) -> tuple[float, float, float]:
+    """Map an AggregatedFitness to the archive's (f1, f2, f3), all maximized.
+
+    f1 = vulnerability reduction (``total_semgrep_delta``; the engine negates the
+    raw delta under ``objective_direction="minimize"`` so higher is always safer),
+    f2 = rule fidelity (mean SBERT of mutated rules vs originals; 1.0 = unchanged),
+    f3 = −parsimony (fewer mutated rules is better; negated so maximizing works).
+    """
+    return agg.total_semgrep_delta, agg.rule_fidelity, -float(agg.parsimony)
+
+
+# ============================================================================
+# Move helpers
 # ============================================================================
 
 def _unused_mutators(parent: RuleSetChromosome, rid: str, mutators: list[Mutator]) -> list[Mutator]:
@@ -86,11 +143,29 @@ def _unused_mutators(parent: RuleSetChromosome, rid: str, mutators: list[Mutator
 
     Enforces "each mutator at most once per rule": re-applying the same operator
     to a rule just re-does the same class of transformation (a wasted eval), so a
-    gene's reachable variants are the distinct-mutator subsets. 
+    gene's reachable variants are the distinct-mutator subsets.
     """
     g = parent.genes.get(rid)
     used = set(g.mutation_path) if g else set()
     return [m for m in mutators if m.name not in used]
+
+
+def _untried_mutators(
+    parent: RuleSetChromosome,
+    rid: str,
+    mutators: list[Mutator],
+) -> list[Mutator]:
+    """Lineage-unused mutators not yet attempted on this exact parent/rule.
+
+    Tried keys are atomic (``("mut", rule_id, mutator_name)``), including when
+    an ablation applies a multi-mutator chain. This gives the tried/restart
+    mechanism a finite, interpretable neighbourhood without enumerating every
+    possible ordering of mutation chains.
+    """
+    return [
+        m for m in _unused_mutators(parent, rid, mutators)
+        if ("mut", rid, m.name) not in parent.tried
+    ]
 
 
 def _eligible_genes(
@@ -123,14 +198,13 @@ def _mutate_candidates(
 ) -> tuple[list[str], list[str]]:
     """Split the genes a mutate move may act on by what happens to them.
 
-    * ``stackable`` — depth < max_depth and ≥1 unused mutator → stack a fresh chain.
+    * ``stackable`` — depth < max_depth and ≥1 unused mutator → stack a mutation.
     * ``saturated`` — a *mutated* gene with no room left → revert to original.
 
     Together they span every rule (an unmutated rule is always stackable), so the
     mutate move's uniform pick can land on a saturated gene and ablate it rather
     than skipping it — a deterministic test of whether its stacked mutations still
-    earn their place (vs the old code, where a saturated gene was only ever reset
-    by a lucky reverse-move draw).
+    earn their place.
     """
     stackable = _eligible_genes(parent, all_rule_ids, mutators, max_depth)
     stack_set = set(stackable)
@@ -138,37 +212,183 @@ def _mutate_candidates(
     return stackable, saturated
 
 
-def _apply_chain(mutators: list[Mutator], text: str) -> tuple[str, list[str], list[str]]:
-    """Apply mutators in order (cumulative). Returns (new_text, names, changes)."""
-    cur = text
-    names: list[str] = []
-    changes: list[str] = []
-    for m in mutators:
-        res = m.mutate(cur)
-        cur = res.mutated
-        names.append(m.name)
-        changes.extend(res.changes)
-    return cur, names, changes
+def _order_extreme(parent: RuleSetChromosome, op: str) -> int:
+    """Priority that moves ONE rule to the front (max+1) or back (min-1).
 
-
-def _objectives(agg: AggregatedFitness, objective_mode: str) -> tuple[float, float, float]:
-    """Map an AggregatedFitness to the archive's (f1, f2, f3) triple.
-
-    All three are MAXIMIZED by the archive; f1 is always vulnerability reduction.
-    - ``divergence`` (default): f2 = proportion_divergent, f3 = conditional_mean_divergence
-      (behavioral-change axes, now on a fixed all-prompts denominator).
-    - ``option_b``: f2 = rule_fidelity (max — keep rules faithful to the original),
-      f3 = −parsimony (minimize # mutated rules; negated so the maximizing archive
-      prefers the smaller edit).
+    This is the whole rule-order operator: a single move sends one rule to an
+    extreme of the global priority ranking and leaves every other rule's
+    relative order untouched (a minimal, hill-climbable edit — the EA
+    accumulates good bumps on a parent and any target permutation is reachable by
+    composing several). It is the ONE seam a richer order operator would replace:
+    a swap/insertion neighbourhood, or a whole-order shuffle, would swap this
+    front/back choice for its own move set inside :func:`_available_local_moves`
+    (EA) and :func:`build_random_chromosome` (sampler). Note a shuffle is a global
+    non-incremental move (it discards the parent's order), so it suits a random
+    sampler but not the incremental EA; keep the two arms' order operators
+    identical to preserve the selection-only contrast.
     """
-    f1 = agg.total_semgrep_delta
-    if objective_mode == "option_b":
-        return f1, agg.rule_fidelity, -float(agg.parsimony)
-    return f1, agg.proportion_divergent, agg.conditional_mean_divergence
+    vals = list(parent.order_priority.values()) or [0]
+    return (max(vals) + 1) if op == "front" else (min(vals) - 1)
+
+
+def _order_changes_any_prompt(parent, child, prompts_with_rules) -> bool:
+    """True iff the reorder changes at least one prompt's rendered order."""
+    for pwr in prompts_with_rules:
+        if parent.render_order(pwr.rule_ids) != child.render_order(pwr.rule_ids):
+            return True
+    return False
+
+
+def _is_render_identity(
+    space: RuleSetSpace,
+    base: RuleSetChromosome,
+    child: RuleSetChromosome,
+    prompts_with_rules: list[Any],
+) -> bool:
+    """True iff ``child`` renders every prompt exactly like ``base``.
+
+    Covers both identity cases: no gene text differs AND no priority change
+    re-ranks any prompt's rules. Identity attempts are recorded but retried at
+    the same budget index because nothing new was evaluated.
+    """
+    if child is base or (child.cid and child.cid == base.cid):
+        return True
+    if child.genes != base.genes:
+        return False
+    return not _order_changes_any_prompt(base, child, prompts_with_rules)
 
 
 # ============================================================================
-# (1+1) EA over one chromosome archive
+# The shared random-chromosome sampler
+# ============================================================================
+
+def build_random_chromosome(
+    space: RuleSetSpace,
+    base: RuleSetChromosome,
+    mutators: list[Mutator],
+    rng: random.Random,
+    *,
+    max_changes: int,
+    max_depth: int,
+    order_move_prob: float = 0.0,
+) -> RandomBuildResult:
+    """Sample one random chromosome by stacking 1..``max_changes`` random changes
+    on a copy of ``base`` (supervisor's random-search sampler, 2026-07-10).
+
+    Per change: with probability ``order_move_prob`` bump a uniformly chosen
+    rule's order priority (front/back); otherwise pick a rule uniformly among
+    those with room (repeats allowed — a re-picked rule stacks, honouring the
+    no-repeat-mutator rule and the per-rule ``max_depth`` cap) and apply exactly
+    ONE mutator to the rule's CURRENT allele in the solution under construction.
+
+    ``base`` is never modified. The returned child is stamped and its
+    ``parent_id`` points at ``base``; when every change was a no-op the ``base``
+    object itself is returned (callers detect identity via
+    :func:`_is_render_identity`). Requested slots, actually attempted operators,
+    and state-changing operations are recorded separately. A sampler-local
+    ``(rule, mutator)`` set enforces no-repeat even when a mutator is a no-op or
+    reverts the gene and therefore leaves no surviving mutation-path marker.
+    """
+    child = base
+    n_requested = rng.randint(1, max(1, max_changes))
+    n_attempted = 0
+    n_effective = 0
+    attempted_pairs: set[tuple[str, str]] = set()
+    attempted_operators: list[str] = []
+    attempted_mutators: list[str] = []
+    effective_mutators: list[str] = []
+    changes: list[str] = []
+    for _ in range(n_requested):
+        if order_move_prob > 0 and rng.random() < order_move_prob:
+            rid = rng.choice(space.all_rule_ids)
+            op = rng.choice(["front", "back"])
+            n_attempted += 1
+            attempted_operators.append(f"order:{op}:{rid}")
+            next_child = child.with_priority(rid, _order_extreme(child, op))
+            if next_child.order_priority != child.order_priority:
+                n_effective += 1
+            child = next_child
+            changes.append(f"order {op}:{rid}")
+            continue
+
+        available_by_rule: dict[str, list[Mutator]] = {}
+        for rid in space.all_rule_ids:
+            if child.gene_depth(rid) >= max_depth:
+                continue
+            available = [
+                m for m in _unused_mutators(child, rid, mutators)
+                if (rid, m.name) not in attempted_pairs
+            ]
+            if available:
+                available_by_rule[rid] = available
+        candidates = list(available_by_rule)
+        if not candidates:
+            break  # requested slots can exceed the remaining no-repeat neighbourhood
+        rid = rng.choice(candidates)
+        m = rng.choice(available_by_rule[rid])
+        attempted_pairs.add((rid, m.name))
+        n_attempted += 1
+        attempted_operators.append(f"mutator:{m.name}:{rid}")
+        attempted_mutators.append(m.name)
+        current = space.allele(child, rid)
+        res = m.mutate(current)
+        if res.mutated == current:
+            changes.append(f"identity {m.name}:{rid}")
+            continue
+        if res.mutated == space.originals[rid]:
+            # The mutator reproduced the original text — functionally a revert.
+            if rid in child.genes:
+                n_effective += 1
+            child = child.with_reverted(rid)
+            changes.append(f"reverted-to-original {m.name}:{rid}")
+            continue
+        child = child.with_gene_chain(rid, res.mutated, [m.name])
+        n_effective += 1
+        effective_mutators.append(m.name)
+        changes.extend(res.changes)
+    if child is base:
+        final_child = base
+    else:
+        final_child = space.stamp(child)
+        final_child.parent_id = base.cid or None
+    return RandomBuildResult(
+        child=final_child,
+        n_requested_changes=n_requested,
+        n_attempted_changes=n_attempted,
+        n_effective_changes=n_effective,
+        attempted_operators=attempted_operators,
+        attempted_mutators=attempted_mutators,
+        effective_mutators=effective_mutators,
+        changes=changes,
+    )
+
+
+def _validate_genes(
+    validate_move_fn: Callable[..., dict] | None,
+    space: RuleSetSpace,
+    base: RuleSetChromosome,
+    child: RuleSetChromosome,
+) -> dict[str, dict]:
+    """Run the (observational) quality validator on every gene that differs
+    between ``base`` and ``child``. Returns ``{rule_id: quality_meta}``."""
+    if validate_move_fn is None:
+        return {}
+    out: dict[str, dict] = {}
+    for rid in sorted(child.mutated_rule_ids() | base.mutated_rule_ids()):
+        base_text = space.allele(base, rid)
+        new_text = space.allele(child, rid)
+        if new_text == base_text:
+            continue
+        g = child.genes.get(rid)
+        chain = list(g.mutation_path) if g else []
+        meta = validate_move_fn(rid, base_text, new_text, chain, [])
+        if meta:  # {} when validation is disabled — keep the record field empty
+            out[rid] = meta
+    return out
+
+
+# ============================================================================
+# (1+1) EA with random initialization + periodic random injection
 # ============================================================================
 
 def run_ea(
@@ -184,10 +404,14 @@ def run_ea(
     restart_h: int,
     max_depth: int,
     ea_n_mutations: int = 1,
-    order_move_weight: float = 0.0,
-    reverse_move_weight: float = 0.0,
-    objective_mode: str = "divergence",
-    from_original: bool = False,
+    ea_move: str = "local",
+    init_random_samples: int = 10,
+    random_injection_every: int = 10,
+    random_max_changes: int = 10,
+    order_move_weight: float = 0.1,
+    ea_origin_parent: bool = True,
+    archive_admission: str = "neutral_drift",
+    identity_retry_limit: int = _IDENTITY_RETRY_LIMIT,
     seed: int | None,
     log: Callable[[str], None],
     iter_record_fn: Callable[[dict], None] | None = None,
@@ -199,21 +423,48 @@ def run_ea(
 ) -> ChromosomeRunResult:
     """(1+1) EA over a single full-chromosome Pareto archive.
 
-    Each iteration: pick a parent chromosome from the archive (origin always
-    available), pick a move (text-mutate one gene, or reorder /
-    revert a gene), build the child chromosome, evaluate the WHOLE chromosome,
-    and offer it to the archive by Pareto dominance over (f1, f2, f3).
+    Iteration phases consume one shared **candidate-evaluation** budget; identity
+    proposals are recorded attempts and retried at the same budget index. Records
+    carry a ``phase`` marker so analysis can split them:
 
-    ``ea_n_mutations`` = max mutators applied per text move (K). A move samples a
-    1..K chain of *distinct, unused* mutators for the chosen gene (K=1 ⇒ a single
-    mutator — the local-search special case). No mutator is ever applied twice to
-    the same rule (see ``_unused_mutators``). Drive K from the same knob as the
-    random baseline's chain length so the two arms share one move budget.
-    ``order_move_weight`` / ``reverse_move_weight`` gate the order/reverse moves
-    (0 by default). RNG draws use one seeded ``random.Random`` for reproducibility.
+    * ``init`` — the first ``init_random_samples`` iterations sample independent
+      random chromosomes from the ORIGIN via :func:`build_random_chromosome`
+      (exactly the random-search sampler) and offer each to the archive.
+      Population-style seeding: the later 1+1 loop builds on the best of them.
+    * ``injection`` — after init, every ``random_injection_every``-th iteration
+      injects one more origin-based random chromosome (0 disables). Diversity
+      maintenance: the archive is never wiped; dominance decides.
+    * ``ea`` — pick a parent from the archive (the origin is also sampleable when
+      ``ea_origin_parent`` is on, so a minimal parsimony-1 lineage can always be
+      seeded), take a move, evaluate the WHOLE chromosome, offer it by Pareto
+      dominance.
+
+    The ``ea``-phase move depends on ``ea_move``:
+
+    * ``"local"`` (default) — the (1+1) step: mutate ONE gene by stacking a
+      1..``ea_n_mutations`` chain of distinct unused mutators on its current
+      allele (default chain length 1 — the canonical small step); a saturated
+      gene reverts to original instead (ablation of its stack); with weight
+      ``order_move_weight`` the move is a rule-order bump instead.
+    * ``"random_builder"`` — ablation arm: the move applies the random sampler
+      to the ARCHIVE PARENT, so selection is the only difference vs random
+      search. Not the main design; kept for the supervisor-requested ablation.
     """
+    if ea_move not in ("local", "random_builder"):
+        raise ValueError(f"ea_move must be 'local' or 'random_builder', got {ea_move!r}")
+    if identity_retry_limit < 1:
+        raise ValueError(
+            f"identity_retry_limit must be >= 1, got {identity_retry_limit}"
+        )
+
     rng = random.Random(seed)
-    archive = ChromosomeArchive(origin, cap=archive_cap, restart_h=restart_h, rng=rng)
+    archive = ChromosomeArchive(
+        origin,
+        cap=archive_cap,
+        restart_h=restart_h,
+        rng=rng,
+        archive_admission=archive_admission,
+    )
 
     iterations: list["IterationResult"] = []
     mutator_stats: dict[str, dict[str, int]] = {
@@ -222,133 +473,221 @@ def run_ea(
     restart_reason_counts: dict[str, int] = {"stagnation": 0}
     n_accepted = 0
     rate_limit_hit = False
-    mutate_weight = max(0.0, 1.0 - order_move_weight - reverse_move_weight)
+    mutate_weight = max(0.0, 1.0 - order_move_weight)
+    init_n = max(0, min(init_random_samples, max_iterations))
 
     def _is_eligible(parent: RuleSetChromosome) -> bool:
-        # from_original: any rule can always be re-derived from the original, so a
-        # mutate move is always available.
-        if from_original:
-            return True
-        stackable, saturated = _mutate_candidates(parent, space.all_rule_ids, mutators, max_depth)
-        if stackable or saturated:
-            return True
-        if reverse_move_weight > 0 and parent.mutated_rule_ids():
-            return True
-        if order_move_weight > 0:
-            return True
-        return False
+        if ea_move == "random_builder":
+            return True  # the sampler can always draw a change
+        stackable, saturated, order_moves = _available_local_moves(
+            parent, space, prompts_with_rules, mutators, max_depth, order_move_weight
+        )
+        return bool(stackable or saturated or order_moves)
 
+    evaluated_count = 0
+    attempt_count = 0
+    identity_retries = 0
     last_completed = 0
-    for i in range(max_iterations):
+    while evaluated_count < max_iterations:
         if should_stop_fn is not None and should_stop_fn():
             log(f"\n⏹️  Graceful stop (SLURM pre-timeout) — stopping after "
                 f"{last_completed}/{max_iterations} iterations")
             break
 
-        # ---- 0. restart on stagnation (option b: re-open, never wipe) --------
+        # ``budget_iter`` advances only after evaluate_chromosome_fn succeeds.
+        # Proposal attempts (including identities) get a separate monotonic id.
+        budget_iter = evaluated_count + 1
+        attempt_count += 1
+        attempt_in_iter = identity_retries + 1
+
+        if evaluated_count < init_n:
+            phase = "init"
+        elif (
+            random_injection_every > 0
+            and (evaluated_count - init_n + 1) % random_injection_every == 0
+        ):
+            phase = "injection"
+        else:
+            phase = "ea"
+
         restarts_this_iter: list[dict[str, Any]] = []
-        if archive.should_restart():
-            archive.restart(iteration=i + 1, reason="stagnation")
-            restart_reason_counts["stagnation"] += 1
-            restarts_this_iter.append({"reason": "stagnation"})
-            log(f"   ↻ archive restart: stagnation (front_size={len(archive)})")
+        n_changes: int | None = None
+        n_attempted_changes: int | None = None
+        n_effective_changes: int | None = None
+        attempted_operators: list[str] = []
+        attempted_mutators: list[str] = []
 
-        # ---- 1. pick a parent (restart re-opens exploration if all exhausted)
-        parent = archive.sample_parent(_is_eligible)
-        if parent is None:
-            archive.restart(iteration=i + 1, reason="exhausted")
-            restart_reason_counts["exhausted"] = restart_reason_counts.get("exhausted", 0) + 1
-            restarts_this_iter.append({"reason": "exhausted"})
-            parent = archive.sample_parent(_is_eligible)
+        if phase in ("init", "injection"):
+            # ---- random sample from the ORIGIN (never from the front) --------
+            parent = archive.origin
+            sample = build_random_chromosome(
+                space, origin, mutators, rng,
+                max_changes=random_max_changes, max_depth=max_depth,
+                order_move_prob=order_move_weight,
+            )
+            child = sample.child
+            n_changes = sample.n_requested_changes
+            n_attempted_changes = sample.n_attempted_changes
+            n_effective_changes = sample.n_effective_changes
+            attempted_operators = sample.attempted_operators
+            attempted_mutators = sample.attempted_mutators
+            chain_names = sample.effective_mutators
+            changes = sample.changes
+            move_type = "init_random" if phase == "init" else "injection_random"
+            rule_id = None
+            is_identity = _is_render_identity(space, origin, child, prompts_with_rules)
+        else:
+            # ---- 0. restart on stagnation (re-open, never wipe) --------------
+            if archive.should_restart():
+                archive.restart(iteration=budget_iter, reason="stagnation")
+                restart_reason_counts["stagnation"] += 1
+                restarts_this_iter.append({"reason": "stagnation"})
+                log(f"   ↻ archive restart: stagnation (front_size={len(archive)})")
+
+            # ---- 1. pick a parent (restart re-opens exploration if exhausted)
+            parent = archive.sample_parent(_is_eligible, include_origin=ea_origin_parent)
             if parent is None:
-                log("\n⏹️  No eligible parent even after restart — stopping early")
-                break
+                archive.restart(iteration=budget_iter, reason="exhausted")
+                restart_reason_counts["exhausted"] = restart_reason_counts.get("exhausted", 0) + 1
+                restarts_this_iter.append({"reason": "exhausted"})
+                parent = archive.sample_parent(_is_eligible, include_origin=ea_origin_parent)
+                if parent is None:
+                    log("\n⏹️  No eligible parent even after restart — stopping early")
+                    break
 
-        # ---- 2. choose + build a move ---------------------------------------
-        move = _choose_and_build_move(
-            parent, space, prompts_with_rules, mutators, rng, max_depth, ea_n_mutations,
-            mutate_weight, order_move_weight, reverse_move_weight, from_original,
-        )
-        if move is None:
-            # Parent had no realizable move (should be filtered by eligibility);
-            # mark a defensive stagnation tick and continue.
-            archive._attempts_since_insert += 1
-            continue
+            # ---- 2. choose + build the move ----------------------------------
+            if ea_move == "random_builder":
+                sample = build_random_chromosome(
+                    space, parent, mutators, rng,
+                    max_changes=random_max_changes, max_depth=max_depth,
+                    order_move_prob=order_move_weight,
+                )
+                child = sample.child
+                n_changes = sample.n_requested_changes
+                n_attempted_changes = sample.n_attempted_changes
+                n_effective_changes = sample.n_effective_changes
+                attempted_operators = sample.attempted_operators
+                attempted_mutators = sample.attempted_mutators
+                chain_names = sample.effective_mutators
+                changes = sample.changes
+                move_type, rule_id = "random_builder", None
+                is_identity = _is_render_identity(space, parent, child, prompts_with_rules)
+            else:
+                move = _choose_and_build_move(
+                    parent, space, prompts_with_rules, mutators, rng, max_depth,
+                    ea_n_mutations, mutate_weight, order_move_weight,
+                )
+                if move is None:
+                    # Eligibility and construction use the same move inventory;
+                    # if stochastic state still makes it empty, re-open and retry
+                    # this evaluation slot without charging the budget.
+                    archive.restart(iteration=budget_iter, reason="exhausted")
+                    restart_reason_counts["exhausted"] = (
+                        restart_reason_counts.get("exhausted", 0) + 1
+                    )
+                    continue
+                child, move_keys, move_type, rule_id, chain_names, changes, is_identity = move
+                archive.mark_tried(parent, move_keys)
+                attempted_mutators = list(chain_names)
+                if move_type == "mutate":
+                    attempted_operators = [f"mutator:{name}:{rule_id}" for name in chain_names]
+                    n_attempted_changes = len(chain_names)
+                else:
+                    attempted_operators = [move_type]
+                    n_attempted_changes = 1
+                # Local search requests exactly the move(s) it then attempts.
+                # Keeping this populated (rather than ``None``) makes the
+                # requested >= attempted >= effective contract uniform across
+                # local EA, initialization/injection, and random search.
+                n_changes = n_attempted_changes
+                n_effective_changes = 0 if is_identity else 1
 
-        child, move_key, move_type, rule_id, chain_names, changes, is_identity = move
-        for name in chain_names:
+        for name in attempted_mutators:
             mutator_stats.setdefault(name, {"attempts": 0, "archive_adds": 0, "archive_adds_f1": 0})
             mutator_stats[name]["attempts"] += 1
-        archive.mark_tried(parent, move_key)
 
-        gene_depth = child.gene_depth(rule_id) if rule_id else 0
+        gene_depth = child.gene_depth(rule_id) if rule_id else max(
+            (child.gene_depth(r) for r in child.mutated_rule_ids()), default=0
+        )
 
-        # ---- 3. identity moves consume the slot but are not evaluated -------
+        # ---- 3. identity attempts are visible but do NOT consume budget -----
         if is_identity:
-            archive._attempts_since_insert += 1
-            # Own header block (leading blank line) so it reads as a distinct
-            # iteration rather than being squished onto the previous one.
-            log(f"\n⏭️  Iteration {i+1}/{max_iterations} — identity {move_type} "
+            identity_retries += 1
+            log(f"\n⏭️  Iteration {budget_iter}/{max_iterations} [{phase}] — identity {move_type} "
                 f"rule={(rule_id or '-').replace('codeguard-', 'cg-')} "
-                f"mutator={'+'.join(chain_names) or rule_id} "
-                f"— no change vs parent, slot consumed (no eval)")
-            # Record the (unchanged) chromosome: an identity candidate equals its
-            # parent, so chromosome_id = parent.cid (never null) with f1=None.
-            _emit_record(iter_record_fn, i + 1, "ea", parent, child=parent, move_type=move_type,
+                f"mutator={'+'.join(chain_names) or '-'} "
+                f"— no evaluation; retry {identity_retries}/{identity_retry_limit}")
+            _emit_record(iter_record_fn, budget_iter, "ea", parent, child=parent, move_type=move_type,
                          rule_id=rule_id, chain_names=chain_names, agg=None, accepted=False,
                          identity=True, gene_depth=gene_depth, n_reused=0, n_rerun=0,
                          eligible=len(space.all_rule_ids), restarts=restarts_this_iter,
-                         objective_mode=objective_mode)
-            last_completed = i + 1
+                         phase=phase, n_changes=n_changes, attempt=attempt_count,
+                         attempt_in_iter=attempt_in_iter, budget_consumed=False,
+                         archive_admission=archive_admission,
+                         attempted_operators=attempted_operators,
+                         attempted_mutators=attempted_mutators,
+                         n_attempted_changes=n_attempted_changes,
+                         n_effective_changes=n_effective_changes)
+            if identity_retries >= identity_retry_limit:
+                raise IdentityRetryLimitExceeded(
+                    "EA identity retry limit exceeded for evaluation "
+                    f"{budget_iter} after {identity_retries} attempts"
+                )
             continue
 
+        identity_retries = 0
         space.stamp(child)
 
         # ---- 4. header → validation → evaluate ------------------------------
-        # Header first so both the validation line and the per-prompt generation
-        # lines nest under this iteration. Validation is computed before code
-        # generation, so its log line must precede the generation lines.
-        log(f"\n🧬 Iteration {i+1}/{max_iterations} — {move_type} "
+        log(f"\n🧬 Iteration {budget_iter}/{max_iterations} [{phase}] — {move_type} "
             f"rule={(rule_id or '-').replace('codeguard-', 'cg-')} "
             f"mutator={'+'.join(chain_names) or '-'} depth={gene_depth} "
-            f"parent_f1={parent.f1:+.2f} front={len(archive)}")
+            f"parent_f1={parent.f1:+.2f} front={len(archive)}"
+            + (f" n_changes={n_changes}" if n_changes is not None else ""))
 
-        # Optional quality validation of the mutation (observational; never refuses).
-        validation_metadata: dict = {}
-        if move_type == "mutate" and validate_move_fn is not None:
-            validation_metadata = validate_move_fn(
-                rule_id, space.allele(parent, rule_id), space.allele(child, rule_id),
-                chain_names, changes,
-            )
+        # Observational quality validation of every changed gene (never refuses).
+        validation_metadata: dict = _validate_genes(validate_move_fn, space, parent, child)
 
         try:
-            agg, _results, n_reused, n_rerun = evaluate_chromosome_fn(child, f"ea_iter{i+1:04d}")
+            agg, _results, n_reused, n_rerun = evaluate_chromosome_fn(
+                child, f"ea_iter{budget_iter:04d}"
+            )
         except WallTimeStop:
-            log(f"\n⏱️  Pre-timeout during iteration {i+1} — discarding in-flight; "
+            log(f"\n⏱️  Pre-timeout during iteration {budget_iter} — discarding in-flight; "
                 f"finalizing from {last_completed} completed iterations.")
             break
         except Exception as e:  # noqa: BLE001 — rate-limit handling only
             if "rate_limit" in str(e).lower() or "429" in str(e) or "413" in str(e):
-                log(f"\n⚠️  Rate limit hit at EA iteration {i+1}: {e}")
+                log(f"\n⚠️  Rate limit hit at EA iteration {budget_iter}: {e}")
                 rate_limit_hit = True
                 break
             raise
 
-        child.f1, child.f2, child.f3 = _objectives(agg, objective_mode)
+        child.f1, child.f2, child.f3 = _objectives(agg)
         child.fitness = agg
 
         # ---- 5. offer to the archive ----------------------------------------
         parent_f1 = parent.f1
         front_before = {e.cid for e in archive.entries}
         size_before = len(archive)
-        accepted, reason = archive.try_add(child, iteration=i + 1)
+        accepted, reason = archive.try_add(
+            child,
+            iteration=budget_iter,
+            count_rejection_for_stagnation=(phase == "ea"),
+        )
         evicted = front_before - {e.cid for e in archive.entries}
         if accepted:
             n_accepted += 1
             if chain_names:
-                mutator_stats[chain_names[-1]]["archive_adds"] += 1
-                if child.f1 > parent_f1:
-                    mutator_stats[chain_names[-1]]["archive_adds_f1"] += 1
+                # Local moves credit the chain's last mutator; sampler-built
+                # children (init/injection/random_builder) share the credit
+                # across every applied mutator. Per-mutator marginal analysis
+                # should therefore filter to phase == "ea" local moves.
+                credited = chain_names if move_type != "mutate" else [chain_names[-1]]
+                for name in credited:
+                    mutator_stats[name]["archive_adds"] += 1
+                    if child.f1 > parent_f1:
+                        mutator_stats[name]["archive_adds_f1"] += 1
             log(f"   ✅ archive add: f1={child.f1:+.2f} f2={child.f2:.3f} f3={child.f3:.3f} "
                 f"(front={len(archive)}/{archive.cap}, cid={child.cid})")
             if evicted:
@@ -362,16 +701,14 @@ def run_ea(
                 f"stagnation={archive._attempts_since_insert}/{restart_h}]")
 
         # Persist this iteration's mutated rule(s) regardless of archive outcome,
-        # so mutated_rules/iterNNN/ documents every evaluated candidate. An
-        # accepted chromosome's genes live at its accept iteration — exactly what
-        # the archive snapshot's text_ref points to.
+        # so mutated_rules/iterNNN/ documents every evaluated candidate.
         if save_move_fn is not None:
-            save_move_fn(iteration=i + 1, child=child, space=space, move_type=move_type,
+            save_move_fn(iteration=budget_iter, child=child, space=space, move_type=move_type,
                          rule_id=rule_id, chain_names=chain_names, changes=changes,
                          validation_metadata=validation_metadata, accepted=accepted)
 
         iterations.append(iteration_result_factory(
-            iteration=i,
+            iteration=evaluated_count,
             rule_text=f"[ea: {child.cid}]",
             aggregated_fitness=agg,
             individual_results=[],
@@ -380,17 +717,24 @@ def run_ea(
             validation_metadata=validation_metadata,
         ))
 
-        _emit_record(iter_record_fn, i + 1, "ea", parent, child=child, move_type=move_type,
+        _emit_record(iter_record_fn, budget_iter, "ea", parent, child=child, move_type=move_type,
                      rule_id=rule_id, chain_names=chain_names, agg=agg, accepted=accepted,
                      identity=False, gene_depth=gene_depth, n_reused=n_reused, n_rerun=n_rerun,
                      eligible=len(space.all_rule_ids), restarts=restarts_this_iter,
                      parent_f1=parent_f1, validation_metadata=validation_metadata,
-                     objective_mode=objective_mode)
+                     phase=phase, n_changes=n_changes, attempt=attempt_count,
+                     attempt_in_iter=attempt_in_iter, budget_consumed=True,
+                     archive_admission=archive_admission,
+                     attempted_operators=attempted_operators,
+                     attempted_mutators=attempted_mutators,
+                     n_attempted_changes=n_attempted_changes,
+                     n_effective_changes=n_effective_changes)
 
-        if (i + 1) % snapshot_every == 0 and archive_snapshot_fn is not None:
-            archive_snapshot_fn(i + 1, archive.snapshot())
+        evaluated_count += 1
+        last_completed = evaluated_count
 
-        last_completed = i + 1
+        if evaluated_count % snapshot_every == 0 and archive_snapshot_fn is not None:
+            archive_snapshot_fn(evaluated_count, archive.snapshot())
 
     if archive_snapshot_fn is not None and last_completed > 0:
         archive_snapshot_fn(last_completed, archive.snapshot())
@@ -419,92 +763,120 @@ def _choose_and_build_move(
     ea_n_mutations: int,
     mutate_weight: float,
     order_weight: float,
-    reverse_weight: float,
-    from_original: bool = False,
 ):
-    """Pick a move type by weight and build the child chromosome.
+    """Pick a local move type by weight and build the child chromosome.
 
-    Returns ``(child, move_key, move_type, rule_id, chain_names, changes,
-    is_identity)`` or ``None`` when no move is realizable. ``move_key`` is the
-    hashable token recorded in ``parent.tried``.
-
-    ``from_original`` = memoryless per-gene EA: a mutate move re-derives the chosen
-    rule from its ORIGINAL text (like the random baseline) and REPLACES the gene,
-    so accepted mutations do not stack. Order/reverse moves are unaffected.
+    Returns ``(child, move_keys, move_type, rule_id, chain_names, changes,
+    is_identity)`` or ``None`` when no untried move is realizable. Every key in
+    ``move_keys`` is recorded in ``parent.tried`` regardless of outcome.
     """
-    move_type = _weighted_move_type(rng, parent, space, mutators, max_depth,
-                                    mutate_weight, order_weight, reverse_weight, from_original)
+    stackable, saturated, order_moves = _available_local_moves(
+        parent, space, prompts_with_rules, mutators, max_depth, order_weight
+    )
+    move_type = _weighted_move_type(
+        rng,
+        can_mutate=bool(stackable or saturated),
+        can_order=bool(order_moves),
+        mutate_weight=mutate_weight,
+        order_weight=order_weight,
+    )
     if move_type is None:
         return None
 
-    if move_type == "reverse":
-        rid = rng.choice(sorted(parent.mutated_rule_ids()))
-        child = parent.with_reverted(rid)
-        return child, ("rev", rid), "reverse", rid, [], [f"reverted {rid}"], False
-
     if move_type == "order":
-        rid = rng.choice(space.all_rule_ids)
-        op = rng.choice(["front", "back"])
-        child = parent.with_priority(rid, _order_extreme(parent, op))
-        # E1: an order move that changes no prompt's render is an identity.
-        is_identity = not _order_changes_any_prompt(parent, child, prompts_with_rules)
-        return child, ("order", rid, op), "order", rid, [], [f"{op}:{rid}"], is_identity
+        move_key, child, rid, op = rng.choice(order_moves)
+        return child, (move_key,), "order", rid, [], [f"{op}:{rid}"], False
 
-    # from_original: pick any rule, draw a fresh 1..K distinct-mutator chain, apply
-    # it to the ORIGINAL text, and REPLACE the gene (no stacking, no saturation).
-    if from_original:
-        rid = rng.choice(space.all_rule_ids)
-        k_cap = max(1, min(ea_n_mutations, len(mutators)))
-        chosen = rng.sample(mutators, rng.randint(1, k_cap))
-        new_text, names, changes = _apply_chain(chosen, space.originals[rid])
-        cur = space.allele(parent, rid)
-        if new_text == cur:                              # no change vs parent → identity
-            return parent, ("mut", rid, tuple(names)), "mutate", rid, names, changes, True
-        if new_text == space.originals[rid]:             # chain reproduced original → revert
-            child = parent.with_reverted(rid)
-        else:
-            child = parent.with_gene_from_original(rid, new_text, names)
-        return child, ("mut", rid, tuple(names)), "mutate", rid, names, changes, False
-
-    # text move (stacking): pick uniformly across all genes. A gene with room gets a
-    # fresh 1..K chain of distinct, unused mutators stacked on its CURRENT allele; a
-    # saturated gene (no room left) is reverted to original instead — an ablation
-    # of its stacked mutations, kept or dropped by the archive's dominance check.
-    stackable, saturated = _mutate_candidates(parent, space.all_rule_ids, mutators, max_depth)
+    # Text move: pick uniformly across all genes. A gene with room gets a
+    # 1..ea_n_mutations chain of distinct unused mutators stacked on its CURRENT
+    # allele (chain length 1 = the canonical (1+1) step); a saturated gene (no
+    # room left) is reverted to original instead — an ablation of its stacked
+    # mutations, kept or dropped by the archive's dominance check.
     candidates = stackable + saturated
     if not candidates:
         return None
     rid = rng.choice(candidates)
     if rid in saturated:
         child = parent.with_reverted(rid)
-        return child, ("rev", rid), "reverse", rid, [], [f"reverted {rid} (saturated)"], False
-    avail = _unused_mutators(parent, rid, mutators)
+        move_key = ("rev", rid)
+        return child, (move_key,), "reverse", rid, [], [f"reverted {rid} (saturated)"], False
+    avail = _untried_mutators(parent, rid, mutators)
     depth = parent.gene_depth(rid)
     room = max(1, min(ea_n_mutations, max_depth - depth, len(avail)))
     chosen = rng.sample(avail, rng.randint(1, room))
     new_text, names, changes = _apply_chain(chosen, space.allele(parent, rid))
     is_identity = new_text == space.allele(parent, rid)
     child = parent if is_identity else parent.with_gene_chain(rid, new_text, names)
-    return child, ("mut", rid, tuple(names)), "mutate", rid, names, changes, is_identity
+    move_keys = tuple(("mut", rid, name) for name in names)
+    return child, move_keys, "mutate", rid, names, changes, is_identity
 
 
-def _weighted_move_type(rng, parent, space, mutators, max_depth,
-                        mutate_weight, order_weight, reverse_weight, from_original=False):
+def _apply_chain(mutators: list[Mutator], text: str) -> tuple[str, list[str], list[str]]:
+    """Apply mutators in order (cumulative). Returns (new_text, names, changes)."""
+    cur = text
+    names: list[str] = []
+    changes: list[str] = []
+    for m in mutators:
+        res = m.mutate(cur)
+        cur = res.mutated
+        names.append(m.name)
+        changes.extend(res.changes)
+    return cur, names, changes
+
+
+def _available_local_moves(
+    parent: RuleSetChromosome,
+    space: RuleSetSpace,
+    prompts_with_rules: list[Any],
+    mutators: list[Mutator],
+    max_depth: int,
+    order_weight: float,
+) -> tuple[list[str], list[str], list[tuple[tuple, RuleSetChromosome, str, str]]]:
+    """Return untried text/revert rules and effective order moves.
+
+    Order changes that do not alter any prompt rendering are excluded before
+    sampling. Text mutators are tracked atomically per parent/rule, so rejected
+    or identity-producing operators are not immediately repeated; restart
+    clears the parent's set and deliberately makes them available again.
+    """
+    stackable = [
+        rid for rid in space.all_rule_ids
+        if parent.gene_depth(rid) < max_depth
+        and _untried_mutators(parent, rid, mutators)
+    ]
+    stackable_set = set(stackable)
+    saturated = [
+        rid for rid in sorted(parent.mutated_rule_ids())
+        if rid not in stackable_set and ("rev", rid) not in parent.tried
+    ]
+
+    order_moves: list[tuple[tuple, RuleSetChromosome, str, str]] = []
+    if order_weight > 0:
+        for rid in space.all_rule_ids:
+            for op in ("front", "back"):
+                key = ("order", rid, op)
+                if key in parent.tried:
+                    continue
+                child = parent.with_priority(rid, _order_extreme(parent, op))
+                if _order_changes_any_prompt(parent, child, prompts_with_rules):
+                    order_moves.append((key, child, rid, op))
+    return stackable, saturated, order_moves
+
+
+def _weighted_move_type(
+    rng,
+    *,
+    can_mutate: bool,
+    can_order: bool,
+    mutate_weight: float,
+    order_weight: float,
+):
     """Choose an available move type by weight; fall back to any available one."""
-    if from_original:
-        can_mutate = True  # any rule can always be re-derived from its original
-    else:
-        stackable, saturated = _mutate_candidates(parent, space.all_rule_ids, mutators, max_depth)
-        can_mutate = bool(stackable or saturated)
-    can_reverse = reverse_weight > 0 and bool(parent.mutated_rule_ids())
-    can_order = order_weight > 0
     options = []
     if can_mutate:
         options.append(("mutate", mutate_weight))
     if can_order:
         options.append(("order", order_weight))
-    if can_reverse:
-        options.append(("reverse", reverse_weight))
     options = [(t, w) for t, w in options if w > 0] or [(t, 1.0) for t, _ in options]
     if not options:
         return None
@@ -518,25 +890,11 @@ def _weighted_move_type(rng, parent, space, mutators, max_depth,
     return options[-1][0]
 
 
-def _order_extreme(parent: RuleSetChromosome, op: str) -> int:
-    """Priority that moves a rule to the front (max+1) or back (min-1)."""
-    vals = list(parent.order_priority.values()) or [0]
-    return (max(vals) + 1) if op == "front" else (min(vals) - 1)
-
-
-def _order_changes_any_prompt(parent, child, prompts_with_rules) -> bool:
-    """True iff the reorder changes at least one prompt's rendered order (E1)."""
-    for pwr in prompts_with_rules:
-        if parent.render_order(pwr.rule_ids) != child.render_order(pwr.rule_ids):
-            return True
-    return False
-
-
 # ============================================================================
-# Random-walk baseline (persistent single chromosome, no archive)
+# Random search (i.i.d. baseline — every iteration independent of all others)
 # ============================================================================
 
-def run_random_baseline(
+def run_random_search(
     *,
     space: RuleSetSpace,
     origin: RuleSetChromosome,
@@ -545,9 +903,10 @@ def run_random_baseline(
     evaluate_chromosome_fn: EvaluateChromosomeFn,
     iteration_result_factory: Callable[..., "IterationResult"],
     max_iterations: int,
-    max_mutations_per_iter: int,
+    max_changes: int,
     max_depth: int,
-    objective_mode: str = "divergence",
+    order_move_prob: float = 0.1,
+    identity_retry_limit: int = _IDENTITY_RETRY_LIMIT,
     seed: int | None,
     log: Callable[[str], None],
     iter_record_fn: Callable[[dict], None] | None = None,
@@ -555,111 +914,138 @@ def run_random_baseline(
     validate_move_fn: Callable[..., dict] | None = None,
     should_stop_fn: Callable[[], bool] | None = None,
 ) -> ChromosomeRunResult:
-    """Persistent single-chromosome random walk over full rule sets.
+    """i.i.d. random search over full rule sets (the corrected baseline,
+    2026-07-10).
 
-    Each iteration: pick a rule uniformly, sample n∈[1, K] distinct mutators,
-    apply that chain **to the ORIGINAL rule text**, overwrite that gene in the
-    carried-forward chromosome, evaluate the whole chromosome, and keep going.
-    No archive, no acceptance, no restart, no guided selection.
+    Every budgeted iteration evaluates an INDEPENDENT chromosome — a fresh copy of the
+    origin with 1..``max_changes`` random changes stacked on it
+    (:func:`build_random_chromosome`) — evaluates the whole rule set, and
+    records it. No parent carry-forward, no archive, no acceptance, no revert
+    operator. The reported best is the best-of-budget sample, with the origin
+    as floor (doing nothing is always available). Identity proposals are logged
+    and retried without consuming an evaluation.
     """
+    if identity_retry_limit < 1:
+        raise ValueError(
+            f"identity_retry_limit must be >= 1, got {identity_retry_limit}"
+        )
     rng = random.Random(seed)
-    k_cap = max(1, min(max_mutations_per_iter, len(mutators), max_depth))
 
     iterations: list["IterationResult"] = []
     mutator_stats: dict[str, dict[str, int]] = {
         m.name: {"applications": 0, "applications_f1_advancing": 0} for m in mutators
     }
-    current = origin
     best = origin
     best_fitness = origin.fitness
     rate_limit_hit = False
 
+    evaluated_count = 0
+    attempt_count = 0
+    identity_retries = 0
     last_completed = 0
-    for i in range(max_iterations):
+    while evaluated_count < max_iterations:
         if should_stop_fn is not None and should_stop_fn():
             log(f"\n⏹️  Graceful stop (SLURM pre-timeout) — stopping after "
                 f"{last_completed}/{max_iterations} iterations")
             break
 
-        rid = rng.choice(space.all_rule_ids)
-        n = rng.randint(1, k_cap)
-        chain = rng.sample(mutators, n)
-        chain_names = [m.name for m in chain]
-        new_text, _names, changes = _apply_chain(chain, space.originals[rid])
+        budget_iter = evaluated_count + 1
+        attempt_count += 1
+        attempt_in_iter = identity_retries + 1
 
-        # E2: identity is measured against the ORIGINAL — a no-op chain must not
-        # advance the walk (and must not revert an already-mutated gene).
-        if new_text == space.originals[rid]:
-            # Own header block (leading blank line) so it reads as a distinct
-            # iteration rather than being squished onto the previous one.
-            log(f"\n⏭️  Iteration {i+1}/{max_iterations} — identity chain "
-                f"rule={rid.replace('codeguard-', 'cg-')} "
-                f"chain={'+'.join(chain_names)} "
-                f"— chain was a no-op vs original, walk not advanced (no eval)")
-            for name in chain_names:
+        sample = build_random_chromosome(
+            space, origin, mutators, rng,
+            max_changes=max_changes, max_depth=max_depth,
+            order_move_prob=order_move_prob,
+        )
+        child = sample.child
+        n_changes = sample.n_requested_changes
+        chain_names = sample.effective_mutators
+        changes = sample.changes
+
+        if _is_render_identity(space, origin, child, prompts_with_rules):
+            identity_retries += 1
+            log(f"\n⏭️  Iteration {budget_iter}/{max_iterations} — identity sample "
+                f"(n_changes={n_changes}, all draws no-ops) — no evaluation; "
+                f"retry {identity_retries}/{identity_retry_limit}")
+            for name in sample.attempted_mutators:
                 mutator_stats[name]["applications"] += 1
-            _emit_record(iter_record_fn, i + 1, "random_baseline", parent=None, child=current,
-                         move_type="mutate", rule_id=rid, chain_names=chain_names, agg=None,
-                         accepted=False, identity=True, gene_depth=current.gene_depth(rid),
-                         n_reused=0, n_rerun=0, objective_mode=objective_mode)
+            _emit_record(iter_record_fn, budget_iter, "random_search", parent=origin, child=origin,
+                         move_type="sample", rule_id=None, chain_names=chain_names, agg=None,
+                         accepted=False, identity=True, gene_depth=0,
+                         n_reused=0, n_rerun=0, phase="random", n_changes=n_changes,
+                         attempt=attempt_count, attempt_in_iter=attempt_in_iter,
+                         budget_consumed=False,
+                         attempted_operators=sample.attempted_operators,
+                         attempted_mutators=sample.attempted_mutators,
+                         n_attempted_changes=sample.n_attempted_changes,
+                         n_effective_changes=sample.n_effective_changes)
+            if identity_retries >= identity_retry_limit:
+                raise IdentityRetryLimitExceeded(
+                    "random-search identity retry limit exceeded for evaluation "
+                    f"{budget_iter} after {identity_retries} attempts"
+                )
             continue
 
-        child = space.stamp(current.with_gene_from_original(rid, new_text, chain_names))
+        identity_retries = 0
+        # Observational quality validation of every changed gene.
+        validation_metadata: dict = _validate_genes(validate_move_fn, space, origin, child)
 
-        # Optional quality validation (observational). Random re-derives from the
-        # ORIGINAL, so the validated parent text is the original rule.
-        validation_metadata: dict = {}
-        if validate_move_fn is not None:
-            validation_metadata = validate_move_fn(
-                rid, space.originals[rid], new_text, chain_names, changes,
-            )
-
-        log(f"\n🎲 Iteration {i+1}/{max_iterations} — rule="
-            f"{rid.replace('codeguard-', 'cg-')} n={n} chain={'+'.join(chain_names)} "
+        log(f"\n🎲 Iteration {budget_iter}/{max_iterations} — sample n_changes={n_changes} "
+            f"chain={'+'.join(chain_names) or '-'} "
             f"mutated_genes={len(child.mutated_rule_ids())}")
         try:
-            agg, _results, n_reused, n_rerun = evaluate_chromosome_fn(child, f"rand_iter{i+1:04d}")
+            agg, _results, n_reused, n_rerun = evaluate_chromosome_fn(
+                child, f"rand_iter{budget_iter:04d}"
+            )
         except WallTimeStop:
             log(f"\n⏹️  Pre-timeout mid-eval — stopping after {last_completed} iterations")
             break
         except Exception as e:  # noqa: BLE001
             if "rate_limit" in str(e).lower() or "429" in str(e) or "413" in str(e):
-                log(f"\n⚠️  Rate limit hit at random iteration {i+1}: {e}")
+                log(f"\n⚠️  Rate limit hit at random iteration {budget_iter}: {e}")
                 rate_limit_hit = True
                 break
             raise
 
-        child.f1, child.f2, child.f3 = _objectives(agg, objective_mode)
+        child.f1, child.f2, child.f3 = _objectives(agg)
         child.fitness = agg
-        current = child  # carry forward — always persisted
 
         f1_advance = child.f1 > 0.0
-        for name in chain_names:
+        for name in sample.attempted_mutators:
             mutator_stats[name]["applications"] += 1
             if f1_advance:
                 mutator_stats[name]["applications_f1_advancing"] += 1
 
-        if best_fitness is None or child.f1 > best.f1:
+        if child.f1 > best.f1:
             best, best_fitness = child, agg
 
         if save_move_fn is not None:
-            save_move_fn(iteration=i + 1, child=child, space=space, move_type="mutate",
-                         rule_id=rid, chain_names=chain_names, changes=changes,
+            save_move_fn(iteration=budget_iter, child=child, space=space, move_type="sample",
+                         rule_id=None, chain_names=chain_names, changes=changes,
                          validation_metadata=validation_metadata, accepted=True)
 
         iterations.append(iteration_result_factory(
-            iteration=i, rule_text=f"[random: {child.cid}]", aggregated_fitness=agg,
+            iteration=evaluated_count, rule_text=f"[random: {child.cid}]", aggregated_fitness=agg,
             individual_results=[], is_improvement=True, mutation_changes=changes,
             validation_metadata=validation_metadata,
         ))
-        _emit_record(iter_record_fn, i + 1, "random_baseline", parent=None, child=child,
-                     move_type="mutate", rule_id=rid, chain_names=chain_names, agg=agg,
-                     accepted=True, identity=False, gene_depth=child.gene_depth(rid),
+        _emit_record(iter_record_fn, budget_iter, "random_search", parent=origin, child=child,
+                     move_type="sample", rule_id=None, chain_names=chain_names, agg=agg,
+                     accepted=True, identity=False,
+                     gene_depth=max((child.gene_depth(r) for r in child.mutated_rule_ids()),
+                                    default=0),
                      n_reused=n_reused, n_rerun=n_rerun, validation_metadata=validation_metadata,
-                     objective_mode=objective_mode)
-        last_completed = i + 1
+                     phase="random", n_changes=n_changes, attempt=attempt_count,
+                     attempt_in_iter=attempt_in_iter, budget_consumed=True,
+                     attempted_operators=sample.attempted_operators,
+                     attempted_mutators=sample.attempted_mutators,
+                     n_attempted_changes=sample.n_attempted_changes,
+                     n_effective_changes=sample.n_effective_changes)
+        evaluated_count += 1
+        last_completed = evaluated_count
 
-    # best includes the origin floor (f1 >= 0): if no walk step beat baseline,
+    # best includes the origin floor (f1 >= 0): if no sample beat baseline,
     # report the origin.
     if best.f1 < origin.f1:
         best, best_fitness = origin, origin.fitness
@@ -684,15 +1070,23 @@ def _emit_record(
     iter_record_fn, iteration, strategy, parent, child, move_type, rule_id, chain_names,
     agg, accepted, identity, gene_depth, n_reused, n_rerun,
     eligible: int = 0, restarts: list | None = None, parent_f1: float | None = None,
-    validation_metadata: dict | None = None, objective_mode: str = "divergence",
+    validation_metadata: dict | None = None, phase: str = "ea",
+    n_changes: int | None = None,
+    attempt: int | None = None,
+    attempt_in_iter: int = 1,
+    budget_consumed: bool = True,
+    archive_admission: str | None = None,
+    attempted_operators: list[str] | None = None,
+    attempted_mutators: list[str] | None = None,
+    n_attempted_changes: int | None = None,
+    n_effective_changes: int | None = None,
 ):
     if iter_record_fn is None:
         return
-    # f1/f2/f3 are the objectives the archive actually used (mode-mapped), so the
-    # front analysis matches the search. The raw component metrics are recorded
-    # alongside regardless of mode, so the two objective sets stay cross-comparable.
+    # f1/f2/f3 are the conservative archive objectives; the divergence components
+    # are recorded alongside as diagnostics so older analyses stay comparable.
     if agg is not None:
-        f1, f2, f3 = _objectives(agg, objective_mode)
+        f1, f2, f3 = _objectives(agg)
         prop_div = agg.proportion_divergent
         cond_div = agg.conditional_mean_divergence
         fidelity = agg.rule_fidelity
@@ -703,19 +1097,33 @@ def _emit_record(
     p_f1 = parent_f1 if parent_f1 is not None else (parent.f1 if parent is not None else None)
     rec = {
         "iter": iteration,
+        "attempt": attempt if attempt is not None else iteration,
+        "attempt_in_iter": attempt_in_iter,
+        "budget_consumed": budget_consumed,
         "timestamp": _utcnow(),
         "strategy": strategy,
+        "phase": phase,
         "chromosome_id": child.cid if child is not None else None,
         "parent_chromosome_id": (parent.cid if parent is not None else None),
         "move_type": move_type,
         "rule_id": rule_id,
         "mutation_chain": list(chain_names),
         "chain_length": len(chain_names),
+        "n_changes": n_changes,
+        "n_requested_changes": n_changes,
+        "n_attempted_changes": n_attempted_changes,
+        "n_effective_changes": n_effective_changes,
+        "attempted_operators": list(attempted_operators or []),
+        "attempted_mutators": list(attempted_mutators or []),
         "mutation_identity": identity,
         "mutated_rule_ids": sorted(child.mutated_rule_ids()) if child is not None else [],
+        "priority_rule_ids": sorted(child.order_priority) if child is not None else [],
+        "priority_offset_count": len(child.order_priority) if child is not None else 0,
         "gene_depth": gene_depth,
-        "objective_mode": objective_mode,
+        "objective_mode": "conservative",
+        "archive_admission": archive_admission,
         "f1": f1, "f2": f2, "f3": f3,
+        "security_neutral": bool(f1 is not None and abs(f1) <= 1e-9),
         "proportion_divergent": prop_div,
         "conditional_mean_divergence": cond_div,
         "rule_fidelity": fidelity,
@@ -726,7 +1134,7 @@ def _emit_record(
         "n_prompts_reused": n_reused,
         "validation_metadata": validation_metadata or {},
         "selection_meta": (
-            {} if strategy == "random_baseline" else {
+            {} if strategy == "random_search" else {
                 "parent_f1": p_f1,
                 "n_eligible_rules": eligible,
                 "restarts_this_iter": restarts or [],
@@ -744,7 +1152,8 @@ def _log_ea_summary(log, archive, mutator_stats, restart_reason_counts, best):
         f"restarts={len(archive.restart_history)}")
     log(f"   best: f1={best.f1:+.2f} f2={best.f2:.3f} f3={best.f3:.3f} "
         f"mutated={sorted(best.mutated_rule_ids())} cid={best.cid}")
-    log("\n🧬  Mutator effectiveness (last-mutator credit):")
+    log("\n🧬  Mutator effectiveness (local moves: last-mutator credit; "
+        "sampler children: shared credit):")
     for name, s in sorted(mutator_stats.items(), key=lambda kv: -kv[1]["archive_adds"]):
         att, ins = s["attempts"], s["archive_adds"]
         rate = (100.0 * ins / att) if att else 0.0
@@ -754,10 +1163,10 @@ def _log_ea_summary(log, archive, mutator_stats, restart_reason_counts, best):
 
 def _log_random_summary(log, mutator_stats, best):
     sep = "═" * 80
-    log(f"\n{sep}\n📊  Random-walk summary\n{sep}")
+    log(f"\n{sep}\n📊  Random-search summary\n{sep}")
     log(f"   best: f1={best.f1:+.2f} f2={best.f2:.3f} f3={best.f3:.3f} "
         f"mutated={sorted(best.mutated_rule_ids())} cid={best.cid}")
-    log("\n🎲  Mutator applications (whole-chain credit):")
+    log("\n🎲  Mutator applications (whole-sample credit):")
     for name, s in sorted(mutator_stats.items(), key=lambda kv: -kv[1]["applications"]):
         apps, adv = s["applications"], s["applications_f1_advancing"]
         rate = (100.0 * adv / apps) if apps else 0.0
