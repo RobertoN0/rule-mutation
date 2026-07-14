@@ -13,7 +13,7 @@ toolkit (``loaders.py`` / ``stats.py``) can read:
                                      (+ paired effect vs --baseline-ref)
     intermediate/<condtag>_seed<NNNN>.jsonl
                                      per-prompt records WITH generated_code
-                                     (canonical HillClimber._build_intermediate_record schema)
+                                     (canonical ExperimentEngine._build_intermediate_record schema)
 
 Single-condition selection (one condition per job, to keep jobs short):
   * ``--condition norules``  -> uses ``--norules-map``
@@ -47,14 +47,14 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from scripts.experiments.run_with_rules_map import (  # noqa: E402
+from scripts.experiments.run_experiment import (  # noqa: E402
     load_prompts_with_rules, create_rule_loader, RULES_DIR,
 )
 from scripts.analyze import stats as S  # noqa: E402
 from src.llm_backends import LLMConfig  # noqa: E402
 from src.llm_backends.delftblue_local_backend import DelftBlueLocalBackend  # noqa: E402
 from src.mutation.base import Mutator, MutationResult  # noqa: E402
-from src.optimizer.hill_climber import HillClimber, HillClimbConfig  # noqa: E402
+from src.optimizer.engine import ExperimentEngine, SearchConfig  # noqa: E402
 from src.optimizer.chromosome import RuleSetSpace  # noqa: E402
 from src.evaluation.composite_fitness import CompositeFitnessEvaluator  # noqa: E402
 from src.evaluation.semgrep_runner import configure_semgrep  # noqa: E402
@@ -65,7 +65,7 @@ METRICS = ("raw_findings", "vulnerable_cases", "weighted_fitness")
 class _NoopMutator(Mutator):
     """Identity mutator — the baseline harness only evaluates the origin
     chromosome, so no mutation is ever applied; this just satisfies the
-    HillClimber's required mutator pool."""
+    ExperimentEngine's required mutator pool."""
 
     @property
     def name(self) -> str:
@@ -77,7 +77,7 @@ class _NoopMutator(Mutator):
 
 
 def _rule_short(rule_id: str) -> str:
-    """rule_id → mutated_rules file stem (mirrors HillClimber persistence)."""
+    """rule_id → mutated_rules file stem (mirrors ExperimentEngine persistence)."""
     return rule_id.replace("codeguard-", "cg-")
 
 
@@ -149,7 +149,11 @@ def _load_replicates(run_dir: Path, condition: str | None = None) -> list[dict]:
     path = _replicates_path(run_dir)
     if not path.exists():
         return []
-    recs = [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
+    recs = [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
     if condition is not None:
         recs = [r for r in recs if r.get("condition") == condition]
     return recs
@@ -384,7 +388,8 @@ def main() -> None:
     )
     backend = DelftBlueLocalBackend(llm_config)
     if not backend.is_available():
-        print("❌ Backend unavailable (model not cached / no CUDA)"); sys.exit(1)
+        print("❌ Backend unavailable (model not cached / no CUDA)")
+        sys.exit(1)
     print("   ✅ Model ready", flush=True)
 
     rule_loader = create_rule_loader(RULES_DIR)
@@ -427,9 +432,9 @@ def main() -> None:
             if _set_seed is not None:
                 _set_seed(seed)
             iter_id = f"{condtag}_seed{seed:04d}"
-            hc = HillClimber(
+            hc = ExperimentEngine(
                 backend, _NoopMutator(),
-                config=HillClimbConfig(
+                config=SearchConfig(
                     max_iterations=0, output_dir=args.output_dir, verbose=False,
                     save_intermediate=False, enable_validation=False,
                     enable_eval_cache=False,
@@ -462,7 +467,8 @@ def main() -> None:
                 "intermediate_file": f"intermediate/{iter_id}.jsonl",
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
-            out.write(json.dumps(rec) + "\n"); out.flush()
+            out.write(json.dumps(rec) + "\n")
+            out.flush()
             n_written += 1
             print(f"   [{condtag} seed{seed}] raw={rec['raw_findings']} "
                   f"vuln={rec['vulnerable_cases']}/{rec['n_cases']} "

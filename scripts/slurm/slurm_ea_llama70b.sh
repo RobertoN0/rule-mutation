@@ -15,7 +15,7 @@
 #SBATCH --signal=B:USR1@300
 
 #############################################################################
-# SBST Experiment: (1+1) EA + Pareto archive OR random_baseline.
+# SBST Experiment: (1+1) EA (random init + injection) OR i.i.d. random_search.
 #
 # MODEL: meta-llama/Llama-3.3-70B-Instruct, 4-bit NF4 quantization.
 #   70B-4bit needs ~35 GB weights + KV cache → fits on ONE A100 80GB.
@@ -28,7 +28,7 @@
 #
 # Mirrors scripts/slurm/slurm_ea_qwen32b.sh; only the model, default
 # quantization (4bit) and compute dtype (bf16) differ. OPTIMIZER ∈ {ea,
-# random_baseline}.
+# random_search}.
 #
 # Usage:
 #   # Smoke test FIRST — 2 cases, 5 iters (validates load + a few iterations)
@@ -50,7 +50,7 @@
 #            scripts/slurm/slurm_ea_llama70b.sh
 #
 #   # Pure random baseline for ablation — python
-#   OPTIMIZER=random_baseline N_CASES=25 N_ITERATIONS=200 LANGUAGES=python SELECTION=random \
+#   OPTIMIZER=random_search N_CASES=25 N_ITERATIONS=200 LANGUAGES=python SELECTION=random \
 #     sbatch --time=18:00:00 --job-name="rand_llama_python_200" \
 #            scripts/slurm/slurm_ea_llama70b.sh
 #
@@ -61,31 +61,41 @@
 
 set -e
 
-# ─────── Optimizer (new) ────────────────────────────────────────────────────
-OPTIMIZER=${OPTIMIZER:-ea}                # "ea" | "random_baseline"
-ARCHIVE_CAP=${ARCHIVE_CAP:-6}             # Pareto archive size per rule (EA)
+# ─────── Optimizer ───────────────────────────────────────────────────────────
+OPTIMIZER=${OPTIMIZER:-ea}                # "ea" | "random_search"
+ARCHIVE_CAP=${ARCHIVE_CAP:-6}             # Pareto archive size (EA)
 RESTART_H=${RESTART_H:-8}                 # stagnation threshold (EA)
-MAX_DEPTH_EA=${MAX_DEPTH_EA:-4}           # per-entry depth cap (EA)
-MAX_MUTATIONS_PER_ITER=${MAX_MUTATIONS_PER_ITER:-4}  # chain length K (random_baseline)
+ARCHIVE_ADMISSION=${ARCHIVE_ADMISSION:-neutral_drift}  # neutral_drift | strict_repair
+MAX_DEPTH=${MAX_DEPTH:-4}                 # per-rule stacked-mutation depth cap (both arms)
+RANDOM_MAX_CHANGES=${RANDOM_MAX_CHANGES:-10}  # sampler K: n_changes in [1,K]
+EA_N_MUTATIONS=${EA_N_MUTATIONS:-1}       # EA local move chain cap (1 = canonical step)
+EA_INIT_SAMPLES=${EA_INIT_SAMPLES:-10}    # initial random samples offered to the archive
+EA_INJECTION_EVERY=${EA_INJECTION_EVERY:-10}  # inject a random sample every N EA iters (0=off)
+EA_MOVE=${EA_MOVE:-local}                 # "local" | "random_builder" (ablation)
+ORDER_MOVE_WEIGHT=${ORDER_MOVE_WEIGHT:-0.1}   # rule-order move probability
+EA_ORIGIN_PARENT=${EA_ORIGIN_PARENT:-true}    # origin sampleable as EA parent (false=ablate)
 
-# ─────── Standard config (unchanged) ────────────────────────────────────────
+# ─────── Standard config ─────────────────────────────────────────────────────
 N_CASES=${N_CASES:-16}
 N_ITERATIONS=${N_ITERATIONS:-10}
 QUANTIZATION=${QUANTIZATION:-4bit}        # 70B fits on one 80GB A100 only at 4bit
 BNB_COMPUTE_DTYPE=${BNB_COMPUTE_DTYPE:-bfloat16}  # Llama-3.3 is bf16-native
+TEMPERATURE=${TEMPERATURE:-0.0}
 SEED=${SEED:-42}
 SELECTION=${SELECTION:-first}
 LANGUAGES=${LANGUAGES:-}
 SEMGREP_RULESET=${SEMGREP_RULESET:-/scratch/$USER/semgrep-rules/security-audit}
 SEMGREP_TIMEOUT_SECONDS=${SEMGREP_TIMEOUT_SECONDS:-180}
 SEMGREP_JOBS=${SEMGREP_JOBS:-4}
-# Mutator pool: the full 8-mutator set. EA and random_baseline do their own
+# Mutator pool: the full 8-mutator set. EA and random_search do their own
 # constrained random selection over this pool (no pool-level strategy).
 MUTATORS=${MUTATORS:-"synonym_replacement add_random_word verb_weakening negation_injection voice_change paraphrase section_reorder_shuffle section_reorder_degrade"}
-ENABLE_VALIDATION=${ENABLE_VALIDATION:-0}
+# Validation default ON: the f2 rule-fidelity objective is SBERT-based.
+ENABLE_VALIDATION=${ENABLE_VALIDATION:-1}
 ENABLE_PERPLEXITY=${ENABLE_PERPLEXITY:-0}
-MUTATION_MAX_RETRIES=${MUTATION_MAX_RETRIES:-2}
 ENABLE_EVAL_CACHE=${ENABLE_EVAL_CACHE:-1}
+# Optimization direction: "minimize" (REPAIR: fewer vulns, default) | "maximize".
+OBJECTIVE_DIRECTION=${OBJECTIVE_DIRECTION:-minimize}
 
 MODEL_ID="meta-llama/Llama-3.3-70B-Instruct"
 # Reusing the Qwen-generated retrieval map for now (same prompts+rules; only the
@@ -93,13 +103,13 @@ MODEL_ID="meta-llama/Llama-3.3-70B-Instruct"
 RULES_MAP=${RULES_MAP:-"/home/rnegro/thesis/rule-mutation/rule_maps/map_qwen32b_python_java.json"}
 
 # Validate OPTIMIZER value
-if [ "$OPTIMIZER" != "ea" ] && [ "$OPTIMIZER" != "random_baseline" ]; then
-    echo "❌ ERROR: OPTIMIZER must be 'ea' or 'random_baseline' (got: $OPTIMIZER)."
+if [ "$OPTIMIZER" != "ea" ] && [ "$OPTIMIZER" != "random_search" ]; then
+    echo "❌ ERROR: OPTIMIZER must be 'ea' or 'random_search' (got: $OPTIMIZER)."
     exit 1
 fi
 
 echo "=========================================================================="
-echo "SBST: (1+1) EA / random_baseline run with Llama-3.3-70B-Instruct (4bit)"
+echo "SBST: (1+1) EA / random_search run with Llama-3.3-70B-Instruct (4bit)"
 echo "=========================================================================="
 echo "Started: $(date)"
 echo "Job ID: $SLURM_JOB_ID"
@@ -109,17 +119,23 @@ echo ""
 echo "Optimizer configuration:"
 echo "  Optimizer:       $OPTIMIZER"
 if [ "$OPTIMIZER" = "ea" ]; then
+    echo "  EA move:         $EA_MOVE (chain<=$EA_N_MUTATIONS)"
+    echo "  Init samples:    $EA_INIT_SAMPLES"
+    echo "  Inject every:    $EA_INJECTION_EVERY"
     echo "  Archive cap:     $ARCHIVE_CAP"
     echo "  Restart h:       $RESTART_H"
-    echo "  Max depth (EA):  $MAX_DEPTH_EA"
-else
-    echo "  Max chain K:     $MAX_MUTATIONS_PER_ITER"
+    echo "  Admission:       $ARCHIVE_ADMISSION"
+    echo "  Origin parent:   $EA_ORIGIN_PARENT"
 fi
+echo "  Max depth:       $MAX_DEPTH"
+echo "  Sampler K:       $RANDOM_MAX_CHANGES (n_changes in [1,K])"
+echo "  Order weight:    $ORDER_MOVE_WEIGHT"
 echo ""
 echo "Run configuration:"
 echo "  Model:           $MODEL_ID"
 echo "  Quantization:    $QUANTIZATION"
 echo "  BnB compute:     $BNB_COMPUTE_DTYPE"
+echo "  Temperature:     $TEMPERATURE"
 echo "  Test cases:      $N_CASES"
 echo "  Iterations:      $N_ITERATIONS"
 echo "  Seed:            $SEED"
@@ -201,7 +217,7 @@ fi
 # Build optional validation flag (and optional perplexity extension)
 VALIDATION_FLAG=""
 if [ "$ENABLE_VALIDATION" = "1" ]; then
-    VALIDATION_FLAG="--enable-validation --mutation-max-retries $MUTATION_MAX_RETRIES"
+    VALIDATION_FLAG="--enable-validation"
     if [ "$ENABLE_PERPLEXITY" = "1" ]; then
         VALIDATION_FLAG="$VALIDATION_FLAG --enable-perplexity"
     fi
@@ -213,11 +229,17 @@ if [ "$ENABLE_EVAL_CACHE" = "0" ]; then
     NO_EVAL_CACHE_FLAG="--no-eval-cache"
 fi
 
+# Origin-as-parent flag (EA only; on by default, set EA_ORIGIN_PARENT=false to ablate)
+ORIGIN_PARENT_FLAG="--ea-origin-parent"
+if [ "$EA_ORIGIN_PARENT" = "false" ]; then
+    ORIGIN_PARENT_FLAG="--no-ea-origin-parent"
+fi
+
 # Run in the background so the batch shell stays responsive to SIGUSR1. The
 # trap forwards SLURM's pre-timeout signal to Python, which breaks the optimizer
 # loop and saves final results before the wall-time SIGKILL. The while-loop
 # re-issues `wait` because `wait` returns early when interrupted by the trap.
-python scripts/experiments/run_with_rules_map.py \
+python scripts/experiments/run_experiment.py \
     --rules-map "$RULES_MAP" \
     --n-cases "$N_CASES" \
     $LANG_ARG \
@@ -227,15 +249,24 @@ python scripts/experiments/run_with_rules_map.py \
     --backend delftblue \
     --quantization "$QUANTIZATION" \
     --bnb-compute-dtype "$BNB_COMPUTE_DTYPE" \
+    --temperature "$TEMPERATURE" \
     --seed "$SEED" \
     --mutators $MUTATORS \
     --optimizer "$OPTIMIZER" \
     --archive-cap "$ARCHIVE_CAP" \
     --restart-h "$RESTART_H" \
-    --max-depth-ea "$MAX_DEPTH_EA" \
-    --max-mutations-per-iter "$MAX_MUTATIONS_PER_ITER" \
+    --archive-admission "$ARCHIVE_ADMISSION" \
+    --max-depth "$MAX_DEPTH" \
+    --random-max-changes "$RANDOM_MAX_CHANGES" \
+    --ea-n-mutations "$EA_N_MUTATIONS" \
+    --ea-init-samples "$EA_INIT_SAMPLES" \
+    --ea-injection-every "$EA_INJECTION_EVERY" \
+    --ea-move "$EA_MOVE" \
+    --order-move-weight "$ORDER_MOVE_WEIGHT" \
+    $ORIGIN_PARENT_FLAG \
     $VALIDATION_FLAG \
     $NO_EVAL_CACHE_FLAG \
+    --objective-direction "$OBJECTIVE_DIRECTION" \
     --semgrep-config "$SEMGREP_RULESET" \
     --semgrep-timeout-seconds "$SEMGREP_TIMEOUT_SECONDS" \
     --semgrep-jobs "$SEMGREP_JOBS" \
