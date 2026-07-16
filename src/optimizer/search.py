@@ -363,6 +363,29 @@ def build_random_chromosome(
     )
 
 
+# Moves built by the shared sampler: they touch many rules at once, so a flat
+# rule=/mutator=/depth= triple would misreport them as one chain on one rule.
+_SAMPLE_MOVE_TYPES = frozenset({"init_random", "injection_random", "random_builder"})
+
+
+def _count_order_ops(attempted_operators: list[str]) -> int:
+    """Order moves among a proposal's attempted operators (``order:<op>:<rid>``)."""
+    return sum(1 for op in attempted_operators if op.startswith("order:"))
+
+
+def _sample_detail(
+    n_requested: int | None,
+    n_effective: int | None,
+    n_rules_changed: int,
+    n_order_moves: int,
+) -> str:
+    """Log fragment for a sampler-built proposal, in sampler accounting terms."""
+    return (
+        f"random sample requested={n_requested} effective={n_effective} "
+        f"rules_changed={n_rules_changed} order_moves={n_order_moves}"
+    )
+
+
 def _validate_genes(
     validate_move_fn: Callable[..., dict] | None,
     space: RuleSetSpace,
@@ -610,12 +633,22 @@ def run_ea(
             (child.gene_depth(r) for r in child.mutated_rule_ids()), default=0
         )
 
+        if move_type in _SAMPLE_MOVE_TYPES:
+            move_detail = _sample_detail(
+                n_changes, n_effective_changes, len(child.mutated_rule_ids()),
+                _count_order_ops(attempted_operators),
+            )
+        else:
+            move_detail = (
+                f"local {move_type} rule={(rule_id or '-').replace('codeguard-', 'cg-')} "
+                f"mutator={'+'.join(chain_names) or '-'} depth={gene_depth}"
+            )
+
         # ---- 3. identity attempts are visible but do NOT consume budget -----
         if is_identity:
             identity_retries += 1
-            log(f"\n⏭️  Iteration {budget_iter}/{max_iterations} [{phase}] — identity {move_type} "
-                f"rule={(rule_id or '-').replace('codeguard-', 'cg-')} "
-                f"mutator={'+'.join(chain_names) or '-'} "
+            log(f"\n⏭️  Iteration {budget_iter}/{max_iterations} [{phase}] — identity: "
+                f"{move_detail} attempt={attempt_count} "
                 f"— no evaluation; retry {identity_retries}/{identity_retry_limit}")
             _emit_record(iter_record_fn, budget_iter, "ea", parent, child=parent, move_type=move_type,
                          rule_id=rule_id, chain_names=chain_names, agg=None, accepted=False,
@@ -639,11 +672,16 @@ def run_ea(
         space.stamp(child)
 
         # ---- 4. header → validation → evaluate ------------------------------
-        log(f"\n🧬 Iteration {budget_iter}/{max_iterations} [{phase}] — {move_type} "
-            f"rule={(rule_id or '-').replace('codeguard-', 'cg-')} "
-            f"mutator={'+'.join(chain_names) or '-'} depth={gene_depth} "
-            f"parent_f1={parent.f1:+.2f} front={len(archive)}"
-            + (f" n_changes={n_changes}" if n_changes is not None else ""))
+        header = f"\n🧬 Iteration {budget_iter}/{max_iterations} [{phase}] — {move_detail}"
+        if phase == "ea":
+            # init/injection always sample from the origin; only in the EA phase is
+            # the parent a choice, and origin-vs-front is what ea_origin_parent turns.
+            parent_label = "ORIGIN" if parent.cid == archive.origin.cid else (parent.cid or "-")
+            header += (
+                f" | parent={parent_label} parent_f1={parent.f1:+.2f} "
+                f"parent_nmut={len(parent.mutated_rule_ids())} front={len(archive)}"
+            )
+        log(header)
 
         # Observational quality validation of every changed gene (never refuses).
         validation_metadata: dict = _validate_genes(validate_move_fn, space, parent, child)
@@ -965,9 +1003,14 @@ def run_random_search(
 
         if _is_render_identity(space, origin, child, prompts_with_rules):
             identity_retries += 1
-            log(f"\n⏭️  Iteration {budget_iter}/{max_iterations} — identity sample "
-                f"(n_changes={n_changes}, all draws no-ops) — no evaluation; "
-                f"retry {identity_retries}/{identity_retry_limit}")
+            # effective>0 with an identity render means the draws cancelled out
+            # (e.g. a mutator reproduced the original text), not that all were no-ops.
+            log(f"\n⏭️  Iteration {budget_iter}/{max_iterations} [random] — identity: "
+                + _sample_detail(n_changes, sample.n_effective_changes,
+                                 len(child.mutated_rule_ids()),
+                                 _count_order_ops(sample.attempted_operators))
+                + f" attempt={attempt_count} — renders as the origin; no evaluation; "
+                  f"retry {identity_retries}/{identity_retry_limit}")
             for name in sample.attempted_mutators:
                 mutator_stats[name]["applications"] += 1
             _emit_record(iter_record_fn, budget_iter, "random_search", parent=origin, child=origin,
@@ -988,12 +1031,14 @@ def run_random_search(
             continue
 
         identity_retries = 0
+        # ---- header → validation → evaluate ---------------------------------
+        log(f"\n🎲 Iteration {budget_iter}/{max_iterations} [random] — "
+            + _sample_detail(n_changes, sample.n_effective_changes,
+                             len(child.mutated_rule_ids()),
+                             _count_order_ops(sample.attempted_operators)))
+
         # Observational quality validation of every changed gene.
         validation_metadata: dict = _validate_genes(validate_move_fn, space, origin, child)
-
-        log(f"\n🎲 Iteration {budget_iter}/{max_iterations} — sample n_changes={n_changes} "
-            f"chain={'+'.join(chain_names) or '-'} "
-            f"mutated_genes={len(child.mutated_rule_ids())}")
         try:
             agg, _results, n_reused, n_rerun = evaluate_chromosome_fn(
                 child, f"rand_iter{budget_iter:04d}"
