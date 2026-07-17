@@ -1,18 +1,21 @@
 """
 Composite fitness evaluator for the SBST rule-set search.
 
-Computes two signals per test case, which the (1+1) EA aggregates into the
-three objectives of the full-chromosome Pareto archive (see ``src/optimizer/search.py`` /
-``chromosome``):
+Computes two per-test-case signals:
 
-    semgrep_delta   : float   — semgrep_score - baseline_score (effectiveness)
+    semgrep_delta   : float   — semgrep_score - baseline_score (the security signal)
     code_divergence : float   — 1 - CodeBLEU(generated, reference)  [0, 1]
 
-``semgrep_delta`` is the effectiveness signal; ``code_divergence`` measures how
-much the mutation changed the LLM's actual code output.  The EA aggregates these
-across a rule's test cases into f1 = total semgrep delta, f2 = proportion of
-divergent cases, f3 = conditional mean divergence, and admits a candidate to the
-archive iff it is **not Pareto-dominated** on (f1, f2, f3). 
+``semgrep_delta`` is aggregated across a rule's test cases into the search's
+primary objective **f1** (total semgrep delta; negated under
+``objective_direction=minimize`` so higher f1 = fewer vulnerabilities).
+``code_divergence`` measures how much the mutation changed the LLM's actual code
+output and is **recorded as a diagnostic only — it is NOT a search objective**.
+The other two objectives are produced elsewhere, not here: **f2** = rule fidelity
+(mean SBERT similarity of the mutated rules, from the quality validator) and
+**f3** = −parsimony (count of mutated rules, from the chromosome). A candidate is
+admitted to the archive iff it is **not Pareto-dominated** on (f1, f2, f3)
+(see ``src/optimizer/search.py`` / ``chromosome.py``).
 
 Reference code
 --------------

@@ -5,7 +5,7 @@ agent retrieves for each CyberSecEval prompt.
 
 Anthropic-API variant of the retrieval step. The companion file
 `rule_retrieval_mapping_local.py` is the DelftBlue-local variant; both produce
-mappings in the same JSON shape that `scripts/experiments/run_with_rules_map.py`
+mappings in the same JSON shape that `scripts/experiments/run_experiment.py`
 can consume.
 
 The Claude tool-calling agent sees the same tools as the notebook's MCP server
@@ -684,7 +684,7 @@ def main() -> None:
     # ── Cost estimate ────────────────────────────────────────────────────
     est = estimate_cost(prompts, list_guidelines_text, model=args.model)
     print(f"\n{'=' * 60}")
-    print(f"💰 COST ESTIMATE (upper bound)")
+    print("💰 COST ESTIMATE (upper bound)")
     print(f"{'=' * 60}")
     print(f"   Prompts:              {est['num_prompts']:>10,}")
     print(f"   Avg prompt tokens:    {est['avg_prompt_tokens']:>10,}")
@@ -694,14 +694,14 @@ def main() -> None:
           f"(${est['price_in_mtok']}/MTok)")
     print(f"   Output cost:          ${est['cost_out']:>9.4f}  "
           f"(${est['price_out_mtok']}/MTok)")
-    print(f"   ─────────────────────────────────")
+    print("   ─────────────────────────────────")
     print(f"   TOTAL:                ${est['cost_total']:>9.4f}")
     print(f"{'=' * 60}")
 
     if args.dry_run:
         print("\n🛑 Dry run — not calling the API.")
         # Show a few example prompts
-        print(f"\nExample prompts (first 3):")
+        print("\nExample prompts (first 3):")
         for i, p in enumerate(prompts[:3]):
             print(f"  [{i}] {p['cwe_id']} ({p['language']}): "
                   f"{p['prompt'][:80]}…")
@@ -837,7 +837,7 @@ def main() -> None:
     # ── Summary ──────────────────────────────────────────────────────────
     meta = mapping["metadata"]
     print(f"\n{'=' * 70}")
-    print(f"🏁 RETRIEVAL MAPPING COMPLETE")
+    print("🏁 RETRIEVAL MAPPING COMPLETE")
     print(f"{'=' * 70}")
     print(f"   Model:                 {args.model}")
     print(f"   Prompts processed:     {meta['total_prompts']}")
@@ -849,13 +849,13 @@ def main() -> None:
     print(f"\n   📄 Mapping saved:      {out_path}")
     print(f"   📄 Progress file:      {progress_path}")
 
-    print(f"\n📊 Rule frequency (top 10):")
+    print("\n📊 Rule frequency (top 10):")
     for rule_id, count in list(mapping["rule_frequency"].items())[:10]:
         print(f"   {rule_id:<50} {count:>5}×")
 
     print(f"\n{'=' * 70}")
-    print(f"Next step: load this mapping in batch_experiment.py:")
-    print(f"  python batch_experiment.py --rule-map {out_path}")
+    print("Next step: use this mapping in the SBST pipeline:")
+    print(f"  python scripts/experiments/run_experiment.py --rules-map {out_path}")
     print(f"{'=' * 70}")
 
 

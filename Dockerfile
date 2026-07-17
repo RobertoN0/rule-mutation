@@ -19,8 +19,8 @@
 #     --env-file .env \
 #     -v "$(pwd)/results:/app/results" \
 #     codeguard-sbst:replication \
-#     python scripts/experiments/run_with_rules_map.py \
-#       --backend claude --optimizer random_baseline \
+#     python scripts/experiments/run_experiment.py \
+#       --backend claude --optimizer random_search \
 #       --rules-map rule_maps/map_qwen32b_python_java.json \
 #       --n-cases 2 --iterations 3 --languages python --seed 42 \
 #       --mutators synonym_replacement add_random_word verb_weakening \

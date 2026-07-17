@@ -7,10 +7,10 @@ This directory contains the core SBST framework modules for mutation-based secur
 ```
 src/
 ├── __init__.py
-├── llm_backends/           # LLM provider abstractions (Groq, OpenRouter, DelftBlue local)
+├── llm_backends/           # Claude, OpenAI, and DelftBlue-local providers
 │   ├── base.py             # LLMBackend ABC, LLMConfig, LLMResponse
-│   ├── groq_backend.py     # Groq implementation
-│   ├── openrouter_backend.py  # OpenRouter fallback
+│   ├── claude_backend.py   # Anthropic API implementation
+│   ├── openai_backend.py   # OpenAI API implementation
 │   └── delftblue_local_backend.py  # Local HF inference (FP16 / 4-bit)
 ├── mutation/               # Rule mutation strategies
 │   ├── base.py             # Mutator ABC, MutationResult
@@ -19,8 +19,10 @@ src/
 │   ├── semgrep_runner.py   # Semgrep integration
 │   ├── fitness.py          # Fitness calculation
 │   └── rule_mapping.py     # Per-prompt rule retrieval
-└── optimizer/              # Search algorithms
-    └── hill_climber.py     # HillClimber implementation
+└── optimizer/              # Search over whole rule-set chromosomes
+    ├── chromosome.py       # RuleSetChromosome/Space + ChromosomeArchive (Pareto)
+    ├── search.py           # run_ea (1+1 EA) + run_random_search
+    └── engine.py           # ExperimentEngine + SearchConfig (drives a run)
 ```
 
 ## Using as a Library
@@ -28,12 +30,10 @@ src/
 ### Set Up LLM Backend
 
 ```python
-from src.llm_backends import GroqBackend, LLMConfig
+from src.llm_backends import create_claude_backend
 
-backend = GroqBackend(LLMConfig(
-    model="llama-3.3-70b-versatile",
-    api_key="your_key_here",
-))
+# Reads ANTHROPIC_API_KEY from the environment.
+backend = create_claude_backend(model="claude-haiku-4-5")
 
 # DelftBlue local model (A100) - FP16 default
 from src.llm_backends import create_delftblue_local_backend
@@ -55,18 +55,22 @@ print(result.mutated)
 print(result.changes)  # List of mutations applied
 ```
 
-### Run Hill Climbing Optimization
+### Run a Search Experiment
 
-```python
-from src.optimizer import HillClimber, HillClimbConfig
-from src.mutation import create_mutator_pool
-
-config = HillClimbConfig(max_iterations=10)
-pool = create_mutator_pool(["synonym_replacement", "verb_weakening"])
-
-climber = HillClimber(backend, pool, config)
-result = climber.optimize_per_prompt_rules(prompts_with_rules=prompts_with_rules)
+```bash
+# The CLI constructs ExperimentEngine, loads the rule map, and persists the
+# schema-version-4 run artifacts. Validation is required because it feeds f2.
+python scripts/experiments/run_experiment.py \
+  --backend claude --optimizer ea --enable-validation \
+  --rules-map rule_maps/map_qwen32b_python_java.json \
+  --n-cases 2 --iterations 5 --languages python \
+  --mutators synonym_replacement verb_weakening \
+  --output-dir experiments/results/library_guide_smoke
 ```
+
+For programmatic use, the public optimizer types are `ExperimentEngine` and
+`SearchConfig`; both strategies are dispatched by `ExperimentEngine.run_search()`.
+See [`optimizer/README.md`](optimizer/README.md) for their algorithm contract.
 
 ## Per-Prompt Rule Mapping
 
@@ -93,7 +97,9 @@ enriched = enrich_prompts_with_rules(
 - **`MutationResult`**: Mutated rule text + list of changes applied
 - **`FitnessResult`**: Vulnerability counts (raw_count, weighted_score, error_count, warning_count)
 - **`TestPrompt`**: Security task (prompt, language, CWE)
-- **`HillClimbResult`**: Optimization outcome (best mutation, fitness trajectory)
+- **`RuleSetChromosome`**: Whole rule-set genotype (mutated rule alleles + order priorities)
+- **`ChromosomeArchive`**: Bounded Pareto front over f1/f2/f3 (EA only)
+- **`SearchResult`**: Best chromosome, fitness trajectory, and run totals
 
 ## Configuration
 

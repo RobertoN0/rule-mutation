@@ -27,7 +27,7 @@ cd rule-mutation
 uv sync --extra dev          # core + pytest/ruff for development
 
 # 4. Verify
-uv run pytest tests/unit/ -q     # should report "231 passed"
+uv run pytest tests/unit/ -q     # should report "230 passed"
 ```
 
 ### Dependency extras
@@ -128,11 +128,13 @@ the archive snapshots (EA), and the run summary. The exact fields are in
 ## How it works
 
 1. **Select** test prompts from CyberSecEval.
-2. **Map** relevant CodeGuard rules to each prompt via AI-based retrieval (pre-computed maps in `rule_maps/`).
+2. **Map** relevant CodeGuard rules to each prompt via AI-based retrieval (or use pre-computed maps in `rule_maps/`).
 3. **Mutate** rules in the chromosome with one of 8 semantics-preserving strategies.
 4. **Validate** mutation quality (SBERT similarity, instruction adherence, security-keyword retention).
 5. **Generate** code with the configured backend on the original vs. mutated rule — Qwen2.5-Coder-32B-Instruct on DelftBlue, or Claude / OpenAI locally.
-6. **Score** each prompt by Semgrep finding count + code-divergence via CodeBLEU.
+6. **Score** each prompt with Semgrep (and record CodeBLEU as a diagnostic), then
+   assemble whole-chromosome f1 vulnerability reduction, f2 mean SBERT rule
+   fidelity, and f3 −parsimony.
 7. **Optimize** with one of two interchangeable search strategies (`--optimizer`)
    over **full rule-set chromosomes** (per-gene rule alleles + a global rule-order gene),
    scored on the conservative objectives (f1 = vulnerability reduction, f2 = rule fidelity, f3 = −parsimony):
@@ -181,17 +183,27 @@ Experiments run on A100 GPU nodes with Qwen2.5-Coder-32B-Instruct loaded offline
 N_CASES=2 N_ITERATIONS=10 LANGUAGES=python OPTIMIZER=ea \
   sbatch --time=0:45:00 --job-name="ea_smoke" scripts/slurm/slurm_ea_qwen32b.sh
 
-# Multi-seed batch — EA vs random across seeds and languages
-for SEED in 1 7 123; do
+# Final repair batch — EA vs random over the FULL case sets (185 python /
+# 114 java), seeds 42 + 43. Runs are wall-time-bounded (SIGUSR1); N_ITERATIONS
+# is a high soft cap. EA_INIT_SAMPLES / EA_ORIGIN_PARENT are EA-only (the random
+# arm ignores them).
+declare -A NCASES=( [python]=185 [java]=114 )
+for SEED in 42 43; do
   for OPT in ea random_search; do
     for LANG in python java; do
-      SEED=$SEED OPTIMIZER=$OPT N_CASES=25 N_ITERATIONS=200 LANGUAGES=$LANG SELECTION=random \
-        sbatch --time=12:00:00 --job-name="${OPT}_${LANG}_s${SEED}" \
+      SEED=$SEED OPTIMIZER=$OPT LANGUAGES=$LANG N_CASES=${NCASES[$LANG]} \
+        N_ITERATIONS=200 EA_INIT_SAMPLES=6 EA_ORIGIN_PARENT=false \
+        ORDER_MOVE_WEIGHT=0.1 EA_INJECTION_EVERY=10 \
+        sbatch --time=6:00:00 --job-name="${OPT}_${LANG}_s${SEED}" \
                scripts/slurm/slurm_ea_qwen32b.sh
     done
   done
 done
 ```
+
+The archive/mutation knobs (`ARCHIVE_CAP=6`, `RESTART_H=8`, `MAX_DEPTH=4`,
+`RANDOM_MAX_CHANGES=10`, `EA_N_MUTATIONS=1`) keep their defaults; `--enable-validation`
+is on by default in the wrapper (feeds the f2 fidelity objective).
 
 Reproduce any run with `python scripts/experiments/rerun_from_config.py <run_dir>` (backend-aware: API → python entrypoint, DelftBlue → `sbatch`). See [WORKFLOW.md](WORKFLOW.md) for the full DelftBlue round-trip.
 
@@ -211,7 +223,7 @@ Reproduce any run with `python scripts/experiments/rerun_from_config.py <run_dir
 │   ├── experiments/       # run_experiment.py (entrypoint); rerun_from_config.py (reproducer)
 │   ├── slurm/             # slurm_ea_qwen32b.sh (EA / random) + slurm_rule_retrieval_local.sh
 │   └── analyze/           # analysis toolkit (WIP — being reworked for the repair design)
-├── tests/unit/            # 231 unit tests
+├── tests/unit/            # 230 unit tests
 ├── project-codeguard/     # CodeGuard security rule library (git submodule)
 ├── rule_maps/             # Pre-computed prompt → rule-ID retrieval maps
 ├── literature_review/     # Paper PDFs + INDEX_AND_LINKS.md + analysis docs

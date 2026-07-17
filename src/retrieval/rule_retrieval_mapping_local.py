@@ -10,7 +10,7 @@ uses a single-turn prompt with the guidelines list embedded directly.  This is
 functionally equivalent: the tool-calling loop always follows the same 2-step
 pattern (list -> select), so we skip the round-trip by providing the list upfront.
 
-Output format is compatible with run_with_rules_map.py --rules-map.
+Output format is compatible with run_experiment.py --rules-map.
 
 Prerequisites
 ─────────────
@@ -39,7 +39,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import re
 import sys
 import time
@@ -52,7 +51,7 @@ import yaml
 from datasets import load_dataset
 
 
-# ── Project root resolution (same pattern as run_with_rules_map.py) ─────────
+# ── Project root resolution (same pattern as run_experiment.py) ─────────────
 def _resolve_project_root() -> Path:
     """Resolve repository root by searching upward for src/ and scripts/ dirs."""
     this_file = Path(__file__).resolve()
@@ -503,7 +502,7 @@ def main() -> None:
 
     if args.dry_run:
         print("\nDry run -- not running inference.")
-        print(f"\nExample prompts (first 3):")
+        print("\nExample prompts (first 3):")
         for i, p in enumerate(prompts[:3]):
             print(f"  [{i}] {p['cwe_id']} ({p['language']}): "
                   f"{p['prompt'][:80]}...")
@@ -650,7 +649,7 @@ def main() -> None:
     # ── Summary ──────────────────────────────────────────────────────────
     meta = mapping["metadata"]
     print(f"\n{'=' * 70}")
-    print(f"RETRIEVAL MAPPING COMPLETE")
+    print("RETRIEVAL MAPPING COMPLETE")
     print(f"{'=' * 70}")
     print(f"   Model:                 {args.model}")
     print(f"   Quantization:          {args.quantization}")
@@ -666,13 +665,13 @@ def main() -> None:
     print(f"\n   Mapping saved: {out_path}")
     print(f"   Progress file: {progress_path}")
 
-    print(f"\nRule frequency (top 10):")
+    print("\nRule frequency (top 10):")
     for rule_id, count in list(mapping["rule_frequency"].items())[:10]:
         print(f"   {rule_id:<50} {count:>5}x")
 
     print(f"\n{'=' * 70}")
-    print(f"Next step: use this mapping in the SBST pipeline:")
-    print(f"  python scripts/experiments/run_with_rules_map.py --rules-map {out_path}")
+    print("Next step: use this mapping in the SBST pipeline:")
+    print(f"  python scripts/experiments/run_experiment.py --rules-map {out_path}")
     print(f"{'=' * 70}")
 
 

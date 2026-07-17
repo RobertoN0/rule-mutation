@@ -218,7 +218,7 @@ class ClaudeBackend(LLMBackend):
                         f"Anthropic model {self.config.model} not available: {e}"
                     )
                 # Overloaded (529) is transient on Anthropic's side — surface as rate-limit
-                # so the hill climber's existing retry/exit logic handles it.
+                # so the experiment runner's existing retry/exit logic handles it.
                 if isinstance(e, anthropic.APIStatusError) and getattr(e, "status_code", None) == 529:
                     raise RateLimitError(f"Anthropic overloaded (529): {e}")
 
@@ -238,6 +238,6 @@ def create_claude_backend(
     model: str = "claude-haiku-4-5",
     **kwargs: Any,
 ) -> ClaudeBackend:
-    """Convenience factory mirroring create_groq_backend / create_openrouter_backend."""
+    """Build a Claude backend from an :class:`LLMConfig`."""
     config = LLMConfig(model=model, **kwargs)
     return ClaudeBackend(config)

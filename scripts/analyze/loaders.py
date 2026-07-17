@@ -2,7 +2,7 @@
 Shared loaders + derivations for SBST experiment results (schema_version 2).
 
 Every analysis script reads a *run directory* produced by
-``scripts/experiments/run_with_rules_map.py``:
+``scripts/experiments/run_experiment.py``:
 
     run_config.json                  provenance + all CLI args
     hillclimb_summary_*.json         run-level totals + mutator_stats + cache stats
@@ -18,9 +18,8 @@ so it can be unit-tested without the plotting/stats extras.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterator
 
 
 # ---------------------------------------------------------------------------

@@ -70,7 +70,7 @@ class TestSemgrepDelta:
 class TestCodeDivergence:
 
     def test_reference_codes_mutable_after_init(self):
-        """reference_codes dict can be populated after construction (hill climber pattern)."""
+        """The engine can populate reference_codes after evaluator construction."""
         ev = _ev(reference_codes={})
         # Empty at first — code_divergence must be 0.0
         r_before = ev.evaluate(semgrep_score=5.0, baseline_score=5.0,
@@ -137,7 +137,6 @@ class TestCodeDivergence:
 class TestFallback:
 
     def test_codebleu_import_error_uses_token_bleu(self):
-        ev = _ev(reference_codes={"tc0": REF_CODE_PY})
         with patch("src.evaluation.composite_fitness.CompositeFitnessEvaluator._code_divergence",
                    wraps=lambda self, g, r: CompositeFitnessEvaluator._token_bleu_divergence(g, r)):
             pass  # just check the fallback path exists and is callable

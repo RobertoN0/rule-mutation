@@ -105,7 +105,7 @@ Owns the evaluation seam shared by both strategies. `run_search()`:
 `SearchConfig` key fields: `max_iterations` (evaluation budget; identities
 retry without consuming it), `optimizer` (`"ea"` default | `"random_search"`),
 `objective_direction` (`"minimize"` default = repair), `archive_cap` (6),
-`restart_h` (8), `archive_admission` (`"neutral_drift"` default | `"strict_repair"`),
+`restart_h` (8),
 `max_depth` (4), `random_max_changes` (10, the sampler's K), `ea_n_mutations`
 (1), `ea_init_samples` (10), `ea_injection_every` (10), `ea_move` (`"local"` |
 `"random_builder"`), `order_move_weight` (0.1), `ea_origin_parent` (True — the
@@ -119,7 +119,7 @@ decoding. Reported in `hillclimb_summary` as `eval_cache_stats`.
 
 #### `search.py` — the two runners (over full chromosomes)
 
-- `run_ea(...)` — the (1+1) EA over the single chromosome archive, with three phases: **init** (`ea_init_samples` random samples from the origin), **injection** (an origin-based random sample every `ea_injection_every` iterations), and **ea** (a local move on a sampled parent — one untried mutator on its current allele, or with weight `order_move_weight` a render-changing order bump). Offers each child by the `archive_admission` policy. Records `phase`, `attempt`/`budget_consumed`, `mutation_chain`, `chromosome_id`/`parent_chromosome_id`/`mutated_rule_ids`/`gene_depth`, and `n_requested/attempted/effective_changes`; `mutator_stats` use **last-mutator credit** for local moves. Identity proposals are logged and retried without consuming budget (guarded by an internal safety cap).
+- `run_ea(...)` — the (1+1) EA over the single chromosome archive. Phases: **init** (`ea_init_samples` random samples from the origin), **injection** (an origin-based random sample every `ea_injection_every` iterations), **ea** (a local move on a sampled parent — one untried mutator on its current allele, or with weight `order_move_weight` a render-changing order bump), and **restart** (after `restart_h` consecutive rejected ea-phase attempts the front is wiped and the next `ea_init_samples` iterations reseed it from fresh origin samples). Offers each child by standard Pareto dominance. Records `phase`, `attempt`/`budget_consumed`, `mutation_chain`, `chromosome_id`/`parent_chromosome_id`/`mutated_rule_ids`/`gene_depth`, and `n_requested/attempted/effective_changes`; `mutator_stats` use **last-mutator credit** for local moves. Identity proposals are logged and retried without consuming budget (guarded by an internal safety cap).
 - `run_random_search(...)` — the i.i.d. baseline. Every budgeted iteration draws an independent sample from the origin via `build_random_chromosome`, evaluates it, and records it; no archive, no carry-forward. Best = best-of-budget (origin floor); `mutator_stats` use **whole-sample credit** `{applications, applications_f1_advancing}`.
 - `build_random_chromosome(...)` — the one shared sampler (random search + EA init/injection): stacks `n ∈ [1, K]` changes on a copy of a base, returning requested/attempted/effective counts. `_choose_and_build_move` builds an EA local move (mutate/order/revert); `_apply_chain` applies mutators cumulatively.
 
@@ -136,9 +136,11 @@ rejects candidates dominated by the **origin** (always a virtual member, held
 aside and never evicted) or any front member, and duplicates by `chromosome_id`.
 On cap overflow it evicts **lexicographically by f1** (lowest f1 first, ties →
 f2+f3, then oldest; the just-added child is protected). On stagnation `restart`
-**re-opens exploration** (clears the exhausted-move sets) rather than wiping the
-front. By default the origin is also a sampleable parent (`ea_origin_parent`), so
-a minimal single-rule lineage can always start.
+**wipes the front** and the runner spends the next `ea_init_samples` evaluations
+reseeding it with fresh origin-based samples. An `"exhausted"` restart is
+different: it keeps the front and only clears tried-move sets. By default the
+origin is also a sampleable parent (`ea_origin_parent`), so a minimal single-rule
+lineage can always start.
 
 ---
 
@@ -205,7 +207,7 @@ a minimal single-rule lineage can always start.
   "n_effective_changes": 1,
   "mutation_identity": false,
   "mutated_rule_ids": ["codeguard-0-…"], "priority_rule_ids": [], "priority_offset_count": 0,
-  "objective_mode": "conservative", "archive_admission": "neutral_drift",
+  "objective_mode": "conservative",
   "f1": 0.0, "f2": 1.0, "f3": 0.0,         // conservative objectives (null if no candidate)
   "rule_fidelity": 1.0, "parsimony": 1,    // f2 source, −f3
   "proportion_divergent": 0.0, "conditional_mean_divergence": 0.0,  // recorded diagnostics (not objectives)
@@ -217,7 +219,7 @@ a minimal single-rule lineage can always start.
 ```
 
 **`archive_snapshots/iterNNNN.json`** — one **single chromosome archive**:
-top-level `{iter, schema_version, cap, restart_h, archive_admission, origin,
+top-level `{iter, schema_version, cap, restart_h, origin,
 n_inserts/n_rejected/…, restart_history, chromosomes:[…]}`. Each entry in
 `chromosomes` is a chromosome snapshot (`cid`, `f1/f2/f3`, `mutated_rule_ids`,
 `order_priority`, `iteration_added`, `parent_id`, and per-gene `genes` each with a

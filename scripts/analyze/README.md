@@ -1,12 +1,16 @@
 # `scripts/analyze/` — SBST results-analysis toolkit
 
-Everything here turns a finished experiment run (the `schema_version: 2` output
-of `scripts/experiments/run_with_rules_map.py`) into **figures, tables, and
-Markdown reports** for the thesis. Nothing here runs the model or Semgrep — it
-only *reads* the artifacts a run already wrote, so it is cheap, offline, and
-re-runnable. Every result the model produced (`generated_code`, `check_ids`,
-the full mutated rule text, every objective value) is persisted, so essentially
-any retrospective metric is recomputable here without re-running anything.
+> **Status:** this is the legacy `schema_version: 2` toolkit, kept for reference
+> while it is reworked for the current repair design (whole-chromosome runs,
+> `schema_version: 4`). Objective labels below (f2/f3) describe the *divergence
+> diagnostics* it reads, **not** the current search objectives (f2 = rule
+> fidelity, f3 = −parsimony — see [`src/optimizer/README.md`](../../src/optimizer/README.md)).
+
+Everything here turns a compatible legacy `schema_version: 2` run into
+**figures, tables, and Markdown reports** for the thesis. It does **not** yet
+consume the active `schema_version: 4` whole-chromosome output from
+`scripts/experiments/run_experiment.py`. Nothing here runs the model or Semgrep;
+it only reads existing artifacts, so it is cheap, offline, and re-runnable.
 
 - [Quick start](#quick-start)
 - [What the tools read](#what-the-tools-read)
@@ -61,7 +65,7 @@ A run directory contains:
 | `archive_snapshots/iterNNNN.json` | per-rule Pareto archive every 20 iters: front entries with `f1/f2/f3`, `depth`, `mutation_chain`, `restart_history` (the **true** chains) |
 | `mutated_rules/iterN/` | the mutated rule Markdown + `meta.json` |
 
-### The three objectives (the EA always *maximises* f1 internally, over the prompts that use the rule)
+### The axes this legacy toolkit reports (f1 security + two divergence diagnostics)
 
 - **f1 = the security fitness** (weights **ERROR=3, WARNING=1, INFO=0**), the primary signal.
   ⚠️ **Its sign depends on `objective_direction`** (recorded in `run_config.json`), because f1 is
@@ -72,13 +76,15 @@ A run directory contains:
     **higher f1 = MORE vulnerable**, negative f1 = safer.
   Reporting resolves this via `loaders.direction_terms(run.objective_direction)` — never assume a sign
   from the raw value alone.
-- **f2 = `proportion_divergent`** — fraction of affected prompts whose generated
-  code changed at all (`code_divergence > 0`).
-- **f3 = `conditional_mean_divergence`** — mean CodeBLEU divergence among those
-  that changed.
+- **`proportion_divergent`** (legacy f2) — fraction of affected prompts whose
+  generated code changed at all (`code_divergence > 0`).
+- **`conditional_mean_divergence`** (legacy f3) — mean CodeBLEU divergence among
+  those that changed.
 
-f2/f3 are the *behavioural* axis (did the output move?), reported separately
+These two are the *behavioural* axis (did the output move?), reported separately
 from security so "different code" is never conflated with "more vulnerable code."
+They remain recorded per iteration as diagnostics; the current search instead
+optimises f2 = rule fidelity and f3 = −parsimony.
 
 ---
 
@@ -155,7 +161,7 @@ scripts/analyze/
     outcomes.py mutators.py security.py search.py cost.py   per-family CSV+MD assembly
   <CLIs>                outcome_distribution, fitness_trajectories, analyze_mutators,
                         analyze_security, analyze_search, analyze_cost, collect_reports,
-                        analyze_run, compare_runs (legacy), validation_audit, migrate_legacy_run
+                        analyze_run, validation_audit, migrate_legacy_run
 ```
 
 ---
@@ -301,13 +307,6 @@ unmatched iteration counts. **Produces:** `cost`, `latency`, `budget_matched`
 shortest run). Token-over-iteration curves come from `fitness_trajectories
 --fields input_tokens_total`.
 
-### `compare_runs.py` — legacy cross-run (RQ3 + multi-seed)
-**What.** Per-seed best-f1, paired EA-vs-random sign/Wilcoxon, convergence bands
-(median + IQR across seeds), cross-strategy per-mutator rate, multi-seed
-aggregation. **Why.** The original RQ3 view; complements
-`outcome_distribution`'s prompt-level pairs. **Run.** `compare_runs.py
-<runs_or_parent> [--out]`.
-
 ### `collect_reports.py` — one quick-read `REPORT.md`
 **What.** Merges the `*.md` under a directory into one `REPORT.md` (TOC, one
 `Source:` link per section, image links rewritten so PNGs render), curated to the
@@ -359,4 +358,3 @@ lists), optionally `viz/<family>.py` (drawing only) and `report/<family>.py`
 `stats` for tests, `report.tables` for serialisation, and `viz.style` for
 figures. Keep compute out of viz/report and IO out of metrics so each piece
 stays testable.
-

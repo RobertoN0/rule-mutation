@@ -259,6 +259,6 @@ def create_openai_backend(
     model: str = "gpt-4o-mini",
     **kwargs: Any,
 ) -> OpenAIBackend:
-    """Convenience factory mirroring create_claude_backend / create_groq_backend."""
+    """Build an OpenAI backend from an :class:`LLMConfig`."""
     config = LLMConfig(model=model, **kwargs)
     return OpenAIBackend(config)

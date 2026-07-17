@@ -68,7 +68,6 @@ The chosen model is recorded in `run_config.json` and `hillclimb_summary_*.json`
 | `--random-max-changes K` | shared sampler's changes-per-sample cap (default 10) |
 | `--ea-init-samples`, `--ea-injection-every`, `--ea-move`, `--ea-n-mutations` | EA init/injection/move knobs |
 | `--ea-origin-parent` / `--no-ea-origin-parent` | keep the origin as a sampleable local-move parent (default on) |
-| `--archive-admission {neutral_drift,strict_repair}` | archive admission policy (default neutral_drift) |
 | `--enable-validation` | quality recording; **required** on real runs (feeds f2 fidelity) |
 | `--seed N` | reproducibility |
 | `--dry-run` | wire a mock backend (no API calls) to check the plumbing |
@@ -84,12 +83,18 @@ the same entrypoint with `--backend delftblue`:
 N_CASES=2 N_ITERATIONS=10 LANGUAGES=python OPTIMIZER=ea \
   sbatch --time=0:45:00 --job-name="ea_smoke" scripts/slurm/slurm_ea_qwen32b.sh
 
-# Multi-seed batch — paired EA vs random across seeds × languages (12 jobs)
-for SEED in 1 7 123; do
+# Final repair batch — paired EA vs random over the FULL case sets
+# (185 python / 114 java), seeds 42 + 43 (8 jobs). Runs are wall-time-bounded
+# (SIGUSR1); N_ITERATIONS is a high soft cap. EA_INIT_SAMPLES / EA_ORIGIN_PARENT
+# are EA-only (the random arm ignores them).
+declare -A NCASES=( [python]=185 [java]=114 )
+for SEED in 42 43; do
   for OPT in ea random_search; do
     for LANG in python java; do
-      SEED=$SEED OPTIMIZER=$OPT N_CASES=25 N_ITERATIONS=200 LANGUAGES=$LANG SELECTION=random \
-        sbatch --time=12:00:00 --job-name="${OPT}_${LANG}_s${SEED}" \
+      SEED=$SEED OPTIMIZER=$OPT LANGUAGES=$LANG N_CASES=${NCASES[$LANG]} \
+        N_ITERATIONS=200 EA_INIT_SAMPLES=6 EA_ORIGIN_PARENT=false \
+        ORDER_MOVE_WEIGHT=0.1 EA_INJECTION_EVERY=10 \
+        sbatch --time=6:00:00 --job-name="${OPT}_${LANG}_s${SEED}" \
                scripts/slurm/slurm_ea_qwen32b.sh
     done
   done
@@ -161,14 +166,12 @@ back to the SLURM wrapper's env vars (`--as delftblue` to force that form).
 - **f2 = `rule_fidelity`** — mean SBERT similarity of each mutated rule to its original (1.0 = unchanged); needs `--enable-validation`.
 - **f3 = `−parsimony`** — negated count of text-mutated rules (fewer edits = higher).
 
-(The old divergence axes `proportion_divergent` / `conditional_mean_divergence`
-are still recorded per iteration as diagnostics but no longer steer the search.)
-
 f1's sign depends on `objective_direction` (f1 is negated at search time so the EA always
 maximises): under **minimize** (the repair runs) higher f1 = *safer* code (fewer findings);
 under **maximize** (the secondary adversarial direction) higher f1 = *more vulnerable* code.
-f2/f3 capture whether the mutation changed the generated code *at all* — useful when Semgrep
-finds nothing but the output still shifted.
+f2/f3 capture how faithfully and minimally the rule set was edited; they do not
+measure generated-code change. The CodeBLEU-derived divergence fields above are
+the diagnostics for whether the output shifted while Semgrep stayed flat.
 
 ### Analysis toolkit — work in progress
 

@@ -113,20 +113,22 @@ class AggregatedFitness:
     mean_code_divergence: float = 0.0
     """Mean code_divergence over ALL prompts (total_div / n_prompts).
     Scale-invariant tiebreaker: naturally penalises narrow mutations that affect few prompts.
-    Used as the secondary axis in _dominates / _acceptance_reward (lex path).
-    Kept for backward compatibility — superseded by (proportion_divergent,
-    conditional_mean_divergence) for the (1+1) EA + Pareto archive path."""
+    Legacy diagnostic from an earlier divergence-objective design; kept for
+    backward-compatible analysis, not used by the current archive (whose
+    objectives are f1/rule_fidelity/parsimony)."""
 
     proportion_divergent: float = 0.0
     """(divergent prompts in the AFFECTED subset) / (affected prompts).
-    Pareto archive's f2 axis. Breadth of code change restricted to prompts whose
-    mutated rule was actually present. When `affected_indices` is unspecified
-    at aggregation time (initial baseline, greedy-batch, lex global), the
+    Recorded **diagnostic** (legacy f2), NOT a current search objective — the
+    current f2 is `rule_fidelity`. Breadth of code change restricted to prompts
+    whose mutated rule was actually present. When `affected_indices` is
+    unspecified at aggregation time (initial baseline, greedy-batch), the
     denominator falls back to all evaluated prompts."""
 
     conditional_mean_divergence: float = 0.0
     """(sum of code_divergence over AFFECTED prompts) / (divergent prompts in the
-    AFFECTED subset), or 0.0 when that denominator is 0. Pareto archive's f3 axis.
+    AFFECTED subset), or 0.0 when that denominator is 0. Recorded **diagnostic**
+    (legacy f3), NOT a current search objective — the current f3 is `−parsimony`.
     Depth of code change among the moved AFFECTED prompts. Falls back to global
     when `affected_indices` is unspecified at aggregation time."""
 
@@ -199,9 +201,9 @@ def aggregate_fitness(
         strategy: How to compute individual fitness values.
         affected_indices: Optional positional indices into `results` for the
             subset of prompts whose mutated rule was actually present (the
-            AFFECTED subset). When supplied, f2 (proportion_divergent) and f3
-            (conditional_mean_divergence) are computed over this subset only,
-            so they reflect breadth/depth among prompts the mutation could
+            AFFECTED subset). When supplied, the divergence diagnostics
+            (proportion_divergent, conditional_mean_divergence) are computed over
+            this subset only, so they reflect breadth/depth among prompts the mutation could
             actually move — not diluted by unaffected prompts that received
             no change. When None, both fall back to the full result set
             (e.g. baseline evaluations and any caller that scores every prompt).
