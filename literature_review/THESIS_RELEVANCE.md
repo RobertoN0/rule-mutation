@@ -4,7 +4,7 @@
 ---
 
 ## Ref C0 — Cisco Project CodeGuard validation study *(PRIMARY REFERENCE — the foundational source for the whole project)*
-**Relevance: CRITICAL — the methodology the thesis replicates and inverts**
+**Relevance: CRITICAL — the methodology the thesis replicates and extends**
 
 *Grey literature (no peer-reviewed paper exists): Thomas Bartlett, "Can Security Rules Make AI Generated Code Safer? What We Learned From 2,717 Prompts With Project CodeGuard," Cisco Security Blog, 2025-12-09. URL: https://community.cisco.com/t5/security-blogs/can-security-rules-make-ai-generated-code-safer/ba-p/5353605. Local copy: `cisco_codeguard_validation_blog.md`.*
 
@@ -16,13 +16,13 @@
 - The **baseline-vs-rules paired comparison** primitive (the thesis's iteration-0 baseline vs mutated-rule generations).
 - **Project CodeGuard rules as the system-under-test** — the artifact the thesis mutates.
 
-**The inversion (the thesis's contribution).** Cisco asks *"do rules make code safer?"* and shows they do (findings ↓). The thesis asks the adversarial converse: *"can semantics-preserving mutations of those rules make them stop working?"* — using SBST to **degrade** rule effectiveness (findings ↑ / output divergence). The thesis attacks the very intervention Cisco validated — the same make-robust → expose-brittleness inversion as ARIEL (41) and MORPH (43).
+**The extension (the thesis's contribution).** Cisco asks *"do rules make code safer?"* and shows that its retrieved CodeGuard rules reduce findings. The thesis treats those rules as a mutable whole-rule-set chromosome and asks whether SBST can find **semantics-preserving repairs that reduce vulnerable generation further**. The primary direction is therefore repair/minimisation (positive f1 means fewer findings than the origin); the retained maximise direction is a secondary robustness experiment, not the main objective.
 
 **Threats-to-validity inheritance.** Cisco's own stated limitations transfer and should be cited: single base model (GPT-5; the thesis uses Qwen2.5-Coder-32B → results may differ by model), Semgrep/CodeQL false positives/negatives (→ Papers 20, 24), single-file snippets, synthetic OWASP templates, no human review.
 
 **Provenance note.** Cisco reports SecurityEval as **121 prompts / 69 CWE**; the SecurityEval *paper* (40) reports **130 samples / 75 CWE**. The thesis's earlier "121" traces to Cisco's usage, not the paper — cite the number matching the source you mean.
 
-**Cite in**: Introduction/Motivation (the question the thesis inverts), Methodology (Semgrep ruleset, datasets, baseline-vs-rules design, raw-count metric), Threats to Validity (inherited limitations).
+**Cite in**: Introduction/Motivation (the question the thesis extends), Methodology (Semgrep ruleset, datasets, baseline-vs-rules design, raw-count metric), Threats to Validity (inherited limitations).
 
 ---
 
@@ -49,7 +49,7 @@ Establishes the formal definition of Metamorphic Relations and the taxonomy all 
 
 Two contributions, both now resolved in the implementation:
 1. **Combinatorial MR chaining** — applying multiple mutators per lineage, which Paper 3 shows is the primary source of incremental failure gain over single-MR application. **Now implemented**: the (1+1) EA chains mutations along a parent lineage up to a depth cap (`--max-depth-ea`, default 4), and the random baseline samples chains of length K.
-2. **Quality-weighted fitness** — Paper 3's `Context_ASR × PerturbationQuality` motivates separating effectiveness from perturbation quality. The optimizer realises this not as a single product but as a 3-objective Pareto archive admitted by **Pareto dominance** over (f1, f2, f3): effectiveness is the primary axis (`semgrep_delta`), code-divergence (1 − CodeBLEU) is a secondary axis, and perturbation quality is measured separately by the informational `MutationQualityValidator` (see ARIEL 41; Chen & Li 26).
+2. **Quality-weighted fitness** — Paper 3's `Context_ASR × PerturbationQuality` motivates separating effectiveness from perturbation quality. The optimizer realises this not as a single product but as a 3-objective Pareto archive admitted by **Pareto dominance** over (f1, f2, f3): effectiveness is the primary axis (f1 = vulnerability-count delta), rule fidelity (f2 = mean SBERT similarity of mutated rules to their originals, sourced from the `MutationQualityValidator`) and −parsimony (f3 = fewer mutated rules) are the perturbation-quality axes. CodeBLEU code-divergence is computed and stored as a diagnostic only, not an objective (see ARIEL 41; Chen & Li 26).
 
 Also validates the current mutator selection: `SynonymReplacement` and `AddRandomWord` are confirmed silver bullets (Paper 3 also reports L33TChanging as a third). The MOEA/D result justifies why SBST outperforms random MR selection — external validation for the search-based approach.
 
@@ -107,7 +107,7 @@ Applies the same MT assumption to code generation validation: semantically equiv
 ## Paper 9 — METAL Framework (Hyun et al. 2023)
 **Relevance: Conceptual source of quality-weighted evaluation (PerturbationQuality)**
 
-METAL's `M-ASR × PerturbationQuality` motivates separating effectiveness from perturbation quality. The thesis realises this *concept* as a 3-objective Pareto archive admitted by **Pareto dominance** over (f1, f2, f3) — effectiveness = `semgrep_delta`; code-divergence = 1 − CodeBLEU as an additional objective; perturbation quality measured separately by the informational `MutationQualityValidator` — rather than as a single product. METAL also validates the focus on sentence-level perturbations (it shows they outperform character/word-level for code-generating LLMs).
+METAL's `M-ASR × PerturbationQuality` motivates separating effectiveness from perturbation quality. The thesis realises this *concept* as a 3-objective Pareto archive admitted by **Pareto dominance** over (f1, f2, f3) — effectiveness = f1 (vulnerability-count delta); rule fidelity = f2 (mean SBERT similarity, from the `MutationQualityValidator`); −parsimony = f3 (fewer mutated rules) — rather than as a single product; CodeBLEU code-divergence is stored as a diagnostic, not an objective. METAL also validates the focus on sentence-level perturbations (it shows they outperform character/word-level for code-generating LLMs).
 
 **Cite in**: Methodology (quality-weighted evaluation lineage; why effectiveness and quality are separated), Evaluation (per-mutator quality vs effectiveness).
 
@@ -124,7 +124,7 @@ The key finding is methodological: aggregating results across domains hides sign
 ## Paper 11 — STELLAR
 **Relevance: Architectural inspiration for future structured search**
 
-STELLAR's 4.3× improvement over random testing (via feature discretization + NSGA-II) motivates eventually moving from hill climbing to multi-objective structured search over a discretized rule mutation space. For the thesis scale, hill climbing is sufficient, but STELLAR provides the architectural vision for a next-generation pipeline. The eight current mutators are already the implicit discrete operator dimension; STELLAR formalizes the full product space.
+STELLAR's 4.3× improvement over random testing (via feature discretization + NSGA-II) motivates eventually moving from the current budget-driven (1+1) EA to population-based multi-objective structured search over a discretized rule mutation space. For the thesis scale, the single-archive EA limits expensive evaluations, while STELLAR provides the architectural vision for a larger-budget pipeline. The eight current mutators are already the implicit discrete operator dimension; STELLAR formalizes the full product space.
 
 **Cite in**: Future Work (multi-objective structured search over discrete rule features).
 
@@ -187,7 +187,7 @@ Demonstrates multi-objective evolution of prompts (balancing security and perfor
 ## Paper 18 — Artemis: Automated Optimization of LLM-based Agents
 **Relevance: Hierarchical evaluation strategy**
 
-Validates that LLM-ensemble mutations (using a secondary LLM to perform intelligent perturbations) outperform random mutations — the thesis already does this for 3 of 8 mutators (the LLM-based ones: negation_injection, voice_change, paraphrase). The actionable contribution is the hierarchical evaluation: cheap filters (SBERT similarity, LLM-as-judge) before expensive validation (Semgrep). This could reduce the number of full generation+Semgrep evaluations needed per hill-climbing step.
+Validates that LLM-ensemble mutations (using a secondary LLM to perform intelligent perturbations) outperform random mutations — the thesis already does this for 3 of 8 mutators (the LLM-based ones: negation_injection, voice_change, paraphrase). The actionable contribution is the hierarchical evaluation: cheap filters (SBERT similarity, LLM-as-judge) before expensive validation (Semgrep). This could reduce the number of full generation+Semgrep evaluations needed per candidate.
 
 **Cite in**: Future Work (hierarchical evaluation to reduce computational cost).
 
@@ -214,7 +214,7 @@ Proves that iterative optimization against SAST tools teaches LLMs to structural
 ## Paper 21 — ATheNA: Hybrid Fitness in SBST
 **Relevance: Formal framework for combining automated + domain-knowledge fitness**
 
-Provides the formal SBST citation for combining an automated fitness `f_AT` (Semgrep) with a domain-knowledge signal `f_MAN` (quality: SBERT similarity, security-keyword retention). Note: ATheNA composes these **additively** (`f = f_AT + f_MAN`), not multiplicatively. In the current design the two concerns are kept separate rather than summed: `f_AT` ≈ the `semgrep_delta` objective and code-divergence are Pareto objectives admitted by dominance, while the domain-knowledge quality signal is an informational `MutationQualityValidator` measurement (not summed in). ATheNA still supports the core claim that domain-knowledge fitness improves SBST effectiveness at low overhead.
+Provides the formal SBST citation for combining an automated fitness `f_AT` (Semgrep) with a domain-knowledge signal `f_MAN` (quality: SBERT similarity, security-keyword retention). Note: ATheNA composes these **additively** (`f = f_AT + f_MAN`), not multiplicatively. In the current design the two concerns are kept separate rather than summed: `f_AT` ≈ the f1 (vulnerability-count) objective, while the domain-knowledge quality signal appears as the f2 rule-fidelity objective (mean SBERT similarity, from the `MutationQualityValidator`) — a separate Pareto axis admitted by dominance, not summed into f1. ATheNA still supports the core claim that domain-knowledge fitness improves SBST effectiveness at low overhead.
 
 **Cite in**: Methodology (hybrid-fitness rationale; why quality is a gate + secondary axis rather than a summed term).
 
@@ -232,7 +232,7 @@ CodeScore's NL-only modality could evaluate whether mutated rules still produce 
 ## Paper 23 — MST-wi: Metamorphic Security Testing for Web Systems
 **Relevance: Low — different domain, conceptual parallel only**
 
-The 76 MRs and 10 structural patterns operate on HTTP requests, not NLP prompts. The relational oracle concept (equality/subset checking) is already implicit in the hill climber. Cite for completeness in the security-domain MT literature.
+The 76 MRs and 10 structural patterns operate on HTTP requests, not NLP prompts. The relational-oracle concept (equality/subset checking) is analogous to the thesis's baseline-relative evaluation of each chromosome. Cite for completeness in the security-domain MT literature.
 
 **Cite in**: Related Work (security-focused MT approaches).
 
@@ -283,7 +283,7 @@ The canonical multi-objective evolutionary algorithm, providing the formal defin
 ## Paper 28 — Nonlinear Multiobjective Optimization (Miettinen, Kluwer 1999)
 **Relevance: Canonical MOO-theory reference — the formal Pareto-optimality definition behind the archive admission rule (and lexicographic ordering as the considered-but-rejected alternative)**
 
-The standard reference textbook for MOO theory. The thesis's archive admits candidates by **Pareto dominance**, so the load-bearing citation is Miettinen's **formal definition of Pareto optimality** (Def 2.2.1, §2.2): a vector is Pareto optimal iff no objective can be improved without worsening another — exactly the `dominates()` relation over (f1, f2, f3) in `pareto_archive.py`. **Lexicographic ordering** (Ch 4 "A Priori Methods", §4.2) is a *different* a-priori method the thesis considered in an earlier design (the "Thread-1" semgrep-primary / code-divergence-tie-break rule) but did **not** adopt — the implemented optimizer uses Pareto dominance, not lexicographic. Cite §4.2 only when discussing the rejected alternative.
+The standard reference textbook for MOO theory. The thesis's archive admits candidates by **Pareto dominance**, so the load-bearing citation is Miettinen's **formal definition of Pareto optimality** (Def 2.2.1, §2.2): a vector is Pareto optimal iff no objective can be improved without worsening another — exactly the `dominates()` relation over (f1, f2, f3) in `chromosome.py`. **Lexicographic ordering** (Ch 4 "A Priori Methods", §4.2) is a *different* a-priori method the thesis considered in an earlier design (the "Thread-1" semgrep-primary / code-divergence-tie-break rule) but did **not** adopt — the implemented optimizer uses Pareto dominance, not lexicographic. Cite §4.2 only when discussing the rejected alternative.
 
 **Cite in**: Methodology (formal Pareto-optimality definition for the admission rule, alongside Chen & Li 26 and ARIEL 41); Related Work (lexicographic ordering as the considered-and-rejected a-priori alternative).
 
@@ -402,18 +402,18 @@ Manually curated prompts designed to elicit insecure completions from coding ass
 ---
 
 ## Paper 41 — ARIEL: Automated Repair of Feature Interaction Failures in ADS (Ben Abdessalem et al., ISSTA 2020)
-**Relevance: Primary algorithmic precedent for the (1+1) EA + Pareto archive design — inverted objective**
+**Relevance: Primary algorithmic precedent for the repair-oriented (1+1) EA + Pareto archive design**
 
-The direct precedent for our optimizer. ARIEL's structure is the (1+1) EA + many-objective archive that the thesis adopts wholesale, with one critical inversion: ARIEL *repairs* rules so safety-requirement tests pass, while we *mutate* rules so the LLM produces code that fails more Semgrep checks. Same algorithmic class, opposite objective sign.
+The direct structural precedent for the optimizer. ARIEL repairs integration rules so safety-requirement tests pass; the thesis searches semantics-preserving edits to natural-language security rules so the guided LLM produces code with fewer Semgrep findings. Both are repair-oriented, expensive-evaluation problems using a (1+1) EA and a many-objective archive, but the chromosome representation, objectives, overflow eviction, and restart implementation are thesis-specific adaptations.
 
 Five concrete mappings into our codebase:
 1. **(1+1) EA chosen over GP because evaluations are expensive.** Their justification — "evaluating a pool of patches in each iteration/generation becomes too expensive (in the order of hours)" — is the verbatim argument we use in the Approach chapter for not using NSGA-II / SPEA2 / GP. Our evaluation cost (LLM generation + Semgrep batch) puts us in the same regime.
-2. **Multi-objectivization to escape local optima.** "Multi-objectivization can lead to better results than classical single-objective approaches… helps store partial patches that individually fix different faults" — direct support for our 3-objective (f1 = semgrep_delta, f2 = proportion_divergent, f3 = conditional_mean_divergence) decomposition. A scalar f1 alone would miss prompts that move on breadth/depth only.
-3. **Archive cap 2×k with eviction by aggregated fitness D = Σ Ω_i.** Their cap is `2 × k` where k = number of safety requirements; ours is `cap=6` per rule. Eviction picks the entry with the lowest `D` (sum of all objectives). We implement the same in [pareto_archive.py:307-313](src/optimizer/pareto_archive.py#L307-L313) via `score_sum()`.
-4. **Stagnation-restart counter h with reset to original rule.** ARIEL's h=8 was picked by preliminary experiments and matches our `restart_h=8` choice exactly. They also reset the archive to the original faulty rule on stagnation — we reset to the original CodeGuard rule text identically.
+2. **Multi-objectivization to escape local optima.** "Multi-objectivization can lead to better results than classical single-objective approaches… helps store partial patches that individually fix different faults" — direct support for our 3-objective (f1 = security effect / vulnerability-count delta, f2 = rule fidelity, f3 = −parsimony) decomposition. A scalar f1 alone would ignore how much the rule set was perturbed to get there.
+3. **Archive cap with eviction that protects the best repair.** Their cap is `2 × k` where k = number of safety requirements; ours is `cap=6` over the single chromosome archive. On overflow we evict **lexicographically by f1** (lowest f1 first, ties → f2+f3, then age) in [chromosome.py](src/optimizer/chromosome.py) — deliberately *not* ARIEL's lowest-aggregated-`D = Σ Ω_i`, because the three objectives live on different scales and a raw sum could drop the best repair to keep a barely-mutated variant.
+4. **Stagnation-restart counter h.** ARIEL's h=8 was picked by preliminary experiments and supplies the precedent for our `restart_h=8` default. The thesis adapts the reset at whole-chromosome level: after h rejected ea-phase attempts, it wipes the front and reseeds it with `ea_init_samples` independent origin-based chromosomes. That is inspired by ARIEL's reset, not an identical per-rule mechanism.
 5. **Roulette-Wheel mutator selection weighted by suspiciousness.** ARIEL samples mutators with probability proportional to a fault-localization score. We currently sample uniformly. **This is a clean future-work direction** — we already collect per-mutator archive-add counts in `mutator_stats[name]['archive_adds']`, which a weighted-by-past-success or bandit selection scheme (Papers 34/35/36; see Bandit note) could consume directly.
 
-**Cite in**: Approach (primary methodological precedent), Related Work (single-state vs population-based EA in expensive-evaluation domains), Discussion (the repair-vs-mutation inversion as a novel contribution).
+**Cite in**: Approach (primary methodological precedent), Related Work (single-state vs population-based EA in expensive-evaluation domains), Discussion (adaptation from integration-rule repair to natural-language security-instruction repair).
 
 ---
 
@@ -446,9 +446,9 @@ Three future-work hooks the survey unlocks (all distinct from current implementa
 
 **Why it is the closest precedent (and how the thesis differs).**
 - **Same paradigm:** metamorphic testing + many-objective optimization — exactly the thesis's combination. Same author lineage as ARIEL (41): Annibale Panichella, TU Delft.
-- **Prediction flips ≈ the thesis's divergence signal.** MORPH's PF (`S(v) ≠ S(v̄)`) measures behavioral change under a semantics-preserving transform; the thesis measures output divergence (`code_divergence` = 1 − CodeBLEU, plus `semgrep_delta`) between baseline and mutated-rule generations. Same idea — behavioral divergence under a meaning-preserving change — applied to a different artifact.
+- **Prediction flips ≈ the thesis's recorded divergence diagnostic.** MORPH's PF (`S(v) ≠ S(v̄)`) measures behavioral change under a semantics-preserving transform; the thesis records `code_divergence = 1 − CodeBLEU` between baseline and mutated-rule generations. This is a conceptual analogue only: CodeBLEU does not steer the search, whose f1 axis is vulnerability reduction.
 - **Renaming ≈ the `synonym_replacement` mutator.** MORPH's natural synonym/acronym renaming of identifiers is the code-side analogue of the thesis's prose-side synonym mutation.
-- **The two key inversions (the thesis's novelty):** (1) *target* — MORPH transforms **code** to harden a **code model**; the thesis transforms **security rules** to expose the brittleness of a **rule-guided LLM**. (2) *goal* — MORPH *robustifies* (minimise prediction flips); the thesis *degrades* (maximise divergence / Semgrep findings). This is the same "make-robust → expose-brittleness" inversion the thesis already applies to ARIEL.
+- **The two key differences:** (1) *target* — MORPH transforms **code** and model configurations to harden a **code model**; the thesis transforms **security rules** that guide an LLM. (2) *objective* — MORPH minimises prediction flips during robust distillation; the thesis primarily minimises Semgrep-measured vulnerabilities while constraining rule fidelity and parsimony. The adversarial maximise direction remains secondary.
 - **Algorithmic contrast:** MORPH uses a population many-objective EA (AGE-MOEA, 4 objectives) with surrogate-assisted evaluation; the thesis uses a budget-driven (1+1) EA + Pareto archive (ARIEL) over 3 objectives. MORPH is the reference for "what a full many-objective + surrogate treatment looks like," and its GBR + LHS surrogates are a concrete instance of the **surrogate-on-expensive-fitness future-work hook** (cf. Chugh survey, 42) — directly relevant if the thesis ever adds a surrogate over Semgrep fitness.
 
 **Cite in**: Related Work (primary anchor — metamorphic + many-objective lineage, alongside ARIEL 41); Approach (justify (1+1) EA vs population many-objective; PF-vs-divergence framing); Future Work (surrogate-assisted MOO via GBR + LHS).
@@ -465,13 +465,13 @@ Three future-work hooks the survey unlocks (all distinct from current implementa
 |---|---|---|
 | 1 — MR Catalog | SBERT validation, MR taxonomy (indirect) | — |
 | 2 — LLMORPH | 4 mutators: Negation, SectionReorder ×2, Paraphrase, VoiceChange | Formal style, elaboration hedging |
-| 3 — Hyun SBST | Hill climbing, SynonymReplacement, AddRandomWord, **combinatorial chaining (EA depth-cap)** | Quality/effectiveness split realised as the 3-objective Pareto archive |
+| 3 — Hyun SBST | (1+1) EA, SynonymReplacement, AddRandomWord, **combinatorial chaining (EA depth-cap)** | Quality/effectiveness split realised as the 3-objective Pareto archive |
 | 4 — AUGMENT | Full 3-criteria validator, VoiceChange, Synonym | Formal Style mutation |
 | 5 — Heo et al. | Used for thesis framing only | Embedding-based proxy fitness (future) |
 | 6 — LAP | Perplexity ratio (informational) | Adversarial candidate selection in Paraphrase |
 | 7 — MOF | — | FormatStyleMutator (after existing MRs validated) |
 | 8 — Code MT | Core assumption | — |
-| 9 — METAL | Synonym, AddWord, SectionReorder, Paraphrase, Negation, SBERT validation | Quality-weighted *concept* realised as informational validator + divergence axis (not a product) |
+| 9 — METAL | Synonym, AddWord, SectionReorder, Paraphrase, Negation, SBERT validation | Quality-weighted *concept* realised as f1 effectiveness + f2 fidelity + f3 −parsimony (not a product) |
 | 10 — Tone | Per-**language** reporting (motivation) | — (FluffMutator retired) |
 | 11 — STELLAR | Implicit discrete operator space | Future: structured multi-objective search |
 | 12 — MRSQLGen | Instability assumption | SRBKB targeted mutations (future) |
@@ -483,9 +483,9 @@ Three future-work hooks the survey unlocks (all distinct from current implementa
 | 18 — Artemis | LLM-based mutation (via existing mutators) | Hierarchical evaluation filtering |
 | 19 — SPRIG | Structural analogue (rule = system prompt) | Adaptive mutator selection (future, via 34/35/36); current selection is uniform |
 | 20 — SCAFFOLD-CEGIS | Safe-zone contract; corpus lexicon anchoring; quality gate | **Threat to validity: Semgrep-only is insufficient** |
-| 21 — ATheNA | Automated fitness (Semgrep = f_AT) | Quality (f_MAN) is **additive** in ATheNA; here code-divergence is a Pareto objective + quality is an informational measurement |
+| 21 — ATheNA | Automated fitness (Semgrep = f_AT) | Quality (f_MAN) is **additive** in ATheNA; here the quality signal (SBERT rule fidelity) is the f2 Pareto objective (not summed into f1), and CodeBLEU code-divergence is a recorded diagnostic |
 | 22 — CodeScore | — | Future: functional correctness counterbalance |
-| 23 — MST-wi | Relational oracle (implicit in hill climber) | — (web-security domain, not applicable) |
+| 23 — MST-wi | Relational-oracle analogue in baseline-relative chromosome evaluation | — (web-security domain, not applicable) |
 | 24 — SAST-MT | Semgrep as fitness oracle | **Threat to validity: SAST FP/FN blind spots** |
 | 25 — zkCraft | Quality validation of LLM mutations | Future: failure-trace-guided re-mutation |
 | 26 — Chen & Li TOSEM | — (empirical basis for design decision) | Cited for dropping weighted composite fitness |
@@ -503,7 +503,7 @@ Three future-work hooks the survey unlocks (all distinct from current implementa
 | 38 — LLMSecEval | Cross-check dataset (planned) | ~3–4h ingestion adapter |
 | 39 — Chapelle & Li *(opt)* | — (see Bandit note) | Future ablation justification only |
 | 40 — SecurityEval *(opt)* | — (third cross-check dataset) | Optional; Python-only, **130 samples / 75 CWEs** |
-| 41 — ARIEL | **(1+1) EA + Pareto archive, cap=6, restart_h=8, score_sum eviction** | Roulette-Wheel mutator selection weighted by archive-add rate |
+| 41 — ARIEL | **(1+1) EA + Pareto archive, cap=6, restart_h=8, f1-lexicographic overflow eviction** | Roulette-Wheel mutator selection weighted by archive-add rate |
 | 42 — Chugh survey | Background framing (expensive MOP vocabulary, evolution control) | Surrogate on Semgrep fitness; Pareto-SVM classification screening; weighted mutator ensemble |
 | 43 — MORPH (Panichella) | — (metamorphic + many-objective precedent; PF ≈ divergence; renaming ≈ synonym mutator) | Score 4–5; full entry written. Future: surrogate-assisted MOO (GBR + LHS) |
-| **C0 — Cisco CodeGuard blog** | **Primary reference**: Semgrep `p/security-audit` + ERROR/WARNING count, CyberSecEval/SecurityEval datasets, baseline-vs-rules design, CodeGuard rules as SUT | The methodology the thesis **inverts** (degrade vs. harden) |
+| **C0 — Cisco CodeGuard blog** | **Primary reference**: Semgrep `p/security-audit` + ERROR/WARNING count, CyberSecEval/SecurityEval datasets, baseline-vs-rules design, CodeGuard rules as SUT | The methodology the thesis **extends** with semantics-preserving rule repair |

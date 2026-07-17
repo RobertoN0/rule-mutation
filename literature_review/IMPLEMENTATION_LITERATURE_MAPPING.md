@@ -6,10 +6,10 @@ This document is a **mapping**, not a new literature search. Anything marked **G
 
 **Current design baseline (source of truth for this document):**
 
-1. **Search** — a (1+1) EA over a per-rule **Pareto archive**. A candidate is admitted **iff it is not Pareto-dominated** over three objectives (f1 = `total_semgrep_delta`, f2 = `proportion_divergent`, f3 = `conditional_mean_divergence`) — `pareto_archive.py` (`dominates`/`try_add`), `ea_optimizer.py`. There is no weighted-sum composite and no lexicographic ordering. `--optimizer` is `ea | random_baseline`.
-2. **Mutator selection** — **uniform** random over the registry (`ea_optimizer.py`). The registry has **8 mutators**: verb_weakening, synonym_replacement, add_random_word, section_reorder_shuffle, section_reorder_degrade, negation_injection, voice_change, paraphrase.
-3. **Code divergence** — `code_divergence = 1 − CodeBLEU` via `composite_fitness.py` (token-BLEU fallback on failure).
-4. **Quality validation** — the `MutationQualityValidator` is **informational / post-hoc** and **never gates** the search (4 criteria: instruction adherence, SBERT similarity, perplexity ratio (off by default), security-keyword retention).
+1. **Search** — a (1+1) EA over a single **whole-rule-set chromosome Pareto archive**. A candidate is admitted **iff it is not Pareto-dominated** over three objectives (f1 = security effect / vulnerability-count delta — positive under `--objective-direction minimize` = repair; f2 = rule fidelity, mean SBERT similarity of mutated rules; f3 = −parsimony, negated count of mutated rules) — `chromosome.py` (`dominates`/`try_add`), `search.py`, `engine.py`. Admission uses no weighted-sum composite; on cap overflow, eviction is lexicographic by f1 (lowest f1 first, ties → f2+f3, then age) so the best repair is never dropped. `--optimizer` is `ea | random_search`.
+2. **Mutator selection** — **uniform** random over the registry (`search.py`). The registry has **8 mutators**: verb_weakening, synonym_replacement, add_random_word, section_reorder_shuffle, section_reorder_degrade, negation_injection, voice_change, paraphrase.
+3. **Code divergence** — `code_divergence = 1 − CodeBLEU` via `composite_fitness.py` (token-BLEU fallback on failure). Computed and stored as a **diagnostic only**, not a search objective.
+4. **Quality validation** — the `MutationQualityValidator` **never gates** the search (4 criteria: instruction adherence, SBERT similarity, perplexity ratio (off by default), security-keyword retention). Its SBERT similarity now **feeds the f2 fidelity objective**; the other criteria remain informational.
 
 > **Bandit note.** An adaptive bandit mutator-selection path (UCB1 / D-UCB / DYTS / Thompson — Papers 34/35/36/39) was prototyped earlier in the project and replaced by the current EA + Pareto archive with uniform selection. The earlier strategy code is recoverable from git history and could be revisited as a future bandit-vs-EA ablation, but it is **not** part of the current design. §6 keeps the bandit citation set only for that conditional future ablation.
 
@@ -32,12 +32,12 @@ Inside each tier, choices are grouped by subsystem (search, mutation, validation
 ### ✅ Validated
 
 **1.1 (1+1) EA + Pareto archive as the base SBST loop**
-- *Choice:* Single-state (1+1) EA that mutates rule text and admits a candidate into a per-rule Pareto archive when it is not dominated.
-- *Citation:* Paper 41 (ARIEL) — the (1+1) EA + many-objective archive design adopted wholesale (with the objective sign inverted). Paper 3 (Hyun et al. 2025) — search-based selection outperforms random over the same kind of mutation space. Paper 19 (SPRIG) — analogous fitness-guided search over system prompts.
+- *Choice:* Single-state (1+1) EA that mutates whole rule-set chromosomes and admits a candidate into a single Pareto archive when it is not dominated.
+- *Citation:* Paper 41 (ARIEL) — the structural precedent for a repair-oriented (1+1) EA with a many-objective archive under expensive evaluation; the thesis adapts that structure to whole natural-language rule-set chromosomes, different objectives, and different overflow handling. Paper 3 (Hyun et al. 2025) — search-based selection outperforms random over the same kind of mutation space. Paper 19 (SPRIG) — analogous fitness-guided search over system prompts.
 - *Confidence:* Strong. ARIEL is a direct structural precedent on a closely related problem.
 
 **1.2 Pareto-dominance admission over (f1, f2, f3)**
-- *Choice:* Admit a candidate iff no archive entry dominates it on (f1 = `total_semgrep_delta`, f2 = `proportion_divergent`, f3 = `conditional_mean_divergence`); evict dominated entries; cap the archive and evict the lowest score-sum on overflow.
+- *Choice:* Admit a candidate iff neither the origin nor an archive entry dominates it on (f1 = security effect / vulnerability-count delta, f2 = rule fidelity, f3 = −parsimony); evict dominated entries; on cap overflow evict lexicographically by f1 (lowest f1 first, ties → f2+f3, then age), so the best repair is protected.
 - *Citation:* **Paper 41 (ARIEL)** — the (1+1) EA + Pareto-archive admission mechanism. **Paper 26 (Chen & Li, TOSEM 2022)** — empirically shows weighted sums miss Pareto-optimal solutions; the case for Pareto over weighted-sum. **Paper 28 (Miettinen 1999)** — the formal Pareto-optimality definition (Def 2.2.1) behind the `dominates()` relation. **Paper 27 (NSGA-II)** — canonical non-dominated-sorting reference. *Lexicographic ordering (Miettinen §4.2) is the considered-and-rejected a-priori alternative, not the implemented rule.*
 
 **1.3 Mutations compound on the parent lineage (not the original)**
@@ -46,9 +46,9 @@ Inside each tier, choices are grouped by subsystem (search, mutation, validation
 
 ### 🟡 Partial
 
-**1.4 Stagnation / depth / mutator-exhausted restarts**
-- *Choice:* The archive restarts a rule to its seed when a stagnation counter (`restart_h`, default 8) trips, when depth saturates, or when every entry has tried every mutator.
-- *Support:* ARIEL (41) uses a stagnation-restart counter h=8 with reset to the original rule — directly matched. The depth- and mutator-exhausted triggers are thesis engineering on top of that precedent.
+**1.4 Stagnation wipe/reseed and exhausted-neighbourhood reopen**
+- *Choice:* After `restart_h` consecutive rejected **ea-phase** attempts, the runner wipes the whole chromosome front and spends the next `ea_init_samples` evaluations reseeding it with independent origin-based random samples. If no parent has an eligible local move, it instead keeps the front and clears tried-move sets so those neighbourhoods can be explored again. Per-rule depth saturation is handled by an explicit revert move, not by restarting the archive.
+- *Support:* ARIEL (41) supplies the stagnation-counter/reset precedent and its empirical `h=8`; the thesis's whole-front wipe followed by a multi-sample chromosome reseed, and the separate exhausted-neighbourhood reopen, are engineering adaptations rather than direct replications of ARIEL's reset.
 
 ---
 
@@ -172,9 +172,9 @@ Inside each tier, choices are grouped by subsystem (search, mutation, validation
 **Current design:**
 - Primary signal: `semgrep_delta = new.semgrep_score − baseline.semgrep_score`.
 - Secondary signal: `code_div = 1.0 − codebleu([baseline_code], [mutated_code])` (via `k4black/codebleu`; token-BLEU fallback on failure).
-- Admission: **Pareto dominance** over the per-rule archive's three objectives (f1/f2/f3). No weighted-sum composite, no lexicographic ordering.
-- `rule_divergence` (SBERT) is an **informational measurement** in the validator — not a fitness term and not a gate (see §4).
-- **Pareto objectives (f1/f2/f3):** the EA aggregates the per-case signals into f1 = `total_semgrep_delta`, f2 = `proportion_divergent`, f3 = `conditional_mean_divergence` (`ea_optimizer.py`). Multi-objectivization is from ARIEL (41); the **breadth/depth split of divergence into f2 (how many cases diverged) + f3 (how much, among those) is a thesis contribution** — no paper prescribes it.
+- Admission: **Pareto dominance** over the single whole-chromosome archive's three objectives (f1/f2/f3). No weighted-sum composite for admission (overflow eviction is f1-lexicographic).
+- SBERT rule similarity is **not a gate** (the validator never rejects), but it is aggregated into the f2 fidelity objective (see §4).
+- **Pareto objectives (f1/f2/f3):** the EA aggregates the per-case signals into f1 = security effect (vulnerability-count delta; positive under `--objective-direction minimize` = repair), f2 = rule fidelity (mean SBERT similarity of mutated rules to their originals), f3 = −parsimony (negated count of mutated rules) (`search.py`). Multi-objectivization is from ARIEL (41); the fidelity + parsimony pair keeps the search close to the original rule set — a conservative-repair framing adopted with the supervisor.
 
 ### ✅ Validated
 
@@ -182,9 +182,9 @@ Inside each tier, choices are grouped by subsystem (search, mutation, validation
 - *Citation:* Paper 21 (ATheNA) — automated oracle `f_AT`. Paper 24 (SAST-MT) — uses SAST as an oracle target, also flags its false-negatives (threat to validity).
 
 **5.2 Separating effectiveness from auxiliary quality signals**
-- *Citation:* Paper 3 (Hyun et al. 2025) — `Context_ASR × PerturbationQuality` is the structural analogue. Paper 9 (METAL) — output-space divergence as a fitness signal. Paper 21 (ATheNA) — formalises combining `f_AT` with a domain-knowledge `f_MAN` (additively). The thesis keeps the two concerns separate: effectiveness and code-divergence are Pareto objectives; quality is an informational validator measurement.
+- *Citation:* Paper 3 (Hyun et al. 2025) — `Context_ASR × PerturbationQuality` is the structural analogue. Paper 9 (METAL) — output-space divergence as a fitness signal. Paper 21 (ATheNA) — formalises combining `f_AT` with a domain-knowledge `f_MAN` (additively). The thesis keeps the concerns separate as Pareto objectives: effectiveness (f1) and the two perturbation-quality axes rule fidelity (f2, from the SBERT validator) and −parsimony (f3). CodeBLEU code-divergence is computed and stored as a diagnostic only, not an objective.
 
-**5.3 Code-divergence component (CodeBLEU between generated code and iteration-0 reference)**
+**5.3 Code-divergence diagnostic (CodeBLEU between generated code and iteration-0 reference)**
 - *Citation:* **Paper 29 (CodeBLEU, Ren et al. 2020)** — the metric definition, default weights (0.25 each), and language-specific AST/data-flow matching, with first-class Python and Java support. Replaces NL-SBERT-on-code, which is architecturally mismatched (NL model on code). Paper 9 (METAL) — output-space divergence as a fitness signal.
 - *Architecture:* reference code is captured at iteration 0 from the same Qwen baseline run (see §8.2). `code_div = 1.0 − calc_codebleu([baseline], [mutated], lang=lang, weights=(0.25,0.25,0.25,0.25))`; language tag from CyberSecEval v2 test-case metadata. Implementation note: `composite_fitness.py` falls back to token-level BLEU if CodeBLEU import/computation fails, so a small fraction of `code_divergence` values may be token-BLEU.
 
@@ -207,7 +207,7 @@ Inside each tier, choices are grouped by subsystem (search, mutation, validation
 
 ## 6. Multi-mutator pool and selection
 
-**Current selection: uniform random mutator selection** (`ea_optimizer.py`). This is the **standard AOS (adaptive-operator-selection) baseline** that adaptive methods are measured *against* — a citable, unbiased default, not an unmotivated choice (supervisor-endorsed). Assigning per-mutator probabilities (a bandit or weighted scheme) is the documented next step, deferred because the search budget is too small for a bandit to learn (~30–50 iterations ÷ 8 arms). See the **Bandit note** at the top of this document.
+**Current selection: uniform random mutator selection** (`search.py`). This is the **standard AOS (adaptive-operator-selection) baseline** that adaptive methods are measured *against* — a citable, unbiased default, not an unmotivated choice (supervisor-endorsed). Assigning per-mutator probabilities (a bandit or weighted scheme) is the documented next step, deferred because the search budget is too small for a bandit to learn (~30–50 iterations ÷ 8 arms). See the **Bandit note** at the top of this document.
 
 ### ✅ Validated
 
@@ -261,7 +261,7 @@ If a bandit-vs-EA ablation on adaptive mutator selection is run as future work, 
 - *CWE note:* CWE is retained as a **retrieval join key** between test cases and rules (kept in the pipeline). It is only retired as a *reporting* stratification axis. See §8.5 and §9.1.
 
 **8.2 Baseline control (original rule) computed fresh at iteration 0**
-- *How it works:* the baseline is **not** loaded from an external file. `hill_climber.py` runs `_evaluate_with_per_prompt_rules` with `target_rule_id=None, mutator_fn=None, phase="baseline"` before the iteration loop. Per-case Semgrep fitness is cached into `self._baseline_fitness_per_case`, and per-case generated code is cached into `self.composite_evaluator.reference_codes`. Each subsequent iteration looks both up: `semgrep_delta` uses the fitness cache, `code_divergence` uses the code cache.
+- *How it works:* the baseline is **not** loaded from an external file. `engine.py` (`ExperimentEngine`) evaluates the origin chromosome once before the iteration loop, caching per-case Semgrep fitness and per-case generated code (the CodeBLEU reference in `composite_fitness.py`). Each subsequent iteration looks both up: `semgrep_delta` uses the fitness cache, `code_divergence` uses the code cache.
 - *Implication:* the pipeline is self-contained per run — one consistent iteration-0 baseline for both signals.
 - *Citation:* Paper 17 (SoS) — baseline-relative selection. Paper 20 (SCAFFOLD-CEGIS) — comparison to an un-mutated baseline is the key experimental primitive.
 
@@ -322,7 +322,7 @@ The following details are inside individual mutators and, while not load-bearing
 ## 11. Gap status and remaining work
 
 **Resolved by the current design (no longer open):**
-- **Search admission** (§1.2) — Pareto-dominance archive admission (ARIEL 41, Chen & Li 26, Miettinen 28). Implemented in `pareto_archive.py` / `ea_optimizer.py`.
+- **Search admission** (§1.2) — Pareto-dominance archive admission (ARIEL 41, Chen & Li 26, Miettinen 28). Implemented in `chromosome.py` / `search.py`.
 - **Code divergence** (§5.3) — CodeBLEU (Paper 29), implemented in `composite_fitness.py`.
 - **SBERT model** (§4.7) — `all-mpnet-base-v2` justified by MTEB (P31) + Sentence-BERT (P32).
 - **SBERT / perplexity thresholds** (§4.5–4.6) — 0.75 / 2.5, both AUGMENT values.
