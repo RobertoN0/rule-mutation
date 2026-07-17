@@ -108,7 +108,6 @@ def _build_api_command(args: dict, output_dir: str) -> list[str]:
         "--ea-injection-every", str(args.get("ea_injection_every", 10)),
         "--ea-move", str(args.get("ea_move", "local")),
         "--order-move-weight", str(args.get("order_move_weight", 0.1)),
-        "--archive-admission", str(args.get("archive_admission", "neutral_drift")),
     ]
     cmd += (
         ["--ea-origin-parent"]
@@ -149,7 +148,6 @@ def _build_slurm_env(args: dict) -> dict[str, str]:
         "EA_MOVE": str(args.get("ea_move", "local")),
         "ORDER_MOVE_WEIGHT": str(args.get("order_move_weight", 0.1)),
         "EA_ORIGIN_PARENT": "true" if args.get("ea_origin_parent", True) else "false",
-        "ARCHIVE_ADMISSION": str(args.get("archive_admission", "neutral_drift")),
         "MUTATORS": " ".join(str(x) for x in args["mutators"]),
         "ENABLE_VALIDATION": "1" if args.get("enable_validation") else "0",
         "ENABLE_PERPLEXITY": "1" if args.get("enable_perplexity") else "0",

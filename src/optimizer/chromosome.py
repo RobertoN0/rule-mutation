@@ -33,7 +33,6 @@ if TYPE_CHECKING:
 
 # Tolerance for Pareto dominance float comparisons.
 _TOL: float = 1e-9
-_ARCHIVE_ADMISSION_MODES = {"neutral_drift", "strict_repair"}
 
 
 def _sha(text: str) -> str:
@@ -270,22 +269,22 @@ class ChromosomeArchive:
     the Pareto front: it is never evicted, is always available as a parent (so a
     fresh lineage can always be started), and participates in dominance for
     admission (so a candidate worse-or-equal to baseline on every axis is
-    rejected). Exact objective ties are handled by the configured admission
-    policy below.
+    rejected).
 
-    Admission is configurable so the thesis can compare the value of neutral
-    drift explicitly:
+    Admission is **standard Pareto admission** (a candidate is kept unless the
+    origin or a front member dominates it). A genotype whose objective vector
+    equals the origin's is eligible — neither vector strictly dominates the
+    other — which lets order-only neutral variants act as stepping stones.
 
-    * ``neutral_drift`` preserves standard Pareto admission. A genotype with an
-      objective vector equal to the origin is eligible (neither vector strictly
-      dominates the other), which lets order-only neutral variants act as
-      stepping stones.
-    * ``strict_repair`` adds a hard security gate: front members must strictly
-      improve ``f1`` over the origin before Pareto admission is considered.
-
-    On stagnation the front is never wiped; instead the ``tried`` move sets on
-    all parents are cleared so exhausted neighbourhoods re-open (stochastic
-    mutators get a fresh draw).
+    On an ``"exhausted"`` restart (no eligible parent has any move left) the
+    front is kept; only the ``tried`` move sets on all parents are cleared so
+    exhausted neighbourhoods re-open (stochastic mutators get a fresh draw).
+    On a ``"stagnation"`` restart (``restart_h`` consecutive rejected "ea"-phase
+    attempts) the front is wiped outright and the caller reseeds it from a
+    fresh batch of random samples off the origin — an ARIEL-style
+    restart-on-stagnation rather than a mere neighbourhood reopen, since
+    repeatedly reopening the same stuck front's tried-sets was not enough to
+    escape it.
     """
 
     def __init__(
@@ -295,22 +294,15 @@ class ChromosomeArchive:
         cap: int,
         restart_h: int,
         rng: random.Random,
-        archive_admission: str = "neutral_drift",
     ) -> None:
         if cap < 1:
             raise ValueError(f"cap must be >= 1, got {cap}")
         if restart_h < 1:
             raise ValueError(f"restart_h must be >= 1, got {restart_h}")
-        if archive_admission not in _ARCHIVE_ADMISSION_MODES:
-            raise ValueError(
-                "archive_admission must be 'neutral_drift' or 'strict_repair', "
-                f"got {archive_admission!r}"
-            )
         self.origin = origin
         self.cap = cap
         self.restart_h = restart_h
         self._rng = rng
-        self.archive_admission = archive_admission
 
         self.entries: list[RuleSetChromosome] = []
         self._attempts_since_insert = 0
@@ -367,10 +359,9 @@ class ChromosomeArchive:
     ) -> tuple[bool, str]:
         """Offer ``child`` to the archive. Returns ``(accepted, reason)``.
 
-        Rejected if its ``cid`` duplicates an existing member (incl. origin), if
-        ``strict_repair`` is active and it does not improve security over the
-        origin, or if it is dominated by the origin/front. On accept it evicts
-        every front member it dominates and, on overflow, the lowest-f1 member
+        Rejected if its ``cid`` duplicates an existing member (incl. origin) or
+        if it is dominated by the origin/front. On accept it evicts every front
+        member it dominates and, on overflow, the lowest-f1 member
         (lexicographic: f1, then f2+f3, then age; the just-added child is safe).
 
         ``count_rejection_for_stagnation=False`` is used for EA initialization
@@ -384,12 +375,6 @@ class ChromosomeArchive:
             self.n_rejected += 1
             self.n_dup_rejected += 1
             return False, "duplicate"
-
-        if (self.archive_admission == "strict_repair" and child.f1 <= self.origin.f1 + _TOL):
-            if count_rejection_for_stagnation:
-                self._attempts_since_insert += 1
-            self.n_rejected += 1
-            return False, "not_strict_repair"
 
         if dominates(self.origin, child) or any(dominates(e, child) for e in self.entries):
             if count_rejection_for_stagnation:
@@ -427,14 +412,26 @@ class ChromosomeArchive:
     def should_restart(self) -> bool:
         return self._attempts_since_insert >= self.restart_h
 
-    def restart(self, iteration: int, reason: str = "stagnation") -> None:
-        """Re-open exploration without wiping the front (clears tried moves)."""
+    def restart(
+        self, iteration: int, reason: str = "stagnation", *, wipe_front: bool = False
+    ) -> None:
+        """Re-open exploration. Always clears ``tried`` move sets on the parents.
+
+        ``wipe_front=True`` additionally discards the current front (``entries``
+        emptied) — used for stagnation-cap restarts, so the caller can reseed a
+        fresh random population instead of re-exploring the same stuck front.
+        Recorded ``front_size``/``parents_reopened`` reflect the pre-wipe state.
+        """
+        front_size = len(self.entries)
         self.restart_history.append({
             "iteration": iteration,
             "reason": reason,
-            "front_size": len(self.entries),
-            "parents_reopened": len(self.entries) + 1,
+            "front_size": front_size,
+            "parents_reopened": front_size + 1,
+            "wiped_front": wipe_front,
         })
+        if wipe_front:
+            self.entries = []
         for c in self.parents():
             c.tried = set()
         self._attempts_since_insert = 0
@@ -459,7 +456,6 @@ class ChromosomeArchive:
         return {
             "cap": self.cap,
             "restart_h": self.restart_h,
-            "archive_admission": self.archive_admission,
             "origin": {
                 "cid": self.origin.cid,
                 "f1": round(self.origin.f1, 6),

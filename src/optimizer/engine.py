@@ -137,11 +137,6 @@ class SearchConfig:
     restart_h: int = 8
     """EA only: consecutive non-inserts before stagnation restart. Sweep-tunable."""
 
-    archive_admission: str = "neutral_drift"
-    """EA archive policy: ``neutral_drift`` preserves objective-equal variants
-    as possible stepping stones; ``strict_repair`` requires f1 to be strictly
-    better than the origin. Explicit ablation pending supervisor review."""
-
     max_depth: int = 4
     """Per-rule stacked-mutation depth cap (mutations from original), enforced
     in both arms and inside the random-chromosome sampler."""
@@ -551,7 +546,6 @@ class ExperimentEngine:
             "schema_version": 4,
             "cap": snap.get("cap"),
             "restart_h": snap.get("restart_h"),
-            "archive_admission": snap.get("archive_admission"),
             "origin": snap.get("origin"),
             "n_inserts": snap.get("n_inserts"),
             "n_rejected": snap.get("n_rejected"),
@@ -782,7 +776,6 @@ class ExperimentEngine:
                     random_max_changes=self.config.random_max_changes,
                     order_move_weight=self.config.order_move_weight,
                     ea_origin_parent=self.config.ea_origin_parent,
-                    archive_admission=self.config.archive_admission,
                     seed=seed, log=self._log,
                     iter_record_fn=self._append_iteration_record,
                     archive_snapshot_fn=snapshot_fn,

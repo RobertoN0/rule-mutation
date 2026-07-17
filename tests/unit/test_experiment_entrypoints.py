@@ -28,7 +28,6 @@ def _recorded_args() -> dict:
         "ea_move": "local",
         "order_move_weight": 0.1,
         "ea_origin_parent": False,
-        "archive_admission": "strict_repair",
         "enable_validation": True,
         "enable_perplexity": False,
         "enable_eval_cache": True,
@@ -47,24 +46,22 @@ def test_baseline_harness_uses_current_experiment_entrypoint() -> None:
     assert baseline_harness.RULES_DIR == run_experiment.RULES_DIR
 
 
-def test_rerun_api_command_preserves_admission_and_retry_policy() -> None:
+def test_rerun_api_command_preserves_origin_parent_and_temperature() -> None:
     from scripts.experiments.rerun_from_config import _build_api_command
 
     cmd = _build_api_command(_recorded_args(), "rerun-output")
 
-    assert cmd[cmd.index("--archive-admission") + 1] == "strict_repair"
     assert cmd[cmd.index("--temperature") + 1] == "0.25"
     # ea_origin_parent=False in the payload ⇒ the negated flag is emitted
     assert "--no-ea-origin-parent" in cmd
     assert "--ea-origin-parent" not in cmd
 
 
-def test_rerun_slurm_env_preserves_admission_and_retry_policy() -> None:
+def test_rerun_slurm_env_preserves_origin_parent_and_dtype() -> None:
     from scripts.experiments.rerun_from_config import _build_slurm_env
 
     env = _build_slurm_env(_recorded_args())
 
-    assert env["ARCHIVE_ADMISSION"] == "strict_repair"
     assert env["TEMPERATURE"] == "0.25"
     assert env["BNB_COMPUTE_DTYPE"] == "bfloat16"
     assert env["EA_ORIGIN_PARENT"] == "false"

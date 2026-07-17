@@ -11,8 +11,6 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import pytest
-
 from src.evaluation.composite_fitness import CompositeFitnessEvaluator
 from src.evaluation.rule_mapping import PromptWithRules
 from src.evaluation.semgrep_runner import SemgrepResult, SemgrepFinding
@@ -86,7 +84,7 @@ def test_ea_end_to_end_writes_schema4(tmp_path: Path):
     # more BAD markers ⇒ more findings ⇒ positive f1 under maximize
     assert result.best_fitness.total_semgrep_delta > 0
 
-    iters = [json.loads(l) for l in (tmp_path / "iterations.jsonl").read_text().splitlines() if l]
+    iters = [json.loads(line) for line in (tmp_path / "iterations.jsonl").read_text().splitlines() if line]
     assert iters and all(it["strategy"] == "ea" for it in iters)
     assert all(it["phase"] == "init" for it in iters)  # 10 iters = the init phase
     real = [it for it in iters if not it["mutation_identity"]]
@@ -96,7 +94,6 @@ def test_ea_end_to_end_writes_schema4(tmp_path: Path):
     assert snaps
     snap = json.loads(snaps[-1].read_text())
     assert snap["schema_version"] == 4 and "chromosomes" in snap
-    assert snap["archive_admission"] == "neutral_drift"
     # a surviving entry references its gene texts under mutated_rules/
     if snap["chromosomes"]:
         entry = snap["chromosomes"][0]
@@ -138,7 +135,7 @@ def test_ea_saves_every_evaluated_iter_and_identity_keeps_cid(tmp_path: Path):
     with patch("src.optimizer.engine.run_semgrep_batch_dir", side_effect=_semgrep_stub):
         hc.run_search(_prompts())
 
-    iters = [json.loads(l) for l in (tmp_path / "iterations.jsonl").read_text().splitlines() if l]
+    iters = [json.loads(line) for line in (tmp_path / "iterations.jsonl").read_text().splitlines() if line]
     evaluated = [it for it in iters if not it["mutation_identity"]]
     identity = [it for it in iters if it["mutation_identity"]]
     saved = {int(m.parent.name.replace("iter", "")) for m in (tmp_path / "mutated_rules").glob("iter*/meta.json")}
@@ -183,7 +180,7 @@ def test_validation_metadata_flows_when_enabled(tmp_path: Path):
     with patch("src.optimizer.engine.run_semgrep_batch_dir", side_effect=_semgrep_stub):
         hc.run_search(_prompts())
 
-    iters = [json.loads(l) for l in (tmp_path / "iterations.jsonl").read_text().splitlines() if l]
+    iters = [json.loads(line) for line in (tmp_path / "iterations.jsonl").read_text().splitlines() if line]
     # validation_metadata is per changed gene: {rule_id: quality_meta}. Text
     # mutations and sampler children carry it; saturated-gene reverts
     # (move_type "reverse") restore the original text, which needs no check.
@@ -209,7 +206,7 @@ def test_validation_absent_when_disabled(tmp_path: Path):
     hc = _climber(tmp_path, "ea", iters=6)  # enable_validation defaults False, validator None
     with patch("src.optimizer.engine.run_semgrep_batch_dir", side_effect=_semgrep_stub):
         hc.run_search(_prompts())
-    iters = [json.loads(l) for l in (tmp_path / "iterations.jsonl").read_text().splitlines() if l]
+    iters = [json.loads(line) for line in (tmp_path / "iterations.jsonl").read_text().splitlines() if line]
     assert all(it["validation_metadata"] == {} for it in iters)
 
 
@@ -218,7 +215,7 @@ def test_random_end_to_end_writes_schema4(tmp_path: Path):
     with patch("src.optimizer.engine.run_semgrep_batch_dir", side_effect=_semgrep_stub):
         result = hc.run_search(_prompts())
 
-    iters = [json.loads(l) for l in (tmp_path / "iterations.jsonl").read_text().splitlines() if l]
+    iters = [json.loads(line) for line in (tmp_path / "iterations.jsonl").read_text().splitlines() if line]
     assert iters and all(it["strategy"] == "random_search" for it in iters)
     assert all(it["phase"] == "random" for it in iters)
     # random keeps no archive

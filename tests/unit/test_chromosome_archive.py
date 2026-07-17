@@ -155,6 +155,22 @@ class TestRestart:
         assert e.tried == set()                  # exploration re-opened
         assert arc.origin.tried == set()
         assert arc.restart_history[-1]["front_size"] == 1
+        assert arc.restart_history[-1]["wiped_front"] is False
+
+    def test_restart_with_wipe_front_clears_entries(self, space):
+        arc = _archive(space, restart_h=1)
+        e = _mk(space, "a", "A!", 1.0, 0.1, 0.1)
+        arc.try_add(e, 1)
+        e.tried.add(("mut", "a", "m"))
+        arc.origin.tried.add(("mut", "b", "m"))
+        arc.try_add(_mk(space, "a", "A!", 1.0, 0.1, 0.1), 2)  # dup ⇒ attempts_since_insert++
+        assert arc.should_restart()
+        arc.restart(iteration=3, reason="stagnation", wipe_front=True)
+        assert len(arc) == 0                     # front wiped, not just reopened
+        assert arc.origin.tried == set()         # origin (the only remaining parent) reopened
+        assert arc.restart_history[-1]["front_size"] == 1  # pre-wipe size, recorded
+        assert arc.restart_history[-1]["wiped_front"] is True
+        assert arc.should_restart() is False     # counter reset by the wipe too
 
 
 # ---------------------------------------------------------------------------

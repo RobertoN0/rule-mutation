@@ -319,16 +319,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "--archive-admission",
-        choices=["neutral_drift", "strict_repair"],
-        default=os.getenv("ARCHIVE_ADMISSION", "neutral_drift"),
-        help=(
-            "EA archive ablation: 'neutral_drift' (default) preserves "
-            "objective-equal variants as possible stepping stones; "
-            "'strict_repair' requires f1 to strictly improve over the origin."
-        ),
-    )
-    parser.add_argument(
         "--max-depth",
         type=int,
         default=4,
@@ -824,7 +814,6 @@ def build_search_config(args: argparse.Namespace) -> SearchConfig:
         optimizer=args.optimizer,
         archive_cap=args.archive_cap,
         restart_h=args.restart_h,
-        archive_admission=args.archive_admission,
         max_depth=args.max_depth,
         random_max_changes=args.random_max_changes,
         ea_n_mutations=args.ea_n_mutations,
@@ -864,7 +853,7 @@ def print_config_summary(args: argparse.Namespace, config: SearchConfig, n_promp
         print(f"   Optimizer: ea (move={args.ea_move}, chain≤{args.ea_n_mutations}, "
               f"init={args.ea_init_samples}, inject_every={args.ea_injection_every}, "
               f"archive_cap={args.archive_cap}, restart_h={args.restart_h}, "
-              f"admission={args.archive_admission}, max_depth={args.max_depth}, "
+              f"max_depth={args.max_depth}, "
               f"order_w={args.order_move_weight}, "
               f"origin_parent={args.ea_origin_parent})")
     else:
@@ -938,7 +927,6 @@ def save_run_config(args: argparse.Namespace, semgrep_config: dict, timestamp: s
             "objective_direction":    args.objective_direction,
             "archive_cap":            args.archive_cap,
             "restart_h":              args.restart_h,
-            "archive_admission":      args.archive_admission,
             "max_depth":              args.max_depth,
             "random_max_changes":     args.random_max_changes,
             "ea_n_mutations":         args.ea_n_mutations,

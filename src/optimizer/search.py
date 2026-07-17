@@ -38,7 +38,7 @@ from typing import Any, Callable, TYPE_CHECKING
 
 from ..evaluation.fitness import AggregatedFitness
 from ..mutation import Mutator
-from .chromosome import ChromosomeArchive, RuleSetChromosome, RuleSetSpace
+from .chromosome import ChromosomeArchive, RuleSetChromosome, RuleSetSpace, dominates
 
 if TYPE_CHECKING:
     from .engine import IterationResult
@@ -365,7 +365,11 @@ def build_random_chromosome(
 
 # Moves built by the shared sampler: they touch many rules at once, so a flat
 # rule=/mutator=/depth= triple would misreport them as one chain on one rule.
-_SAMPLE_MOVE_TYPES = frozenset({"init_random", "injection_random", "random_builder"})
+# ``restart_random`` is a stagnation-restart reseed — same origin-based sampler
+# as init/injection, so it logs with the same accounting.
+_SAMPLE_MOVE_TYPES = frozenset(
+    {"init_random", "injection_random", "random_builder", "restart_random"}
+)
 
 
 def _count_order_ops(attempted_operators: list[str]) -> int:
@@ -433,7 +437,6 @@ def run_ea(
     random_max_changes: int = 10,
     order_move_weight: float = 0.1,
     ea_origin_parent: bool = True,
-    archive_admission: str = "neutral_drift",
     identity_retry_limit: int = _IDENTITY_RETRY_LIMIT,
     seed: int | None,
     log: Callable[[str], None],
@@ -453,14 +456,20 @@ def run_ea(
     * ``init`` — the first ``init_random_samples`` iterations sample independent
       random chromosomes from the ORIGIN via :func:`build_random_chromosome`
       (exactly the random-search sampler) and offer each to the archive.
-      Population-style seeding: the later 1+1 loop builds on the best of them.
+      Population-style seeding: the later 1+1 loop starts from their Pareto front.
     * ``injection`` — after init, every ``random_injection_every``-th iteration
       injects one more origin-based random chromosome (0 disables). Diversity
-      maintenance: the archive is never wiped; dominance decides.
+      maintenance: the archive is not wiped for this; dominance decides.
     * ``ea`` — pick a parent from the archive (the origin is also sampleable when
       ``ea_origin_parent`` is on, so a minimal parsimony-1 lineage can always be
       seeded), take a move, evaluate the WHOLE chromosome, offer it by Pareto
       dominance.
+    * ``restart`` — triggered when an "ea"-phase attempt hits ``restart_h``
+      consecutive rejections (stagnation): the front is wiped
+      (:meth:`ChromosomeArchive.restart` with ``wipe_front=True``) and the next
+      ``init_random_samples`` iterations reseed it exactly like ``init``, one
+      fresh origin-based random sample per iteration (ARIEL-style
+      restart-on-stagnation), before normal ``injection``/``ea`` cadence resumes.
 
     The ``ea``-phase move depends on ``ea_move``:
 
@@ -486,7 +495,6 @@ def run_ea(
         cap=archive_cap,
         restart_h=restart_h,
         rng=rng,
-        archive_admission=archive_admission,
     )
 
     iterations: list["IterationResult"] = []
@@ -511,6 +519,7 @@ def run_ea(
     attempt_count = 0
     identity_retries = 0
     last_completed = 0
+    reseed_remaining = 0  # iterations left in an active stagnation reseed burst
     while evaluated_count < max_iterations:
         if should_stop_fn is not None and should_stop_fn():
             log(f"\n⏹️  Graceful stop (SLURM pre-timeout) — stopping after "
@@ -523,8 +532,12 @@ def run_ea(
         attempt_count += 1
         attempt_in_iter = identity_retries + 1
 
+        restarts_this_iter: list[dict[str, Any]] = []
+
         if evaluated_count < init_n:
             phase = "init"
+        elif reseed_remaining > 0:
+            phase = "restart"
         elif (
             random_injection_every > 0
             and (evaluated_count - init_n + 1) % random_injection_every == 0
@@ -532,15 +545,25 @@ def run_ea(
             phase = "injection"
         else:
             phase = "ea"
+            # ---- stagnation cap: wipe the front, reseed like init/injection --
+            if archive.should_restart():
+                front_size_before_restart = len(archive)
+                archive.restart(iteration=budget_iter, reason="stagnation", wipe_front=True)
+                restart_reason_counts["stagnation"] += 1
+                restarts_this_iter.append({"reason": "stagnation", "wiped_front": True})
+                reseed_remaining = max(1, init_n)  # always reseed >=1 even if init_n==0
+                log(f"   ↻ archive restart: stagnation — wiping front (was "
+                    f"{front_size_before_restart}) and reseeding "
+                    f"{reseed_remaining} random samples")
+                phase = "restart"
 
-        restarts_this_iter: list[dict[str, Any]] = []
         n_changes: int | None = None
         n_attempted_changes: int | None = None
         n_effective_changes: int | None = None
         attempted_operators: list[str] = []
         attempted_mutators: list[str] = []
 
-        if phase in ("init", "injection"):
+        if phase in ("init", "injection", "restart"):
             # ---- random sample from the ORIGIN (never from the front) --------
             parent = archive.origin
             sample = build_random_chromosome(
@@ -556,17 +579,12 @@ def run_ea(
             attempted_mutators = sample.attempted_mutators
             chain_names = sample.effective_mutators
             changes = sample.changes
-            move_type = "init_random" if phase == "init" else "injection_random"
+            move_type = {
+                "init": "init_random", "injection": "injection_random", "restart": "restart_random",
+            }[phase]
             rule_id = None
             is_identity = _is_render_identity(space, origin, child, prompts_with_rules)
         else:
-            # ---- 0. restart on stagnation (re-open, never wipe) --------------
-            if archive.should_restart():
-                archive.restart(iteration=budget_iter, reason="stagnation")
-                restart_reason_counts["stagnation"] += 1
-                restarts_this_iter.append({"reason": "stagnation"})
-                log(f"   ↻ archive restart: stagnation (front_size={len(archive)})")
-
             # ---- 1. pick a parent (restart re-opens exploration if exhausted)
             parent = archive.sample_parent(_is_eligible, include_origin=ea_origin_parent)
             if parent is None:
@@ -656,7 +674,6 @@ def run_ea(
                          eligible=len(space.all_rule_ids), restarts=restarts_this_iter,
                          phase=phase, n_changes=n_changes, attempt=attempt_count,
                          attempt_in_iter=attempt_in_iter, budget_consumed=False,
-                         archive_admission=archive_admission,
                          attempted_operators=attempted_operators,
                          attempted_mutators=attempted_mutators,
                          n_attempted_changes=n_attempted_changes,
@@ -706,7 +723,8 @@ def run_ea(
 
         # ---- 5. offer to the archive ----------------------------------------
         parent_f1 = parent.f1
-        front_before = {e.cid for e in archive.entries}
+        front_before_entries = list(archive.entries)
+        front_before = {e.cid for e in front_before_entries}
         size_before = len(archive)
         accepted, reason = archive.try_add(
             child,
@@ -714,6 +732,14 @@ def run_ea(
             count_rejection_for_stagnation=(phase == "ea"),
         )
         evicted = front_before - {e.cid for e in archive.entries}
+        # Two eviction sources fire inside one try_add: members the child
+        # dominates, and (on cap overflow) the single lowest-f1 survivor. Split
+        # them for the log — the overflow set is whatever left that the child
+        # did not dominate.
+        evicted_dominated = {
+            e.cid for e in front_before_entries if e.cid in evicted and dominates(child, e)
+        }
+        evicted_overflow = evicted - evicted_dominated
         if accepted:
             n_accepted += 1
             if chain_names:
@@ -728,9 +754,10 @@ def run_ea(
                         mutator_stats[name]["archive_adds_f1"] += 1
             log(f"   ✅ archive add: f1={child.f1:+.2f} f2={child.f2:.3f} f3={child.f3:.3f} "
                 f"(front={len(archive)}/{archive.cap}, cid={child.cid})")
-            if evicted:
-                log(f"   ⤷ evicted from front (dominated or cap-overflow): "
-                    f"{', '.join(sorted(evicted))}")
+            if evicted_dominated:
+                log(f"   ⤷ evicted_dominated={', '.join(sorted(evicted_dominated))}")
+            if evicted_overflow:
+                log(f"   ⤷ evicted_overflow={', '.join(sorted(evicted_overflow))}")
             if len(archive) < size_before:
                 log(f"   ↧ front shrank {size_before} → {len(archive)}")
         else:
@@ -762,11 +789,16 @@ def run_ea(
                      parent_f1=parent_f1, validation_metadata=validation_metadata,
                      phase=phase, n_changes=n_changes, attempt=attempt_count,
                      attempt_in_iter=attempt_in_iter, budget_consumed=True,
-                     archive_admission=archive_admission,
                      attempted_operators=attempted_operators,
                      attempted_mutators=attempted_mutators,
                      n_attempted_changes=n_attempted_changes,
                      n_effective_changes=n_effective_changes)
+
+        # A restart slot is an evaluated random sample, not merely a proposal.
+        # Identity attempts retry in the same phase without consuming the
+        # evaluation budget or shortening the reseed burst.
+        if phase == "restart":
+            reseed_remaining -= 1
 
         evaluated_count += 1
         last_completed = evaluated_count
@@ -1120,7 +1152,6 @@ def _emit_record(
     attempt: int | None = None,
     attempt_in_iter: int = 1,
     budget_consumed: bool = True,
-    archive_admission: str | None = None,
     attempted_operators: list[str] | None = None,
     attempted_mutators: list[str] | None = None,
     n_attempted_changes: int | None = None,
@@ -1166,7 +1197,6 @@ def _emit_record(
         "priority_offset_count": len(child.order_priority) if child is not None else 0,
         "gene_depth": gene_depth,
         "objective_mode": "conservative",
-        "archive_admission": archive_admission,
         "f1": f1, "f2": f2, "f3": f3,
         "security_neutral": bool(f1 is not None and abs(f1) <= 1e-9),
         "proportion_divergent": prop_div,

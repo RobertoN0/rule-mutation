@@ -1,8 +1,9 @@
 """Regression tests for the 2026-07-12 optimizer stabilization pass.
 
-These tests pin down two experimental-design contracts that are easy to blur:
+These tests pin down experimental-design contracts that are easy to blur:
 
-* archive admission is an explicit ablation (neutral drift vs strict repair),
+* archive admission uses standard Pareto dominance with neutral drift,
+* stagnation restarts wipe and reseed the archive front, and
 * ``max_iterations`` is an evaluation budget, not a candidate-attempt budget.
 
 No LLM or Semgrep process is used.
@@ -17,7 +18,7 @@ from src.evaluation.fitness import AggregatedFitness
 from src.evaluation.rule_mapping import PromptWithRules
 from src.mutation.base import MutationResult, Mutator
 from src.optimizer.chromosome import ChromosomeArchive, RuleSetSpace
-from src.optimizer.engine import IterationResult, SearchConfig
+from src.optimizer.engine import IterationResult
 import src.optimizer.search as search
 
 
@@ -84,7 +85,7 @@ def _evaluated_record_contract(records: list[dict], budget: int) -> None:
     )
 
 
-class TestArchiveAdmissionAblation:
+class TestArchiveAdmission:
     def _order_only_equal_candidate(self, space, origin):
         # r2 is moved ahead of r1, so this is a distinct genotype and render,
         # but it has exactly the origin objective vector (0, 1, 0).
@@ -92,12 +93,14 @@ class TestArchiveAdmissionAblation:
         child.f1, child.f2, child.f3 = origin.f1, origin.f2, origin.f3
         return child
 
-    def test_neutral_drift_accepts_objective_equal_order_candidate(self):
+    def test_objective_equal_order_candidate_is_admitted_as_neutral_drift(self):
+        # Standard Pareto admission (the only policy): a candidate whose
+        # objective vector ties the origin is not dominated, so it is admitted
+        # as a neutral-drift stepping stone.
         space = _space()
         origin = _origin(space)
         archive = ChromosomeArchive(
             origin, cap=6, restart_h=8, rng=random.Random(0),
-            archive_admission="neutral_drift",
         )
 
         accepted, reason = archive.try_add(
@@ -106,52 +109,9 @@ class TestArchiveAdmissionAblation:
 
         assert accepted and reason == "accepted"
         assert len(archive) == 1
-        snap = archive.snapshot()
-        assert snap["archive_admission"] == "neutral_drift"
-        assert snap["n_neutral_inserts"] == 1
+        assert archive.snapshot()["n_neutral_inserts"] == 1
         # Neutral drift affects parent selection, not the reported best repair.
         assert archive.best() is origin
-
-    def test_strict_repair_rejects_objective_equal_order_candidate(self):
-        space = _space()
-        origin = _origin(space)
-        archive = ChromosomeArchive(
-            origin, cap=6, restart_h=8, rng=random.Random(0),
-            archive_admission="strict_repair",
-        )
-
-        accepted, reason = archive.try_add(
-            self._order_only_equal_candidate(space, origin), iteration=1,
-        )
-
-        assert not accepted and reason == "not_strict_repair"
-        assert len(archive) == 0
-
-    def test_strict_repair_still_accepts_an_ordered_security_improver(self):
-        space = _space()
-        origin = _origin(space)
-        archive = ChromosomeArchive(
-            origin, cap=6, restart_h=8, rng=random.Random(0),
-            archive_admission="strict_repair",
-        )
-        child = self._order_only_equal_candidate(space, origin)
-        child.f1 = 0.25
-
-        accepted, reason = archive.try_add(child, iteration=1)
-
-        assert accepted and reason == "accepted"
-
-    def test_unknown_policy_is_rejected(self):
-        space = _space()
-        with pytest.raises(ValueError, match="archive_admission"):
-            ChromosomeArchive(
-                _origin(space), cap=6, restart_h=8, rng=random.Random(0),
-                archive_admission="unknown",
-            )
-
-    def test_search_config_exposes_admission_knob(self):
-        assert SearchConfig().archive_admission == "neutral_drift"
-        assert SearchConfig(archive_admission="strict_repair").archive_admission == "strict_repair"
 
 
 class TestTriedMoveBookkeeping:
@@ -160,7 +120,6 @@ class TestTriedMoveBookkeeping:
         parent = _origin(space)
         archive = ChromosomeArchive(
             parent, cap=3, restart_h=8, rng=random.Random(0),
-            archive_admission="neutral_drift",
         )
         args = (
             parent, space, _prompt(("r1",)), [_AppendMutator()], random.Random(0),
@@ -200,7 +159,6 @@ class TestTriedMoveBookkeeping:
             init_random_samples=0,
             random_injection_every=0,
             order_move_weight=0.0,
-            archive_admission="neutral_drift",
             identity_retry_limit=5,
             seed=0,
             log=lambda _msg: None,
@@ -227,7 +185,6 @@ class TestTriedMoveBookkeeping:
             init_random_samples=0,
             random_injection_every=0,
             order_move_weight=0.0,
-            archive_admission="neutral_drift",
             identity_retry_limit=5,
             seed=0,
             log=lambda _msg: None,
@@ -333,7 +290,6 @@ class TestEvaluationBudget:
             random_injection_every=2,
             random_max_changes=1,
             order_move_weight=0.0,
-            archive_admission="neutral_drift",
             identity_retry_limit=5,
             seed=3,
             log=lambda _msg: None,
@@ -390,9 +346,7 @@ class TestEvaluationBudget:
                     init_random_samples=1,
                     random_injection_every=0,
                     random_max_changes=1,
-                    order_move_weight=0.0,
-                    archive_admission="neutral_drift",
-                )
+                    order_move_weight=0.0,                )
             else:
                 search.run_random_search(
                     **common,
@@ -428,7 +382,6 @@ class TestStagnationIsolation:
             random_injection_every=injection_every,
             random_max_changes=1,
             order_move_weight=0.0,
-            archive_admission="neutral_drift",
             identity_retry_limit=5,
             seed=0,
             log=lambda _msg: None,
@@ -446,3 +399,110 @@ class TestStagnationIsolation:
         # trigger a restart before eval 3.
         result = self._run_all_rejected(init_samples=0, injection_every=2, restart_h=2)
         assert result.restart_reason_counts["stagnation"] == 0
+
+
+class TestStagnationCapWipesFrontAndReseeds:
+    def test_stagnation_restart_wipes_front_and_forces_a_random_reseed(self):
+        """Hitting restart_h no longer just reopens tried-sets: it wipes the
+        front outright and forces the next iteration(s) through the same
+        random-sample-from-origin path as init/injection (ARIEL-style
+        restart-on-stagnation)."""
+        space = _space(("r1",))
+        calls = 0
+
+        def evaluate(_child, _iter_id):
+            nonlocal calls
+            calls += 1
+            # First candidate repairs (accepted); everything after is
+            # dominated by the origin (rejected) to drive up the stagnation
+            # streak deterministically.
+            return _fit(1.0 if calls == 1 else -1.0), [], 0, 0
+
+        records: list[dict] = []
+        result = search.run_ea(
+            space=space,
+            origin=_origin(space),
+            prompts_with_rules=_prompt(("r1",)),
+            mutators=[_AppendMutator("m0"), _AppendMutator("m1"), _AppendMutator("m2")],
+            evaluate_chromosome_fn=evaluate,
+            iteration_result_factory=IterationResult,
+            max_iterations=5,
+            archive_cap=3,
+            restart_h=2,
+            max_depth=3,
+            init_random_samples=0,
+            random_injection_every=0,
+            random_max_changes=1,
+            order_move_weight=0.0,
+            identity_retry_limit=5,
+            seed=0,
+            log=lambda _msg: None,
+            iter_record_fn=records.append,
+        )
+
+        assert result.restart_reason_counts["stagnation"] == 1
+        evaluated = [r for r in records if r["budget_consumed"]]
+        assert [r["phase"] for r in evaluated] == ["ea", "ea", "ea", "restart", "ea"]
+        assert evaluated[3]["move_type"] == "restart_random"
+
+        snap = result.archive_snapshot
+        assert snap["entries"] == []  # the one accepted entry was wiped, not just re-opened
+        stagnation_events = [h for h in snap["restart_history"] if h["reason"] == "stagnation"]
+        assert len(stagnation_events) == 1
+        assert stagnation_events[0]["wiped_front"] is True
+        assert stagnation_events[0]["front_size"] == 1  # pre-wipe size
+
+    def test_restart_identity_retry_does_not_consume_reseed_slot(self, monkeypatch):
+        space = _space(("r1",))
+        builder_calls = 0
+
+        def scripted_builder(space, base, mutators, _rng, **_kwargs):
+            nonlocal builder_calls
+            builder_calls += 1
+            name = mutators[0].name
+            if builder_calls == 1:
+                return search.RandomBuildResult(
+                    base, 1, 1, 0, [f"mutator:{name}:r1"], [name], [], ["identity"]
+                )
+            child = space.stamp(base.with_gene("r1", "R1|restart", name))
+            return search.RandomBuildResult(
+                child, 1, 1, 1, [f"mutator:{name}:r1"], [name], [name], ["changed"]
+            )
+
+        monkeypatch.setattr(search, "build_random_chromosome", scripted_builder)
+        evaluations = 0
+
+        def evaluate(_child, _iter_id):
+            nonlocal evaluations
+            evaluations += 1
+            # Accept one front member, then reject the next local move so H=1
+            # triggers a wipe before evaluation 3.
+            return _fit(1.0 if evaluations == 1 else -1.0), [], 0, 0
+
+        records: list[dict] = []
+        search.run_ea(
+            space=space,
+            origin=_origin(space),
+            prompts_with_rules=_prompt(("r1",)),
+            mutators=[_AppendMutator("m0"), _AppendMutator("m1"), _AppendMutator("m2")],
+            evaluate_chromosome_fn=evaluate,
+            iteration_result_factory=IterationResult,
+            max_iterations=3,
+            archive_cap=3,
+            restart_h=1,
+            max_depth=3,
+            init_random_samples=0,
+            random_injection_every=0,
+            random_max_changes=1,
+            order_move_weight=0.0,
+            identity_retry_limit=5,
+            seed=0,
+            log=lambda _msg: None,
+            iter_record_fn=records.append,
+        )
+
+        evaluated = [r for r in records if r["budget_consumed"]]
+        identities = [r for r in records if not r["budget_consumed"]]
+        assert [r["phase"] for r in evaluated] == ["ea", "ea", "restart"]
+        assert [(r["iter"], r["phase"]) for r in identities] == [(3, "restart")]
+        assert builder_calls == 2

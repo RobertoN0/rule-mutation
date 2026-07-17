@@ -65,7 +65,6 @@ set -e
 OPTIMIZER=${OPTIMIZER:-ea}                # "ea" | "random_search"
 ARCHIVE_CAP=${ARCHIVE_CAP:-6}             # Pareto archive size (EA)
 RESTART_H=${RESTART_H:-8}                 # stagnation threshold (EA)
-ARCHIVE_ADMISSION=${ARCHIVE_ADMISSION:-neutral_drift}  # neutral_drift | strict_repair
 MAX_DEPTH=${MAX_DEPTH:-4}                 # per-rule stacked-mutation depth cap (both arms)
 RANDOM_MAX_CHANGES=${RANDOM_MAX_CHANGES:-10}  # sampler K: n_changes in [1,K]
 EA_N_MUTATIONS=${EA_N_MUTATIONS:-1}       # EA local move chain cap (1 = canonical step)
@@ -124,7 +123,6 @@ if [ "$OPTIMIZER" = "ea" ]; then
     echo "  Inject every:    $EA_INJECTION_EVERY"
     echo "  Archive cap:     $ARCHIVE_CAP"
     echo "  Restart h:       $RESTART_H"
-    echo "  Admission:       $ARCHIVE_ADMISSION"
     echo "  Origin parent:   $EA_ORIGIN_PARENT"
 fi
 echo "  Max depth:       $MAX_DEPTH"
@@ -255,7 +253,6 @@ python scripts/experiments/run_experiment.py \
     --optimizer "$OPTIMIZER" \
     --archive-cap "$ARCHIVE_CAP" \
     --restart-h "$RESTART_H" \
-    --archive-admission "$ARCHIVE_ADMISSION" \
     --max-depth "$MAX_DEPTH" \
     --random-max-changes "$RANDOM_MAX_CHANGES" \
     --ea-n-mutations "$EA_N_MUTATIONS" \
