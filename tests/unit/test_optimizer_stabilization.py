@@ -137,13 +137,18 @@ class TestTriedMoveBookkeeping:
         assert reopened is not None and reopened[1] == move_key
 
     def test_exhausted_parent_restarts_before_reusing_its_only_move(self):
+        # With the empty-front safe net, the exhausted-restart path is reached
+        # only once the front holds an elite: origin-parent OFF + a single seeded
+        # parent whose sole (max-depth) move gets tried, so the next ea iteration
+        # finds no untried move and must restart (reopen the tried set), not stall.
         space = _space(("r1",))
         calls: list[str] = []
 
         def evaluate(_child, iter_id):
             calls.append(iter_id)
-            # Dominated by the origin, so the child never becomes another parent.
-            return _fit(-1.0), [], 0, 0
+            # Accept the first (init) sample to seed the front; reject the rest so
+            # they never become parents but keep exploiting the one seeded elite.
+            return _fit(1.0 if len(calls) == 1 else -1.0), [], 0, 0
 
         result = search.run_ea(
             space=space,
@@ -152,22 +157,28 @@ class TestTriedMoveBookkeeping:
             mutators=[_AppendMutator()],
             evaluate_chromosome_fn=evaluate,
             iteration_result_factory=IterationResult,
-            max_iterations=2,
+            max_iterations=3,
             archive_cap=3,
             restart_h=10,
             max_depth=1,
-            init_random_samples=0,
+            init_random_samples=1,
             random_injection_every=0,
             order_move_weight=0.0,
-            identity_retry_limit=5,
+            ea_origin_parent=False,
+            identity_retry_limit=8,
             seed=0,
             log=lambda _msg: None,
         )
 
-        assert calls == ["ea_iter0001", "ea_iter0002"]
+        assert calls == ["ea_iter0001", "ea_iter0002", "ea_iter0003"]
+        assert len(result.iterations) == 3  # ran to budget; no early stop
         assert result.restart_reason_counts["exhausted"] == 1
+        assert len(result.archive_snapshot["entries"]) == 1  # the seeded elite
 
     def test_local_move_records_requested_attempted_effective_counts(self):
+        # The ea phase takes a local move only on a non-empty front (an empty one
+        # would take the no_parent_fallback sampler), so seed one accepted init
+        # sample, then check the following ea local move's change counts (1/1/1).
         space = _space(("r1",))
         records: list[dict] = []
 
@@ -175,14 +186,14 @@ class TestTriedMoveBookkeeping:
             space=space,
             origin=_origin(space),
             prompts_with_rules=_prompt(("r1",)),
-            mutators=[_AppendMutator()],
+            mutators=[_AppendMutator("m0"), _AppendMutator("m1"), _AppendMutator("m2")],
             evaluate_chromosome_fn=lambda *_args: (_fit(1.0), [], 0, 0),
             iteration_result_factory=IterationResult,
-            max_iterations=1,
+            max_iterations=2,
             archive_cap=3,
             restart_h=10,
-            max_depth=1,
-            init_random_samples=0,
+            max_depth=3,
+            init_random_samples=1,
             random_injection_every=0,
             order_move_weight=0.0,
             identity_retry_limit=5,
@@ -191,10 +202,12 @@ class TestTriedMoveBookkeeping:
             iter_record_fn=records.append,
         )
 
-        assert len(records) == 1
-        assert records[0]["n_requested_changes"] == 1
-        assert records[0]["n_attempted_changes"] == 1
-        assert records[0]["n_effective_changes"] == 1
+        ea_moves = [r for r in records if r["budget_consumed"] and r["phase"] == "ea"]
+        assert len(ea_moves) == 1
+        assert ea_moves[0]["move_type"] == "mutate"
+        assert ea_moves[0]["n_requested_changes"] == 1
+        assert ea_moves[0]["n_attempted_changes"] == 1
+        assert ea_moves[0]["n_effective_changes"] == 1
 
 
 class TestEvaluationBudget:
@@ -388,17 +401,52 @@ class TestStagnationIsolation:
         )
 
     def test_rejected_init_samples_do_not_preload_local_stagnation(self):
-        # Two rejected init samples followed by the first local move. With H=1,
-        # counting init rejection would force a spurious restart at that boundary.
+        # Two rejected init samples. With H=1, counting them toward local
+        # stagnation would fire should_restart at the first post-init iteration;
+        # that iteration is instead a no_parent_fallback (empty front) and no
+        # stagnation restart fires — init rejections never accrue.
         result = self._run_all_rejected(init_samples=2, injection_every=0, restart_h=1)
         assert result.restart_reason_counts["stagnation"] == 0
 
     def test_rejected_injection_does_not_advance_local_stagnation(self):
-        # Eval 1 is a rejected local move (streak=1), eval 2 a rejected
-        # injection, and eval 3 local again. With H=2, the injection must not
-        # trigger a restart before eval 3.
-        result = self._run_all_rejected(init_samples=0, injection_every=2, restart_h=2)
-        assert result.restart_reason_counts["stagnation"] == 0
+        # Seed one accepted init sample so the ea phase takes real LOCAL moves,
+        # then reject the rest. With H=2 and injection every 2, the restart fires
+        # only after two "ea" rejections (evals 2 and 4); the interleaved
+        # injection rejections (evals 3, 5) must NOT advance the local streak, so
+        # the wipe lands at eval 6 — not eval 4, as it would if injection counted.
+        space = _space(("r1",))
+        calls = 0
+
+        def evaluate(_child, _iter_id):
+            nonlocal calls
+            calls += 1
+            return _fit(1.0 if calls == 1 else -1.0), [], 0, 0
+
+        records: list[dict] = []
+        result = search.run_ea(
+            space=space,
+            origin=_origin(space),
+            prompts_with_rules=_prompt(("r1",)),
+            mutators=[_AppendMutator("m0"), _AppendMutator("m1"), _AppendMutator("m2")],
+            evaluate_chromosome_fn=evaluate,
+            iteration_result_factory=IterationResult,
+            max_iterations=6,
+            archive_cap=3,
+            restart_h=2,
+            max_depth=3,
+            init_random_samples=1,
+            random_injection_every=2,
+            random_max_changes=1,
+            order_move_weight=0.0,
+            identity_retry_limit=5,
+            seed=0,
+            log=lambda _msg: None,
+            iter_record_fn=records.append,
+        )
+
+        evaluated = [r["phase"] for r in records if r["budget_consumed"]]
+        assert evaluated == ["init", "ea", "injection", "ea", "injection", "restart"]
+        assert result.restart_reason_counts["stagnation"] == 1
 
 
 class TestStagnationCapWipesFrontAndReseeds:
@@ -442,7 +490,11 @@ class TestStagnationCapWipesFrontAndReseeds:
 
         assert result.restart_reason_counts["stagnation"] == 1
         evaluated = [r for r in records if r["budget_consumed"]]
-        assert [r["phase"] for r in evaluated] == ["ea", "ea", "ea", "restart", "ea"]
+        # eval 1 seeds the front from the empty archive (no_parent_fallback);
+        # evals 2-3 exploit it and stagnate; eval 4 wipes+reseeds (restart); the
+        # wipe empties the front again, so eval 5 is another no_parent_fallback.
+        assert [r["phase"] for r in evaluated] == [
+            "no_parent_fallback", "ea", "ea", "restart", "no_parent_fallback"]
         assert evaluated[3]["move_type"] == "restart_random"
 
         snap = result.archive_snapshot
@@ -460,11 +512,15 @@ class TestStagnationCapWipesFrontAndReseeds:
             nonlocal builder_calls
             builder_calls += 1
             name = mutators[0].name
-            if builder_calls == 1:
+            # call 1 seeds the front (init); call 2 is an identity during the
+            # restart reseed — it must retry WITHOUT consuming the reseed slot;
+            # call 3 is the actual restart reseed sample.
+            if builder_calls == 2:
                 return search.RandomBuildResult(
                     base, 1, 1, 0, [f"mutator:{name}:r1"], [name], [], ["identity"]
                 )
-            child = space.stamp(base.with_gene("r1", "R1|restart", name))
+            gene = "R1|seed" if builder_calls == 1 else "R1|restart"
+            child = space.stamp(base.with_gene("r1", gene, name))
             return search.RandomBuildResult(
                 child, 1, 1, 1, [f"mutator:{name}:r1"], [name], [name], ["changed"]
             )
@@ -475,8 +531,8 @@ class TestStagnationCapWipesFrontAndReseeds:
         def evaluate(_child, _iter_id):
             nonlocal evaluations
             evaluations += 1
-            # Accept one front member, then reject the next local move so H=1
-            # triggers a wipe before evaluation 3.
+            # Accept the seed, then reject the local move so H=1 triggers a wipe
+            # before evaluation 3.
             return _fit(1.0 if evaluations == 1 else -1.0), [], 0, 0
 
         records: list[dict] = []
@@ -491,7 +547,7 @@ class TestStagnationCapWipesFrontAndReseeds:
             archive_cap=3,
             restart_h=1,
             max_depth=3,
-            init_random_samples=0,
+            init_random_samples=1,
             random_injection_every=0,
             random_max_changes=1,
             order_move_weight=0.0,
@@ -503,6 +559,102 @@ class TestStagnationCapWipesFrontAndReseeds:
 
         evaluated = [r for r in records if r["budget_consumed"]]
         identities = [r for r in records if not r["budget_consumed"]]
-        assert [r["phase"] for r in evaluated] == ["ea", "ea", "restart"]
+        assert [r["phase"] for r in evaluated] == ["init", "ea", "restart"]
         assert [(r["iter"], r["phase"]) for r in identities] == [(3, "restart")]
-        assert builder_calls == 2
+        assert builder_calls == 3
+
+
+class TestEmptyArchiveSafeNet:
+    """When the EA reaches the ``ea`` phase but the archive front is empty, it
+    falls back to a fresh origin-based random sample (``no_parent_fallback``
+    phase / move) instead of trying to pick a parent. This keeps
+    ``--no-ea-origin-parent`` runs from stopping early on a persistently empty
+    front, and resumes normal local exploitation once a candidate is admitted."""
+
+    def test_empty_front_falls_back_to_random_without_early_stop(self):
+        # ea_origin_parent=False + every candidate dominated by the origin: the
+        # front never fills. Without the safe net, sample_parent() returns None,
+        # the exhausted restart also returns None, and run_ea breaks early. With
+        # it, post-init iterations sample from the origin and the budget is spent.
+        space = _space(("r1",))
+
+        def evaluate(_child, _iter_id):
+            return _fit(-1.0), [], 0, 0  # dominated by the origin → never admitted
+
+        records: list[dict] = []
+        result = search.run_ea(
+            space=space,
+            origin=_origin(space),
+            prompts_with_rules=_prompt(("r1",)),
+            mutators=[_AppendMutator("m0"), _AppendMutator("m1"), _AppendMutator("m2")],
+            evaluate_chromosome_fn=evaluate,
+            iteration_result_factory=IterationResult,
+            max_iterations=5,
+            archive_cap=3,
+            restart_h=20,  # high enough that stagnation never fires here
+            max_depth=3,
+            init_random_samples=2,
+            random_injection_every=0,
+            random_max_changes=1,
+            order_move_weight=0.0,
+            ea_origin_parent=False,
+            identity_retry_limit=5,
+            seed=0,
+            log=lambda _msg: None,
+            iter_record_fn=records.append,
+        )
+
+        # Reached the full budget — did NOT break early.
+        assert len(result.iterations) == 5
+        assert result.restart_reason_counts.get("exhausted", 0) == 0
+        evaluated = [r for r in records if r["budget_consumed"]]
+        # init covers iterations 1-2; iterations 3-5 all land in the fallback
+        # because every candidate is dominated, so the front never fills.
+        assert [r["phase"] for r in evaluated] == [
+            "init", "init", "no_parent_fallback", "no_parent_fallback", "no_parent_fallback",
+        ]
+        assert all(r["move_type"] == "no_parent_fallback" for r in evaluated[2:])
+        # fallback samples are origin-based, so stagnation never accrues.
+        assert result.archive_snapshot["entries"] == []
+
+    def test_exploitation_resumes_after_first_insert(self):
+        # First candidate repairs (admitted → front non-empty); everything after
+        # is dominated. Once the front holds an elite, the ea phase must take a
+        # local move on it (phase "ea", not the "no_parent_fallback").
+        space = _space(("r1",))
+        calls = 0
+
+        def evaluate(_child, _iter_id):
+            nonlocal calls
+            calls += 1
+            return _fit(1.0 if calls == 1 else -1.0), [], 0, 0
+
+        records: list[dict] = []
+        result = search.run_ea(
+            space=space,
+            origin=_origin(space),
+            prompts_with_rules=_prompt(("r1",)),
+            mutators=[_AppendMutator("m0"), _AppendMutator("m1"), _AppendMutator("m2")],
+            evaluate_chromosome_fn=evaluate,
+            iteration_result_factory=IterationResult,
+            max_iterations=4,
+            archive_cap=3,
+            restart_h=20,
+            max_depth=3,
+            init_random_samples=1,
+            random_injection_every=0,
+            random_max_changes=1,
+            order_move_weight=0.0,
+            ea_origin_parent=False,
+            identity_retry_limit=5,
+            seed=0,
+            log=lambda _msg: None,
+            iter_record_fn=records.append,
+        )
+
+        evaluated = [r for r in records if r["budget_consumed"]]
+        assert evaluated[0]["phase"] == "init"  # the accepted seed
+        assert len(result.archive_snapshot["entries"]) == 1  # elite to exploit
+        ea_moves = [r for r in evaluated[1:] if r["phase"] == "ea"]
+        assert ea_moves  # exploitation resumed on the non-empty front
+        assert ea_moves[0]["move_type"] == "mutate"  # a local move, not a sample

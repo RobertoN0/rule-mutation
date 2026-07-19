@@ -365,10 +365,12 @@ def build_random_chromosome(
 
 # Moves built by the shared sampler: they touch many rules at once, so a flat
 # rule=/mutator=/depth= triple would misreport them as one chain on one rule.
-# ``restart_random`` is a stagnation-restart reseed — same origin-based sampler
-# as init/injection, so it logs with the same accounting.
+# ``restart_random`` is a stagnation-restart reseed and ``no_parent_fallback`` is
+# the empty-front safe net — both use the same origin-based sampler as
+# init/injection, so they log with the same accounting.
 _SAMPLE_MOVE_TYPES = frozenset(
-    {"init_random", "injection_random", "random_builder", "restart_random"}
+    {"init_random", "injection_random", "random_builder",
+     "restart_random", "no_parent_fallback"}
 )
 
 
@@ -556,6 +558,10 @@ def run_ea(
                     f"{front_size_before_restart}) and reseeding "
                     f"{reseed_remaining} random samples")
                 phase = "restart"
+            elif not archive.entries:
+                # SAFE NET: no parents available to exploit, so fall back to a
+                # random sample from the origin.
+                phase = "no_parent_fallback"
 
         n_changes: int | None = None
         n_attempted_changes: int | None = None
@@ -563,7 +569,7 @@ def run_ea(
         attempted_operators: list[str] = []
         attempted_mutators: list[str] = []
 
-        if phase in ("init", "injection", "restart"):
+        if phase in ("init", "injection", "restart", "no_parent_fallback"):
             # ---- random sample from the ORIGIN (never from the front) --------
             parent = archive.origin
             sample = build_random_chromosome(
@@ -580,7 +586,8 @@ def run_ea(
             chain_names = sample.effective_mutators
             changes = sample.changes
             move_type = {
-                "init": "init_random", "injection": "injection_random", "restart": "restart_random",
+                "init": "init_random", "injection": "injection_random",
+                "restart": "restart_random", "no_parent_fallback": "no_parent_fallback",
             }[phase]
             rule_id = None
             is_identity = _is_render_identity(space, origin, child, prompts_with_rules)
