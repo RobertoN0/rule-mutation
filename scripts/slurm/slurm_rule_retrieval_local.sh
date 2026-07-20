@@ -36,6 +36,21 @@
 #   # Resume an interrupted run
 #   RESUME=rule_maps/rule_retrieval_progress_local_20260410.jsonl \
 #     sbatch scripts/slurm/slurm_rule_retrieval_local.sh
+#
+#   # Temperature/seed sweep over a FIXED prompt set (bypasses CWE selection --
+#   # reuses an existing map's exact prompts; the model loads once and is
+#   # reused across all seeds). seeds run SEED_START .. SEED_START+REPETITIONS-1:
+#   FROM_MAP=rule_maps/map_qwen32b_vulnerable_py.json \
+#   TEMPERATURE=0.6 SEED_START=1 REPETITIONS=20 \
+#     sbatch --time=14:00:00 scripts/slurm/slurm_rule_retrieval_local.sh
+#
+#   # Same sweep on Llama-70B (see slurm_rule_retrieval_llama70b.sh for the
+#   # pre-set 4bit/bfloat16 defaults that model needs on a single A100):
+#   MODEL_ID="meta-llama/Llama-3.3-70B-Instruct" QUANTIZATION=4bit \
+#   BNB_COMPUTE_DTYPE=bfloat16 \
+#   FROM_MAP=rule_maps/map_qwen32b_vulnerable_py.json \
+#   TEMPERATURE=0.6 SEED_START=1 REPETITIONS=20 \
+#     sbatch --time=20:00:00 scripts/slurm/slurm_rule_retrieval_local.sh
 #############################################################################
 
 set -e
@@ -46,11 +61,17 @@ TOTAL_LIMIT=${TOTAL_LIMIT:-}
 CWES=${CWES:-}                    # space-separated, e.g. "CWE-89 CWE-79"
 LANGUAGES=${LANGUAGES:-}          # space-separated, e.g. "python java"
 QUANTIZATION=${QUANTIZATION:-fp16}
+BNB_COMPUTE_DTYPE=${BNB_COMPUTE_DTYPE:-float16}  # only used when QUANTIZATION=4bit
 MODEL_ID=${MODEL_ID:-"Qwen/Qwen2.5-Coder-32B-Instruct"}
 MAX_TOKENS=${MAX_TOKENS:-1024}
 EXCLUDE_MAP=${EXCLUDE_MAP:-}
+FROM_MAP=${FROM_MAP:-}            # space-separated map path(s); bypasses CWE selection
+TEMPERATURE=${TEMPERATURE:-0.0}
+SEED_START=${SEED_START:-1}
+REPETITIONS=${REPETITIONS:-1}
 RESUME=${RESUME:-}
 OUTPUT=${OUTPUT:-}
+OUTPUT_DIR=${OUTPUT_DIR:-}
 
 echo "=========================================================================="
 echo "Rule Retrieval Mapping: Local Model on DelftBlue"
@@ -62,8 +83,11 @@ echo "Partition: $SLURM_JOB_PARTITION"
 echo ""
 echo "Configuration:"
 echo "  Model: $MODEL_ID"
-echo "  Quantization: $QUANTIZATION"
+echo "  Quantization: $QUANTIZATION"$([ "$QUANTIZATION" = "4bit" ] && echo " (compute_dtype=$BNB_COMPUTE_DTYPE)")
 echo "  Max tokens: $MAX_TOKENS"
+echo "  Temperature: $TEMPERATURE"
+echo "  Seed start / repetitions: $SEED_START / $REPETITIONS"
+echo "  From map: ${FROM_MAP:-none (uses CWE-based selection below)}"
 echo "  Limit per CWE: ${LIMIT_PER_CWE:-all}"
 echo "  Total limit: ${TOTAL_LIMIT:-none}"
 echo "  CWEs: ${CWES:-all}"
@@ -116,24 +140,32 @@ echo "=== Starting Rule Retrieval ==="
 # Build optional arguments
 ARGS=""
 
-if [ -n "$LIMIT_PER_CWE" ]; then
-    ARGS="$ARGS --limit-per-cwe $LIMIT_PER_CWE"
-fi
+if [ -n "$FROM_MAP" ]; then
+    # --from-map reuses a prompt set verbatim; the CWE-selection flags below
+    # are meaningless in that mode and the Python script rejects combining
+    # them, so skip adding them entirely (rather than relying on the caller
+    # to remember to clear LIMIT_PER_CWE's default of 5).
+    ARGS="$ARGS --from-map $FROM_MAP"
+else
+    if [ -n "$LIMIT_PER_CWE" ]; then
+        ARGS="$ARGS --limit-per-cwe $LIMIT_PER_CWE"
+    fi
 
-if [ -n "$TOTAL_LIMIT" ]; then
-    ARGS="$ARGS --total-limit $TOTAL_LIMIT"
-fi
+    if [ -n "$TOTAL_LIMIT" ]; then
+        ARGS="$ARGS --total-limit $TOTAL_LIMIT"
+    fi
 
-if [ -n "$CWES" ]; then
-    ARGS="$ARGS --cwes $CWES"
-fi
+    if [ -n "$CWES" ]; then
+        ARGS="$ARGS --cwes $CWES"
+    fi
 
-if [ -n "$LANGUAGES" ]; then
-    ARGS="$ARGS --languages $LANGUAGES"
-fi
+    if [ -n "$LANGUAGES" ]; then
+        ARGS="$ARGS --languages $LANGUAGES"
+    fi
 
-if [ -n "$EXCLUDE_MAP" ]; then
-    ARGS="$ARGS --exclude-map $EXCLUDE_MAP"
+    if [ -n "$EXCLUDE_MAP" ]; then
+        ARGS="$ARGS --exclude-map $EXCLUDE_MAP"
+    fi
 fi
 
 if [ -n "$RESUME" ]; then
@@ -144,10 +176,18 @@ if [ -n "$OUTPUT" ]; then
     ARGS="$ARGS --output $OUTPUT"
 fi
 
+if [ -n "$OUTPUT_DIR" ]; then
+    ARGS="$ARGS --output-dir $OUTPUT_DIR"
+fi
+
 python src/retrieval/rule_retrieval_mapping_local.py \
     --model "$MODEL_ID" \
     --quantization "$QUANTIZATION" \
+    --bnb-compute-dtype "$BNB_COMPUTE_DTYPE" \
     --max-tokens "$MAX_TOKENS" \
+    --temperature "$TEMPERATURE" \
+    --seed-start "$SEED_START" \
+    --repetitions "$REPETITIONS" \
     --yes \
     $ARGS
 
