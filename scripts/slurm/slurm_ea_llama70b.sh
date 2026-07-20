@@ -99,7 +99,7 @@ OBJECTIVE_DIRECTION=${OBJECTIVE_DIRECTION:-minimize}
 MODEL_ID="meta-llama/Llama-3.3-70B-Instruct"
 # Reusing the Qwen-generated retrieval map for now (same prompts+rules; only the
 # code-gen model changes). Regenerate a Llama-specific map later if needed.
-RULES_MAP=${RULES_MAP:-"/home/rnegro/thesis/rule-mutation/rule_maps/map_qwen32b_python_java.json"}
+RULES_MAP=${RULES_MAP:-"/home/rnegro/thesis/rule-mutation/rule_maps/final_consensus_map_llama.json"}
 
 # Validate OPTIMIZER value
 if [ "$OPTIMIZER" != "ea" ] && [ "$OPTIMIZER" != "random_search" ]; then

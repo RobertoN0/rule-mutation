@@ -20,7 +20,7 @@ Usage:
 
     # Full run shape (DelftBlue submits this via scripts/slurm/slurm_ea_qwen32b.sh)
     python scripts/experiments/run_experiment.py \
-        --rules-map rule_maps/map_qwen32b_python_java.json \
+        --rules-map rule_maps/final_consensus_map_qwen.json \
         --model Qwen/Qwen2.5-Coder-32B-Instruct \
         --optimizer ea --iterations 200 --enable-validation
 """
@@ -117,7 +117,7 @@ SCHEMA_VERSION = 4
 
 # Default paths (relative to project root)
 DEFAULT_RULES_MAP = (
-    PROJECT_ROOT / "rule_maps" / "map_qwen32b_python_java.json"
+    PROJECT_ROOT / "rule_maps" / "final_consensus_map_qwen.json"
 )
 RULES_DIR = PROJECT_ROOT / "project-codeguard" / "skills" / "software-security" / "rules"
 

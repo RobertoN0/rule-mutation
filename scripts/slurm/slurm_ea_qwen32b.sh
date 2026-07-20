@@ -108,7 +108,7 @@ OBJECTIVE_DIRECTION=${OBJECTIVE_DIRECTION:-minimize}
 # in-flight iteration and finalizing from the last completed one. No iteration budget.
 
 MODEL_ID="Qwen/Qwen2.5-Coder-32B-Instruct"
-RULES_MAP=${RULES_MAP:-"/home/rnegro/thesis/rule-mutation/rule_maps/map_qwen32b_python_java.json"}
+RULES_MAP=${RULES_MAP:-"/home/rnegro/thesis/rule-mutation/rule_maps/final_consensus_map_qwen.json"}
 
 # Validate OPTIMIZER value
 if [ "$OPTIMIZER" != "ea" ] && [ "$OPTIMIZER" != "random_search" ]; then
