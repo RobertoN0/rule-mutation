@@ -295,6 +295,18 @@ done
 set -e
 trap - USR1
 
+# ── Post-run: shrink + audit semgrep_debug ───────────────────────────────────
+# Strip the giant raw semgrep stdout (results/paths/timing) from
+# semgrep_debug.jsonl, keeping each call's findings + an extracted error audit
+# (semgrep_analysis).
+FILTER=/home/rnegro/thesis/rule-mutation/scripts/analyze/filter_semgrep_debug.py
+if [ -f "$OUTPUT_DIR/semgrep_debug/semgrep_debug.jsonl" ]; then
+    echo ""
+    echo "→ Filtering semgrep_debug (strip raw stdout, keep findings + error audit)…"
+    timeout 250 python "$FILTER" --in-place --audit-json "$OUTPUT_DIR" \
+        || echo "⚠️  semgrep_debug filter incomplete/skipped (raw kept — re-run on login)"
+fi
+
 echo ""
 echo "=========================================================================="
 echo "Experiment Complete"
