@@ -31,13 +31,13 @@ Usage
 ─────
   # Temperature/seed sweep over a FIXED prompt set (as with the original script):
   python src/retrieval/rule_retrieval_mapping_reframed.py \\
-      --from-map rule_maps/map_qwen32b_vulnerable_py.json \\
+      --from-map rule_maps/old_maps/map_qwen32b_vulnerable_py.json \\
       --temperature 0.6 --seed-start 1 --repetitions 20 \\
       --output-dir rule_maps/temp_sweep_reframed/python
 
   # Dry run:
   python src/retrieval/rule_retrieval_mapping_reframed.py --dry-run \\
-      --from-map rule_maps/map_qwen32b_vulnerable_py.json
+      --from-map rule_maps/old_maps/map_qwen32b_vulnerable_py.json
 """
 
 from __future__ import annotations

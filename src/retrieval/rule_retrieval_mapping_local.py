@@ -37,7 +37,7 @@ Usage
   # mapping is written as soon as that seed finishes, and a seed already on
   # disk is skipped -- resubmitting after a wall-time kill just continues:
   python src/retrieval/rule_retrieval_mapping_local.py \\
-      --from-map rule_maps/map_qwen32b_vulnerable_py.json \\
+      --from-map rule_maps/old_maps/map_qwen32b_vulnerable_py.json \\
       --temperature 0.6 --seed-start 1 --repetitions 20
 
   # Dry run:

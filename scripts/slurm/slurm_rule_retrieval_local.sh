@@ -40,15 +40,16 @@
 #   # Temperature/seed sweep over a FIXED prompt set (bypasses CWE selection --
 #   # reuses an existing map's exact prompts; the model loads once and is
 #   # reused across all seeds). seeds run SEED_START .. SEED_START+REPETITIONS-1:
-#   FROM_MAP=rule_maps/map_qwen32b_vulnerable_py.json \
+#   FROM_MAP=rule_maps/old_maps/map_qwen32b_vulnerable_py.json \
 #   TEMPERATURE=0.6 SEED_START=1 REPETITIONS=20 \
 #     sbatch --time=14:00:00 scripts/slurm/slurm_rule_retrieval_local.sh
 #
-#   # Same sweep on Llama-70B (see slurm_rule_retrieval_llama70b.sh for the
-#   # pre-set 4bit/bfloat16 defaults that model needs on a single A100):
+#   # Same sweep on Llama-70B (override MODEL_ID/QUANTIZATION as below; 70B needs
+#   # 4bit/bfloat16 on a single A100). For current maps prefer the reframed
+#   # wrapper: scripts/slurm/slurm_rule_retrieval_reframed.sh (both models).
 #   MODEL_ID="meta-llama/Llama-3.3-70B-Instruct" QUANTIZATION=4bit \
 #   BNB_COMPUTE_DTYPE=bfloat16 \
-#   FROM_MAP=rule_maps/map_qwen32b_vulnerable_py.json \
+#   FROM_MAP=rule_maps/old_maps/map_qwen32b_vulnerable_py.json \
 #   TEMPERATURE=0.6 SEED_START=1 REPETITIONS=20 \
 #     sbatch --time=20:00:00 scripts/slurm/slurm_rule_retrieval_local.sh
 #############################################################################

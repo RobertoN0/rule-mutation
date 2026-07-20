@@ -25,14 +25,14 @@
 # ── Commands used to compute the final reframed maps (temp=0.6, 20 seeds) ──
 #
 #   # Qwen py (185 prompts):
-#   FROM_MAP=rule_maps/map_qwen32b_vulnerable_py.json \
+#   FROM_MAP=rule_maps/old_maps/map_qwen32b_vulnerable_py.json \
 #   TEMPERATURE=0.6 SEED_START=1 REPETITIONS=20 \
 #   OUTPUT_DIR=rule_maps/temp_sweep_reframed/python \
 #     sbatch --time=8:00:00 --job-name=reframed_qwen_py \
 #            scripts/slurm/slurm_rule_retrieval_reframed.sh
 #
 #   # Qwen java (114 prompts):
-#   FROM_MAP=rule_maps/map_qwen32b_vulnerable_java.json \
+#   FROM_MAP=rule_maps/old_maps/map_qwen32b_vulnerable_java.json \
 #   TEMPERATURE=0.6 SEED_START=1 REPETITIONS=20 \
 #   OUTPUT_DIR=rule_maps/temp_sweep_reframed/java \
 #     sbatch --time=5:00:00 --job-name=reframed_qwen_java \
@@ -40,7 +40,7 @@
 #
 #   # Llama py -- override model + 4bit/bf16 (70B fits one A100 only at 4bit):
 #   MODEL_ID=meta-llama/Llama-3.3-70B-Instruct QUANTIZATION=4bit BNB_COMPUTE_DTYPE=bfloat16 \
-#   FROM_MAP=rule_maps/map_qwen32b_vulnerable_py.json \
+#   FROM_MAP=rule_maps/old_maps/map_qwen32b_vulnerable_py.json \
 #   TEMPERATURE=0.6 SEED_START=1 REPETITIONS=20 \
 #   OUTPUT_DIR=rule_maps/temp_sweep_reframed/python \
 #     sbatch --time=18:00:00 --job-name=reframed_llama_py \
@@ -48,7 +48,7 @@
 #
 #   # Llama java:
 #   MODEL_ID=meta-llama/Llama-3.3-70B-Instruct QUANTIZATION=4bit BNB_COMPUTE_DTYPE=bfloat16 \
-#   FROM_MAP=rule_maps/map_qwen32b_vulnerable_java.json \
+#   FROM_MAP=rule_maps/old_maps/map_qwen32b_vulnerable_java.json \
 #   TEMPERATURE=0.6 SEED_START=1 REPETITIONS=20 \
 #   OUTPUT_DIR=rule_maps/temp_sweep_reframed/java \
 #     sbatch --time=10:00:00 --job-name=reframed_llama_java \

@@ -62,7 +62,7 @@ print(result.changes)  # List of mutations applied
 # schema-version-4 run artifacts. Validation is required because it feeds f2.
 python scripts/experiments/run_experiment.py \
   --backend claude --optimizer ea --enable-validation \
-  --rules-map rule_maps/map_qwen32b_python_java.json \
+  --rules-map rule_maps/final_consensus_map_qwen.json \
   --n-cases 2 --iterations 5 --languages python \
   --mutators synonym_replacement verb_weakening \
   --output-dir experiments/results/library_guide_smoke

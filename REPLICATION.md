@@ -86,7 +86,7 @@ covers Python + Java; `--languages python` keeps it small and cheap):
 # activated venv:  source .venv/bin/activate first
 python scripts/experiments/run_experiment.py \
   --backend claude --optimizer ea --enable-validation \
-  --rules-map rule_maps/map_qwen32b_python_java.json \
+  --rules-map rule_maps/final_consensus_map_qwen.json \
   --n-cases 2 --iterations 5 \
   --archive-cap 6 --restart-h 8 --max-depth 4 \
   --ea-init-samples 10 --ea-injection-every 10 --random-max-changes 10 \

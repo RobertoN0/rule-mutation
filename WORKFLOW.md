@@ -23,7 +23,7 @@ source .venv/bin/activate        # or prefix commands with `uv run`
 
 python scripts/experiments/run_experiment.py \
   --backend claude --model claude-haiku-4-5 --optimizer ea \
-  --rules-map rule_maps/map_qwen32b_python_java.json \
+  --rules-map rule_maps/final_consensus_map_qwen.json \
   --n-cases 8 --iterations 25 \
   --archive-cap 6 --restart-h 8 --max-depth 4 \
   --ea-init-samples 10 --ea-injection-every 10 --random-max-changes 10 \
