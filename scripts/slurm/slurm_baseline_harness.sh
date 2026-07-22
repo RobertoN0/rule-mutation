@@ -22,16 +22,16 @@
 #
 # Usage:
 #   # No-rules / with-rules baselines (one condition each):
-#   MODEL=qwen LANGUAGES=python N_CASES=351 CONDITION=norules   sbatch --job-name=bh_qwen_py_nr scripts/slurm/slurm_baseline_harness.sh
-#   MODEL=qwen LANGUAGES=python N_CASES=351 CONDITION=withrules \
+#   MODEL=qwen LANGUAGES=python N_CASES=184 CONDITION=norules   sbatch --job-name=bh_qwen_py_nr scripts/slurm/slurm_baseline_harness.sh
+#   MODEL=qwen LANGUAGES=python N_CASES=184 CONDITION=withrules \
 #       BASELINE_REF=experiments/results/<norules_run_dir> sbatch --job-name=bh_qwen_py_wr scripts/slurm/slurm_baseline_harness.sh
 #
 #   # Resume only the missing seeds into an existing run dir:
-#   MODEL=qwen LANGUAGES=java N_CASES=229 CONDITION=withrules SEEDS=47,48,49,50,51 \
+#   MODEL=qwen LANGUAGES=java N_CASES=113 CONDITION=withrules SEEDS=47,48,49,50,51 \
 #       OUTPUT_DIR=experiments/results/<existing_dir> sbatch --job-name=bh_qwen_ja_wr_topup scripts/slurm/slurm_baseline_harness.sh
 #
 #   # Override mode (a specific EA iteration's mutated rules over its prompt subset):
-#   MODEL=qwen LANGUAGES=python N_CASES=351 CONDITION_LABEL=iter042 \
+#   MODEL=qwen LANGUAGES=python N_CASES=184 CONDITION_LABEL=iter042 \
 #       RULES_OVERRIDE_DIR=$PWD/experiments/results/<ea_run>/mutated_rules/iter042 \
 #       sbatch --job-name=bh_qwen_py_iter042 scripts/slurm/slurm_baseline_harness.sh
 #############################################################################
@@ -40,7 +40,13 @@ set -e
 
 MODEL=${MODEL:-qwen}                 # qwen | llama
 LANGUAGES=${LANGUAGES:-python}
-N_CASES=${N_CASES:-351}
+if [ "$LANGUAGES" = "python" ]; then
+    N_CASES=${N_CASES:-184}
+elif [ "$LANGUAGES" = "java" ]; then
+    N_CASES=${N_CASES:-113}
+else
+    echo "ERROR: LANGUAGES must be python or java (got: $LANGUAGES)"; exit 1
+fi
 SELECTION=${SELECTION:-random}
 TEMPERATURE=${TEMPERATURE:-0.6}
 REPLICATES=${REPLICATES:-10}
@@ -104,6 +110,9 @@ echo "==========================================================================
 nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv
 
 if [ ! -e "$SEMGREP_RULESET" ]; then echo "ERROR: Semgrep rules not found: $SEMGREP_RULESET"; exit 1; fi
+if [ ! -s "$SEMGREP_RULESET/SOURCE_COMMIT" ]; then
+    echo "WARNING: Semgrep rules lack upstream commit metadata; exact content SHA-256 will still be recorded."
+fi
 
 # OUTPUT_DIR may be passed in to resume an existing run; otherwise derive it.
 DATE=$(date +%m%d)
