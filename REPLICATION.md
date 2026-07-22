@@ -11,7 +11,7 @@ The framework supports two execution paths:
 | **A. API-based** (this doc) | Any laptop / VM, CPU only | Anthropic / OpenAI API | ✅ Yes |
 | **B. Local GPU** | DelftBlue A100 nodes | HuggingFace + transformers | ❌ Cluster-only |
 
-Both paths run the *same* mutation → generate → Semgrep → CodeBLEU → search
+Both paths run the *same* mutation → generate → output qualification → Semgrep → search
 pipeline and write the *same* output schema. Only the
 code-generation backend differs. Everything below refers to **Path A**.
 
@@ -60,6 +60,8 @@ $EDITOR .env       # fill in ANTHROPIC_API_KEY (or OPENAI_API_KEY)
 
 ```bash
 uv sync                                              # API-only deps into .venv/
+uv run python -m nltk.downloader wordnet omw-1.4 \
+  averaged_perceptron_tagger averaged_perceptron_tagger_eng
 uv run python scripts/validation/validate_claude.py  # one ~$0.0001 Claude call
 ```
 
@@ -104,8 +106,8 @@ instead, swap `--optimizer random_search` (same sampler, no archive).
 rule-fidelity objective (SBERT similarity of each mutated rule to its original)
 and records the post-hoc quality metadata (instruction adherence, keyword
 retention, etc.) into `iterations.jsonl` — nothing is rejected. Only `--dry-run`
-may omit it. Summarise the metadata with `scripts/analyze/validation_audit.py`
-(see §5).
+may omit it. Schema-5 validation checks that the resulting run artifacts
+reconcile before they are used as evidence.
 
 Reproduce that exact run from its recorded config:
 
@@ -130,11 +132,15 @@ A completed run records everything needed for analysis directly on disk (see
 §6). The `iterations.jsonl` trajectory and the `intermediate/*.jsonl` per-prompt
 evaluations are plain JSON lines you can read without any extra tooling.
 
-> **Analysis toolkit — work in progress.** Scripts under `scripts/analyze/`
-> (`--extra analysis`: `matplotlib`, `scipy`) turn runs into figures and
-> statistics, but they are being reworked for the repair/chromosome design and
-> are not finalised — out of scope for this reproduction. Read the raw artifacts
-> in the meantime.
+For schema-5 run health, use:
+
+```bash
+.venv/bin/python scripts/analyze/validate_schema5_run.py --write <run_dir>
+```
+
+This is a reconciliation validator, not the final multi-run thesis analyzer:
+it checks artifact consistency, raw f1, imputation, map/rule provenance, and
+Semgrep-debug coverage.
 
 > `uv sync --extra analysis` replaces the resolved set, so it removes the `dev`
 > extras (pytest/ruff) if they were installed. To keep everything, sync all the
@@ -146,7 +152,7 @@ evaluations are plain JSON lines you can read without any extra tooling.
 
 ```
 experiments/results/<name>/
-├── run_config.json                  # every CLI arg + git SHA + schema_version: 4
+├── run_config.json                  # every CLI arg + git SHA + schema_version: 5
 ├── hillclimb_summary_*.json         # run-level totals, mutator stats, cache hygiene
 ├── iterations.jsonl                 # one record per search iteration (the trajectory)
 ├── archive_snapshots/iterNNNN.json  # EA only — single chromosome Pareto archive every 20 iters + final
@@ -155,6 +161,8 @@ experiments/results/<name>/
 │   └── {ea_iter0001,rand_iter0001,…}.jsonl
 ├── mutated_rules/iterNNN/           # mutated rule text (.md) + meta.json (mutation_chain, changes)
 ├── semgrep_debug/semgrep_debug.jsonl  # per-scan trace (failure vs zero-findings)
+├── evaluation_manifest.json         # exact task set + map-fixed analysis language
+├── evaluation_failures.jsonl        # fatal cause + invalid-baseline raw output evidence
 └── run.log                          # stdout/stderr tee
 ```
 
@@ -168,7 +176,7 @@ The full field-level schema is documented in
 `pyproject.toml` declares the base dependencies plus optional extras:
 
 - **Default (`uv sync`)** — the API path: `anthropic`, `openai`, `semgrep`,
-  `codebleu` + tree-sitter grammars, `sentence-transformers` (for the optional
+  `tree-sitter-java` for Java qualification, `sentence-transformers` (for the
   validator), `datasets`, `pandas`. Pinned exactly in `uv.lock` (committed); the
   Dockerfile consumes the same lockfile via `uv sync --frozen --no-dev`.
 - **`--extra gpu`** — `accelerate`, `bitsandbytes` (+ a CUDA torch reinstall on
@@ -198,6 +206,12 @@ The full field-level schema is documented in
 
 `--seed`, the model, and the git SHA are recorded in `run_config.json`.
 
+The output-token cap is fixed at 4096 and recorded in `run_config.json`.
+`finish_reason` is saved per prompt. The runtime evaluation policy excludes task
+1301 and freezes the baseline-selected language for the explicitly
+language-neutral tasks. Invalid candidate prompts are baseline-imputed; invalid
+baselines and evaluator/system errors fail closed.
+
 ---
 
 ## 9. Troubleshooting
@@ -205,9 +219,9 @@ The full field-level schema is documented in
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | `ANTHROPIC_API_KEY is not set` | `.env` missing or unfilled | `cp .env.example .env`, add the key |
-| `Semgrep not installed or not in PATH` (and findings all 0) | venv not active when calling `.venv/bin/python` directly | `source .venv/bin/activate`, or run via `uv run …`, or prefix `PATH="$PWD/.venv/bin:$PATH"` |
+| `Semgrep not installed or not in PATH` | venv not active when calling `.venv/bin/python` directly | `source .venv/bin/activate`, or run via `uv run …`, or prefix `PATH="$PWD/.venv/bin:$PATH"`; the run aborts rather than recording zero findings |
+| `Mutator preflight failed for 'synonym_replacement'` | WordNet or the NLTK POS tagger is absent (compute nodes cannot fetch it) | On an internet-connected/login node run `python -m nltk.downloader wordnet omw-1.4 averaged_perceptron_tagger averaged_perceptron_tagger_eng`; the experiment aborts before model inference instead of silently using identity mutations |
 | `pytest` missing after `uv sync --extra analysis` | uv pruned the `dev` extra | `uv sync --extra dev --extra analysis` (combine extras) |
 | `FileNotFoundError: project-codeguard/...` | submodule not initialised | `git submodule update --init --recursive` |
 | Docker build fails on `COPY project-codeguard` | same — submodule empty | initialise the submodule before `docker build` |
 | Rate-limited (429 / 529) | provider throttling | wait and retry; the run saves all completed iterations and exits gracefully |
-| `WARNING: There is no reference data-flows extracted…` (only visible in old logs) | CodeBLEU's data-flow extractor can't parse a few prompts | harmless and **silenced by default** (a root-logger filter in `composite_fitness.py`); that prompt's code-divergence simply omits the data-flow sub-score. Semgrep findings are unaffected. |

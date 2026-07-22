@@ -10,7 +10,7 @@ Map for reviewing the search implementation:
 
 ## Objectives (conservative set — all maximized by the archive)
 
-- **f1** — vulnerability reduction: severity-weighted Semgrep delta vs baseline
+- **f1** — vulnerability reduction: raw Semgrep-finding delta vs baseline
   (`objective_direction="minimize"` negates the raw delta, so positive f1 =
   fewer vulnerabilities = a repair).
 - **f2** — rule fidelity: mean SBERT similarity of each mutated rule vs its
@@ -24,11 +24,39 @@ dominated, so it is admitted and can act as a neutral stepping-stone parent
 (neutral drift).
 
 `best()` reports the origin unless some candidate *strictly* improves f1, so
-neutral drift never pollutes the reported best repair (RQ3's `best_f1`). Under
+neutral drift never pollutes the reported best repair (RQ3's `best_f1`). It is
+updated from every evaluated child before archive admission and persists across
+front eviction/restart wipes. Under
 cap overflow the archive evicts **lexicographically by f1**
 (lowest f1 first, ties → f2+f3, then oldest), so an over-cap archive never drops
 its best repair to keep a near-baseline variant; the just-added child is
-protected.
+protected. If the existing selection key is exactly tied, fewer invalid prompts
+is the final quality tie-breaker; validity is not a fourth objective.
+
+## Generated-output validity and language
+
+Map membership is the population contract. The committed qualified maps contain
+184 Python and 113 Java tasks; task 1301 was physically removed because it
+explicitly requests Bash. There is no second runtime policy. The map language is
+authoritative for baseline and candidates, and the system prompt explicitly
+selects it when the user prompt leaves the language open.
+
+Before Semgrep, the engine selects the first implementation, checks
+`finish_reason`, validates Python with the AST compiler and Java with
+tree-sitter, and records language drift, vacuous output, or malformed/multiple
+target artifacts. Extra explicitly different-language blocks are recorded and
+ignored; independent target-language blocks are never concatenated. The raw
+generation lives in the intermediate row, while Semgrep debug retains the exact
+selected scanner input.
+
+A candidate prompt that fails these checks or Semgrep target parsing is assigned
+that prompt's baseline raw and weighted scores. It therefore receives neither
+repair credit nor a vulnerability penalty, while valid prompts in the same
+chromosome remain usable. An invalid baseline aborts preflight. Semgrep config,
+process, timeout, JSON, skipped-rule, and unmapped-result failures retry once
+when transient and otherwise abort the chromosome evaluation; they are never
+scored as zero findings. Weighted `ERROR×3 + WARNING×1` is retained only as a
+reported diagnostic.
 
 ## Random search (`run_random_search`)
 

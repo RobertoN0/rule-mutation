@@ -71,8 +71,8 @@ Implements the AUGMENT three-criteria framework plus a security-domain
 criterion (four criteria total). Enabled with `--enable-validation`.
 **Informational:** every candidate's metadata is recorded; nothing is ever
 rejected on quality grounds (the validator never gates the search). The
-post-hoc audit in `scripts/analyze/validation_audit.py` reports per-criterion
-fail rates and a "what if we had gated" simulation.
+per-iteration validation metadata is available for schema-5 reporting and for
+future quality-ablation summaries.
 
 | # | Criterion | How measured | Default threshold |
 |---|---|---|---|
@@ -98,7 +98,7 @@ original), `perplexity_ratio`, `inline_code_retention`, `keyword_retention`,
 
 Owns the evaluation seam shared by both strategies. `run_search()`:
 
-1. **Baseline pass** — generate code for every prompt under the original rules, run a single batched Semgrep, record per-case baseline findings and reference code (for CodeBLEU).
+1. **Baseline pass** — generate code for every prompt under the original rules, qualify the target-language implementation, run one batched Semgrep analysis, and record per-case baseline findings. Any invalid prompt stops the run before search.
 2. **Dispatch** — to `run_ea` or `run_random_search` (`search.py`) based on `config.optimizer`. Both call back into the same per-prompt evaluation closure.
 3. **Persist** — `iterations.jsonl` (per iteration, atomic append), `intermediate/{iter_id}.jsonl` (per prompt), `archive_snapshots/` (EA, every 20 iters), `mutated_rules/iterNNN/`, and the run summary.
 
@@ -148,9 +148,9 @@ lineage can always start.
 
 | File | Role |
 |---|---|
-| `semgrep_runner.py` | Runs Semgrep per batch in one subprocess; resolves the `semgrep` executable via PATH then the running interpreter's `bin/` dir; writes a `semgrep_debug.jsonl` record on **every** path so a failed scan (`error != null`) is distinguishable from a clean scan with zero findings. |
-| `composite_fitness.py` | `CompositeFitnessEvaluator` — per prompt, `semgrep_delta = score(mutated) − score(baseline)` and `code_divergence = 1 − CodeBLEU(generated, reference)`. Takes a per-call `lang` override so a mixed Python+Java run uses the correct tree-sitter grammar per case. |
-| `fitness.py` | `FitnessStrategy` (per-prompt Semgrep scoring; `SEVERITY_WEIGHTED` = ERROR×3 + WARNING×1) and `AggregatedFitness`, which exposes the three search objectives (f1/f2/f3). |
+| `output_validation.py` | Selects the primary artifact under the fixed map language, checks finish reasons/block structure/language drift, validates Python with the AST compiler and Java with tree-sitter, rejects vacuous implementations, and classifies prompt-local failures. |
+| `semgrep_runner.py` | Runs Semgrep per batch in one subprocess; maps target errors to their exact sample, fails closed on global/config/process/skipped-rule errors, fingerprints local rules, and writes a `semgrep_debug.jsonl` record on **every** path. |
+| `fitness.py` | Computes raw findings (the f1 basis), severity-weighted diagnostics, per-prompt baseline reductions, aggregation, and prompt-local baseline imputation metadata. |
 
 ---
 
@@ -163,17 +163,19 @@ lineage can always start.
 | `delftblue` (`DelftBlueLocalBackend`) | HuggingFace model from local cache (`HF_HUB_OFFLINE=1`), Qwen2.5-Coder-32B-Instruct on A100; fp16 or 4-bit. Lazy-imported so the API path needs no torch. |
 
 `LLMBackend.generate(system, messages, …) → LLMResponse` with `content`,
-`latency_ms`, `input_tokens`, `output_tokens`.
+`latency_ms`, `input_tokens`, `output_tokens`, and `finish_reason`. The local
+backend decodes only newly generated tokens and reports `length` when it reaches
+the fixed 4096-token output cap without EOS.
 
 ---
 
 ## Output schema
 
-> **Schema 4.** Runs carry `schema_version: 4` (chromosome design). Its record
-> shape is described below; `rerun_from_config.py` and the analysis layer key off
-> this version and refuse older layouts.
+> **Schema 5.** Runs carry `schema_version: 5`. It extends the chromosome design
+> with raw-count f1, output qualification, map-fixed language, and explicit
+> effective-versus-observed prompt scores.
 
-`run_config.json` carries `schema_version: 4`. A run directory:
+`run_config.json` carries `schema_version: 5`. A run directory:
 
 ```
 {output_dir}/
@@ -184,6 +186,8 @@ lineage can always start.
 ├── intermediate/{iter_id}.jsonl     # per-prompt evaluation records; iter_id ∈ {baseline, ea_iter0001, rand_iter0042}
 ├── mutated_rules/iterNNN/           # <rule>.md (mutated text) + meta.json
 ├── semgrep_debug/semgrep_debug.jsonl
+├── evaluation_manifest.json         # exclusions + frozen language contract
+├── evaluation_failures.jsonl        # fatal causes; invalid-baseline rows retain raw output evidence
 └── run.log
 ```
 
@@ -209,8 +213,11 @@ lineage can always start.
   "mutated_rule_ids": ["codeguard-0-…"], "priority_rule_ids": [], "priority_offset_count": 0,
   "objective_mode": "conservative",
   "f1": 0.0, "f2": 1.0, "f3": 0.0,         // conservative objectives (null if no candidate)
+  "total_raw_findings": 213,                 // primary remaining count
+  "total_weighted_score": 367.0,             // diagnostic
+  "num_invalid_prompts": 0, "failure_counts": {},
   "rule_fidelity": 1.0, "parsimony": 1,    // f2 source, −f3
-  "proportion_divergent": 0.0, "conditional_mean_divergence": 0.0,  // recorded diagnostics (not objectives)
+  "weighted_reduction": 0.0,               // baseline − candidate weighted score; diagnostic
   "f1_advance": false,
   "accepted": true,                        // EA: try_add result; random: always true
   "validation_metadata": { "codeguard-0-…": { … } },  // per changed gene; {} unless --enable-validation
@@ -219,18 +226,29 @@ lineage can always start.
 ```
 
 **`archive_snapshots/iterNNNN.json`** — one **single chromosome archive**:
-top-level `{iter, schema_version, cap, restart_h, origin,
-n_inserts/n_rejected/…, restart_history, chromosomes:[…]}`. Each entry in
+top-level `{iter, schema_version, cap, restart_h, origin, best_ever,
+best_ever_iteration, n_inserts/n_rejected/…, restart_history, chromosomes:[…]}`. Each entry in
 `chromosomes` is a chromosome snapshot (`cid`, `f1/f2/f3`, `mutated_rule_ids`,
 `order_priority`, `iteration_added`, `parent_id`, and per-gene `genes` each with a
 `text_ref` into the matching `mutated_rules/iterNNN/` file).
 
-**`intermediate/{iter_id}.jsonl`** — per prompt: `test_case_id`, `language`,
-`cwe_id`, `rules_used` (`original_rule_ids`, `mutated_rule_ids`, `render_order`,
-`chromosome_id`), `fitness{raw_count, weighted_score, check_ids,
-composite_score, code_divergence, …}`, latencies, tokens, and `generated_code`
-(last). The prompt text is *not* stored — it is recoverable from the rules map
-keyed by `test_case_id`.
+**`intermediate/{iter_id}.jsonl`** — per prompt: `test_case_id`, fixed
+`analysis_language`, `cwe_id`, `rules_used` (`original_rule_ids`,
+`mutated_rule_ids`, `render_order`, `chromosome_id`),
+`fitness{raw_count, weighted_score, raw_reduction, weighted_reduction,
+check_ids, score_source, analysis_status, observed_raw_count,
+observed_weighted_score, …}`, `output_validation`, latencies, tokens,
+`finish_reason`, raw `generated_code`, and `analyzed_code_sha256`. The exact
+selected scanner input is retained once in `semgrep_debug`; it is not duplicated
+in every intermediate row. The
+prompt text is *not* stored — it is recoverable from the rules map keyed by
+`test_case_id`.
+
+Candidate prompt-local failures use the matching baseline `raw_count` and
+`weighted_score`, so they cannot create false repair credit or penalize the
+whole chromosome. An invalid baseline aborts preflight. Evaluator/system errors
+retry once when transient and then abort; they are never converted to an empty
+finding list.
 
 **`mutated_rules/iterNNN/meta.json`** — `{iteration, chromosome_id, parent_id,
 move_type, changed_rule_id, chain, mutated_rule_ids, order_priority, changes,
@@ -279,7 +297,8 @@ class MyMutator(Mutator):
 Managed by `uv` (Python ≥ 3.11), pinned in `uv.lock`.
 
 - **Code generation:** `anthropic`, `openai` (API path); `torch`, `transformers`, `accelerate`, `bitsandbytes` (`--extra gpu`, DelftBlue only).
-- **Scoring:** `semgrep` (pinned 1.85.0 for DelftBlue glibc 2.28), `codebleu` + `tree-sitter-{python,java,c}` grammars.
+- **Scoring:** `semgrep` (pinned 1.85.0 for DelftBlue glibc 2.28).
+- **Output qualification:** Python standard-library AST; `tree-sitter==0.22.3` + `tree-sitter-java<0.22`.
 - **Validation:** `sentence-transformers` (`all-mpnet-base-v2`), `textstat`.
 - **Mutation:** `nlpaug`, `nltk`, `pyyaml`.
 - **Analysis (`--extra analysis`):** `matplotlib`, `scipy`, `pandas`.

@@ -13,10 +13,10 @@ set of CodeGuard rules used by the experiment, where each *gene* is one rule's
 text (original or a mutated allele) and a global *order gene* fixes the priority
 with which rules are inserted into each prompt. Each iteration mutates one gene of
 a chromosome, regenerates code for the prompts affected by that gene, scores the
-security effect with Semgrep (severity-weighted finding count), and assigns the
+security effect with Semgrep (raw finding count; severity weighting is diagnostic), and assigns the
 three conservative objectives (f1 = vulnerability reduction, f2 = rule fidelity,
-f3 = −parsimony) to the **whole chromosome**. Code divergence (1 − CodeBLEU) is
-recorded per prompt as a diagnostic only — it is not one of the objectives.
+f3 = −parsimony) to the **whole chromosome**. Severity-weighted findings are a
+reported diagnostic; raw finding reduction is the only security objective.
 
 ```mermaid
 flowchart TD
@@ -49,8 +49,8 @@ flowchart TD
     ASM --> LLM[LLM backend<br/>code generation<br/>signature cache -> skip unaffected]
     P --> LLM
     LLM --> CODE[Generated code<br/>per prompt]
-    CODE --> SG[Semgrep<br/>static analysis]
-    CODE --> CB[CodeBLEU divergence<br/>recorded diagnostic only]
+    CODE --> OV[Language + syntax<br/>qualification]
+    OV --> SG[Semgrep<br/>static analysis]
     SG -->|f1| FIT["Whole-chromosome fitness<br/>f1 vuln reduction<br/>f2 rule fidelity (SBERT)<br/>f3 −parsimony"]
     QV -->|f2| FIT
     ASM -->|f3| FIT
@@ -79,7 +79,7 @@ flowchart TD
     class R,P input
     class ARC archive
     class LLM llm
-    class FIT,SG,CB metric
+    class FIT,SG,OV metric
 ```
 
 The mutator(s), validator, backend, and scorers are fixed; only the **search
@@ -90,11 +90,11 @@ strategy** differs between the two configurations
 
 1. **Select** prompts from CyberSecEval (a language / count filter, seeded).
 2. **Map** each prompt to the CodeGuard rules relevant to it (pre-computed retrieval maps under `rule_maps/`).
-3. **Baseline**: evaluate the *origin chromosome* (all rules original, retrieval order) once — this seeds the per-case baseline Semgrep score and the reference code for divergence.
+3. **Baseline**: evaluate the *origin chromosome* (all rules original, retrieval order) once. Every prompt must produce a valid target-language implementation and a completed Semgrep score; otherwise the run stops before search because no trustworthy delta exists.
 4. **Build a candidate**: either a random sample from the origin (random search, EA init/injection) or a local move on an archive parent (EA — mutate one gene, or with weight 0.1 a rule-order bump). A candidate that renders identically to its base is retried without spending budget.
 5. **Validate** the mutation against four quality criteria — *informational*: the metadata is recorded and never gates the search.
 6. **Render + generate**: render each prompt's rule block from the child chromosome's alleles in its order, then generate code. A **per-prompt signature cache** (keyed on rule versions + order) reuses results for prompts the change did not touch.
-7. **Score**: compute each prompt's Semgrep severity-weighted finding count and CodeBLEU diagnostic; aggregate f1 from the prompt results and compute whole-chromosome fidelity (f2) and parsimony (f3).
+7. **Score**: compute each prompt's raw Semgrep finding count and severity-weighted diagnostic; aggregate raw-count f1 and compute whole-chromosome fidelity (f2) and parsimony (f3). Candidate prompt-local invalid outputs use their own baseline score; evaluator failures abort.
 8. **Search**: let the strategy decide what to keep from the three whole-chromosome objectives.
 
 ## The three objectives (conservative set)
@@ -104,7 +104,7 @@ objective set.
 
 | Objective | Definition | Captures |
 |---|---|---|
-| **f1** security fitness | Σ severity-weighted Semgrep delta vs baseline, **sign per `objective_direction`**: `minimize` (repair — the default) = `baseline − mutated` (higher f1 = *safer*); `maximize` = the secondary adversarial direction (`mutated − baseline`) | the primary signal: did the rule-set variant reduce vulnerable generation |
+| **f1** security fitness | Σ raw Semgrep-finding delta vs baseline, **sign per `objective_direction`**: `minimize` (repair — the default) = `baseline − mutated` (higher f1 = *safer*); `maximize` = the secondary adversarial direction (`mutated − baseline`) | the primary signal: did the rule-set variant reduce vulnerable generation |
 | **f2** rule fidelity | mean SBERT similarity of each *mutated* rule vs its original (1.0 = unchanged) — computed by the quality validator, so `--enable-validation` is mandatory on real runs | *faithfulness* — prefer repairs that barely change the rules' text |
 | **f3** −parsimony | negated count of text-mutated rules | *minimality* — prefer repairs that touch fewer rules |
 
@@ -151,7 +151,10 @@ carries a `phase`):
 **Admission** is standard Pareto admission: a candidate is kept unless the origin
 or a front member dominates it, so objective-equal order variants (scoring the
 origin's vector) are kept as neutral stepping-stone parents (neutral drift).
-`best()` reports the origin unless a candidate strictly improves f1.
+`best()` reports the origin unless a candidate strictly improves f1. Every
+evaluated child is considered for a separate persistent absolute-best record
+before archive admission, so rejection, cap eviction, and a later front wipe do
+not erase the run's best observed repair.
 On cap overflow the archive evicts **lexicographically by f1** (lowest f1 first,
 ties → f2+f3, then oldest; the just-added child is protected), so it never drops
 its best repair to keep a near-baseline variant. On a **stagnation** restart
@@ -181,4 +184,4 @@ Everything written to disk each iteration (the trajectory record, per-prompt
 evaluations, the single chromosome-archive snapshot, mutated rule text per
 evaluated iteration) is specified in
 [IMPLEMENTATION.md → Output schema](IMPLEMENTATION.md#output-schema).
-Runs use **schema_version 4**.
+Runs use **schema_version 5**.

@@ -26,29 +26,27 @@ Run as:
 Why needed:
 - Encapsulates cluster resource config and reproducible runtime setup.
 
-## analyze/ (report figures + tables — needs the `analysis` extra)
+## analyze/ (run validation + retained historical reports)
 
-> **Legacy status:** these tools currently target `schema_version: 2` runs and
-> do not yet consume the active whole-chromosome `schema_version: 4` artifacts.
-> See [`analyze/README.md`](analyze/README.md) before using them.
+- validate_schema5_run.py: strict schema-5 run reconciliation after each SLURM
+  search.
+- analyze_final_schema4.py / analyze_partial_schema4.py / final_schema4/: frozen
+  historical analyzers for the already completed schema-4 reports.
+- analyze_replicates.py / stats.py: temp>0 baseline-harness replicate summaries.
 
-- analyze_run.py: single run → RQ1 (per-rule + per-prompt baseline-vs-best,
-  Wilcoxon/McNemar), RQ2 (per-mutator effective rate + bootstrap CI), convergence,
-  cost + cache/search hygiene.
-- analyze_search.py: one or many runs → RQ3 (per-run efficiency, best f1,
-  time-to-best, restart breakdown; EA-vs-random comparison + convergence with
-  multiple runs).
-- validation_audit.py: per-criterion fail rate, per-mutator pass rate, what-if-gated
-  (needs `--enable-validation` runs).
-- migrate_legacy_run.py: bridge a pre-schema-2 run so the above can read it
-  (reconstructs iterations.jsonl + intermediate/; RQ1/RQ3 only).
-- loaders.py / stats.py: shared loaders + scipy stat helpers.
+The old schema-2 report stack was removed from the working tree to avoid
+accidentally analyzing current schema-5 runs with incompatible metrics.
 
-For a compatible legacy run (install once: `uv sync --extra analysis`):
-- `python scripts/analyze/analyze_run.py <run_dir>`
+## experiments/ (run and output hygiene)
+
+- filter_semgrep_debug.py: compact and audit `semgrep_debug.jsonl` after a run;
+  the search SLURM wrappers call it automatically before schema-5 validation.
 
 ## setup/
-- download_semgrep_security_audit_rules.sh: One-time/periodic local Semgrep rules bootstrap.
+- download_semgrep_security_audit_rules.sh: One-time local Semgrep rules bootstrap;
+  requires an immutable upstream commit and records it in `SOURCE_COMMIT`.
+- qualify_final_maps.py: Idempotently materializes the declared task-1301
+  exclusion in the final search maps and reconciles their derived metadata.
 
 Why needed:
 - Required for offline/consistent Semgrep scans on compute nodes.

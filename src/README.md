@@ -16,6 +16,7 @@ src/
 │   ├── base.py             # Mutator ABC, MutationResult
 │   └── rule_based.py       # VerbWeakening, SynonymReplacement, SectionReorder, etc.
 ├── evaluation/             # Code security analysis
+│   ├── output_validation.py # Language/syntax/completeness qualification
 │   ├── semgrep_runner.py   # Semgrep integration
 │   ├── fitness.py          # Fitness calculation
 │   └── rule_mapping.py     # Per-prompt rule retrieval
@@ -59,7 +60,7 @@ print(result.changes)  # List of mutations applied
 
 ```bash
 # The CLI constructs ExperimentEngine, loads the rule map, and persists the
-# schema-version-4 run artifacts. Validation is required because it feeds f2.
+# schema-version-5 run artifacts. Validation is required because it feeds f2.
 python scripts/experiments/run_experiment.py \
   --backend claude --optimizer ea --enable-validation \
   --rules-map rule_maps/final_consensus_map_qwen.json \

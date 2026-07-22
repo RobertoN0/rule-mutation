@@ -84,10 +84,10 @@ N_CASES=2 N_ITERATIONS=10 LANGUAGES=python OPTIMIZER=ea \
   sbatch --time=0:45:00 --job-name="ea_smoke" scripts/slurm/slurm_ea_qwen32b.sh
 
 # Final repair batch — paired EA vs random over the FULL case sets
-# (185 python / 114 java), seeds 42 + 43 (8 jobs). Runs are wall-time-bounded
+# (184 python / 113 java), seeds 42 + 43 (8 jobs). Runs are wall-time-bounded
 # (SIGUSR1); N_ITERATIONS is a high soft cap. EA_INIT_SAMPLES / EA_ORIGIN_PARENT
 # are EA-only (the random arm ignores them).
-declare -A NCASES=( [python]=185 [java]=114 )
+declare -A NCASES=( [python]=184 [java]=113 )
 for SEED in 42 43; do
   for OPT in ea random_search; do
     for LANG in python java; do
@@ -162,25 +162,22 @@ back to the SLURM wrapper's env vars (`--as delftblue` to force that form).
 
 ### The three objectives (conservative set, all maximised over the whole chromosome)
 
-- **f1 = `total_semgrep_delta`** — vulnerability reduction vs. baseline under `--objective-direction minimize` (higher = safer); the primary signal.
+- **f1 = `total_raw_reduction`** — raw Semgrep-finding reduction vs. baseline under `--objective-direction minimize` (higher = safer); the primary signal.
 - **f2 = `rule_fidelity`** — mean SBERT similarity of each mutated rule to its original (1.0 = unchanged); needs `--enable-validation`.
 - **f3 = `−parsimony`** — negated count of text-mutated rules (fewer edits = higher).
 
 f1's sign depends on `objective_direction` (f1 is negated at search time so the EA always
 maximises): under **minimize** (the repair runs) higher f1 = *safer* code (fewer findings);
 under **maximize** (the secondary adversarial direction) higher f1 = *more vulnerable* code.
-f2/f3 capture how faithfully and minimally the rule set was edited; they do not
-measure generated-code change. The CodeBLEU-derived divergence fields above are
-the diagnostics for whether the output shifted while Semgrep stayed flat.
+f2/f3 capture how faithfully and minimally the rule set was edited. The
+severity-weighted reduction is reported separately and does not drive search.
 
-### Analysis toolkit — work in progress
+### Analysis and validation
 
-A set of scripts under `scripts/analyze/` (needs `--extra analysis`) turns the
-raw run artifacts into figures and statistics. It is **being reworked for the
-repair/chromosome design**: the research-question mapping, the specific
-statistical tests, and the figure set are **not finalised**, so they are not
-documented here yet and are out of scope for the current code review. Until then,
-read the raw evidence directly — it is complete and stable (schema 4):
+`scripts/analyze/validate_schema5_run.py` is the current schema-5 health gate.
+Run it after each completed SLURM search and after syncing outputs locally. The
+multi-run schema-5 report generator is still pending; until then, read the raw
+evidence directly:
 
 - `iterations.jsonl` — the per-iteration trajectory (objectives, phase, move, acceptance).
 - `intermediate/*.jsonl` — the per-prompt evaluations (findings, generated code).
@@ -206,8 +203,8 @@ PY
 API backends can hit 429/529; a SLURM job can hit its wall-time. In both cases
 the per-iteration writer appends atomically, so `iterations.jsonl` and the
 already-written `intermediate/*.jsonl` are intact up to the cut-off. The run
-summary and `run_config.json` are written at the very end, so a killed run may
-lack them (the data is still there). To finish a shorter run, lower `--n-cases`
+summary is written at the end; `run_config.json` is written before model/scanner
+preflight, so a failed run still has provenance. To finish a shorter run, lower `--n-cases`
 / `--iterations`, or wait and re-run.
 
 ---
@@ -220,7 +217,6 @@ lack them (the data is still there). To finish a shorter run, lower `--n-cases`
 | `pytest` gone after `uv sync --extra analysis` | uv pruned the `dev` extra | `uv sync --extra dev --extra analysis` (combine extras) |
 | `FileNotFoundError: project-codeguard/...` | submodule not initialised | `git submodule update --init --recursive` |
 | `No matching prompts in rule mapping` | the rules map doesn't match the dataset slice | use a committed map under `rule_maps/` |
-| `WARNING: no reference data-flows extracted` (only visible in old logs) | CodeBLEU can't parse a few prompts | harmless and **silenced by default** (root-logger filter in `composite_fitness.py`); that prompt's divergence omits the data-flow sub-score. Findings unaffected. |
 
 ---
 

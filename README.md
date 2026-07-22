@@ -51,7 +51,7 @@ uv sync --extra dev --extra analysis     # both at once — NOT two separate syn
 
 ## Reproduce locally (API backends — no GPU required)
 
-The pipeline (mutate → generate → Semgrep → CodeBLEU → optional validation) runs end-to-end on any CPU machine using **Anthropic Claude** or **OpenAI** as the code-generation backend. Pick one of the two paths below.
+The pipeline (mutate → generate → qualify → Semgrep → search) runs end-to-end on any CPU machine using **Anthropic Claude** or **OpenAI** as the code-generation backend. Pick one of the two paths below.
 
 First, set an API key:
 
@@ -118,10 +118,10 @@ the archive snapshots (EA), and the run summary. The exact fields are in
 [IMPLEMENTATION.md → Output schema](IMPLEMENTATION.md#output-schema).
 
 > **Analysis toolkit — work in progress.** A set of scripts under
-> `scripts/analyze/` (needs the `analysis` extra: `matplotlib`, `scipy`) is being
-> reworked for the repair/chromosome design. Its figures, statistics, and the
-> research-question mapping are **not yet finalised** and are out of scope for the
-> current code review; they will be documented here once stable.
+> `scripts/analyze/validate_schema5_run.py` is the current run-health validator.
+> It reconciles schema-5 artifacts after each SLURM run. Multi-run schema-5
+> reporting will be added after the strict baseline preflights and final matrix
+> are fixed.
 
 ---
 
@@ -132,7 +132,7 @@ the archive snapshots (EA), and the run summary. The exact fields are in
 3. **Mutate** rules in the chromosome with one of 8 semantics-preserving strategies.
 4. **Validate** mutation quality (SBERT similarity, instruction adherence, security-keyword retention).
 5. **Generate** code with the configured backend on the original vs. mutated rule — Qwen2.5-Coder-32B-Instruct on DelftBlue, or Claude / OpenAI locally.
-6. **Score** each prompt with Semgrep (and record CodeBLEU as a diagnostic), then
+6. **Score** each prompt with Semgrep (raw findings primary; severity weighting diagnostic), then
    assemble whole-chromosome f1 vulnerability reduction, f2 mean SBERT rule
    fidelity, and f3 −parsimony.
 7. **Optimize** with one of two interchangeable search strategies (`--optimizer`)
@@ -183,11 +183,11 @@ Experiments run on A100 GPU nodes with Qwen2.5-Coder-32B-Instruct loaded offline
 N_CASES=2 N_ITERATIONS=10 LANGUAGES=python OPTIMIZER=ea \
   sbatch --time=0:45:00 --job-name="ea_smoke" scripts/slurm/slurm_ea_qwen32b.sh
 
-# Final repair batch — EA vs random over the FULL case sets (185 python /
-# 114 java), seeds 42 + 43. Runs are wall-time-bounded (SIGUSR1); N_ITERATIONS
+# Final repair batch — EA vs random over the qualified case sets (184 python /
+# 113 java), seeds 42 + 43. Runs are wall-time-bounded (SIGUSR1); N_ITERATIONS
 # is a high soft cap. EA_INIT_SAMPLES / EA_ORIGIN_PARENT are EA-only (the random
 # arm ignores them).
-declare -A NCASES=( [python]=185 [java]=114 )
+declare -A NCASES=( [python]=184 [java]=113 )
 for SEED in 42 43; do
   for OPT in ea random_search; do
     for LANG in python java; do
@@ -216,13 +216,13 @@ Reproduce any run with `python scripts/experiments/rerun_from_config.py <run_dir
 │   ├── mutation/          # 8 mutators + MutatorPool + MutationQualityValidator + ParsedRule
 │   ├── optimizer/         # chromosome + single Pareto archive (chromosome.py), EA + i.i.d. random-search runners (search.py)
 │   │                      #   + shared random sampler; ExperimentEngine orchestration (engine.py)
-│   ├── evaluation/        # Semgrep runner, CodeBLEU code-divergence, fitness, rule/dataset loading
+│   ├── evaluation/        # Output qualification, Semgrep runner, fitness, rule/dataset loading
 │   ├── llm_backends/      # Claude / OpenAI / DelftBlue-local backends
 │   └── retrieval/         # prompt → CodeGuard-rule map builders (local + Anthropic; [retrieval] extra)
 ├── scripts/
-│   ├── experiments/       # run_experiment.py (entrypoint); rerun_from_config.py (reproducer)
+│   ├── experiments/       # run_experiment.py, rerun_from_config.py, Semgrep-debug filter
 │   ├── slurm/             # slurm_ea_qwen32b.sh (EA / random) + slurm_rule_retrieval_local.sh
-│   └── analyze/           # analysis toolkit (WIP — being reworked for the repair design)
+│   └── analyze/           # schema-5 validator + retained historical analyzers
 ├── tests/unit/            # 230 unit tests
 ├── project-codeguard/     # CodeGuard security rule library (git submodule)
 ├── rule_maps/             # Pre-computed prompt → rule-ID retrieval maps
