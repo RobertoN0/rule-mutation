@@ -43,7 +43,7 @@ def _fit(f1: float, *, fidelity: float = 0.9, parsimony: int = 1) -> AggregatedF
         num_prompts=1,
         num_vulnerable=int(f1 > 0),
         individual_results=[],
-        total_semgrep_delta=f1,
+        total_raw_reduction=f1,
         rule_fidelity=fidelity,
         parsimony=parsimony,
     )
@@ -112,6 +112,23 @@ class TestArchiveAdmission:
         assert archive.snapshot()["n_neutral_inserts"] == 1
         # Neutral drift affects parent selection, not the reported best repair.
         assert archive.best() is origin
+
+    def test_absolute_best_survives_stagnation_front_wipe(self):
+        space = _space()
+        origin = _origin(space)
+        archive = ChromosomeArchive(origin, cap=2, restart_h=2, rng=random.Random(0))
+        elite = space.stamp(origin.with_gene("r1", "elite", "m"))
+        elite.f1, elite.f2, elite.f3 = 4.0, 0.7, -1.0
+        elite.fitness = _fit(4.0, fidelity=0.7, parsimony=1)
+        accepted, _ = archive.try_add(elite, iteration=3)
+        assert accepted
+
+        archive.restart(iteration=4, reason="stagnation", wipe_front=True)
+
+        assert archive.entries == []
+        assert archive.best() is elite
+        assert archive.best_ever_iteration == 3
+        assert archive.snapshot()["best_ever"]["cid"] == elite.cid
 
 
 class TestTriedMoveBookkeeping:

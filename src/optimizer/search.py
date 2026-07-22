@@ -10,7 +10,7 @@ from the chromosome and scores the whole rule set.
 
 Objectives — the "conservative" set (adopted 2026-07-10), all MAXIMIZED by the
 Pareto archive:
-    f1 = vulnerability reduction (severity-weighted Semgrep delta; sign set by
+    f1 = vulnerability reduction (raw Semgrep-finding delta; sign set by
          the engine's ``objective_direction``)
     f2 = rule fidelity (mean SBERT similarity of mutated rules vs originals)
     f3 = −parsimony (negated count of mutated rules — prefer the smaller edit)
@@ -126,12 +126,11 @@ class RandomBuildResult:
 def _objectives(agg: AggregatedFitness) -> tuple[float, float, float]:
     """Map an AggregatedFitness to the archive's (f1, f2, f3), all maximized.
 
-    f1 = vulnerability reduction (``total_semgrep_delta``; the engine negates the
-    raw delta under ``objective_direction="minimize"`` so higher is always safer),
+    f1 = vulnerability reduction (``total_raw_reduction``; positive means safer),
     f2 = rule fidelity (mean SBERT of mutated rules vs originals; 1.0 = unchanged),
     f3 = −parsimony (fewer mutated rules is better; negated so maximizing works).
     """
-    return agg.total_semgrep_delta, agg.rule_fidelity, -float(agg.parsimony)
+    return agg.total_raw_reduction, agg.rule_fidelity, -float(agg.parsimony)
 
 
 # ============================================================================
@@ -727,6 +726,7 @@ def run_ea(
 
         child.f1, child.f2, child.f3 = _objectives(agg)
         child.fitness = agg
+        child.evaluation_iteration = budget_iter
 
         # ---- 5. offer to the archive ----------------------------------------
         parent_f1 = parent.f1
@@ -1094,6 +1094,7 @@ def run_random_search(
 
         child.f1, child.f2, child.f3 = _objectives(agg)
         child.fitness = agg
+        child.evaluation_iteration = budget_iter
 
         f1_advance = child.f1 > 0.0
         for name in sample.attempted_mutators:
@@ -1101,7 +1102,20 @@ def run_random_search(
             if f1_advance:
                 mutator_stats[name]["applications_f1_advancing"] += 1
 
-        if child.f1 > best.f1:
+        if (
+            child.f1 > best.f1
+            or (
+                abs(child.f1 - best.f1) <= 1e-9
+                and (
+                    child.invalid_prompt_count,
+                    -(child.f2 + child.f3),
+                )
+                < (
+                    best.invalid_prompt_count,
+                    -(best.f2 + best.f3),
+                )
+            )
+        ):
             best, best_fitness = child, agg
 
         if save_move_fn is not None:
@@ -1166,17 +1180,13 @@ def _emit_record(
 ):
     if iter_record_fn is None:
         return
-    # f1/f2/f3 are the conservative archive objectives; the divergence components
-    # are recorded alongside as diagnostics so older analyses stay comparable.
     if agg is not None:
         f1, f2, f3 = _objectives(agg)
-        prop_div = agg.proportion_divergent
-        cond_div = agg.conditional_mean_divergence
         fidelity = agg.rule_fidelity
         parsimony = agg.parsimony
     else:
         f1 = f2 = f3 = None
-        prop_div = cond_div = fidelity = parsimony = None
+        fidelity = parsimony = None
     p_f1 = parent_f1 if parent_f1 is not None else (parent.f1 if parent is not None else None)
     rec = {
         "iter": iteration,
@@ -1206,10 +1216,13 @@ def _emit_record(
         "objective_mode": "conservative",
         "f1": f1, "f2": f2, "f3": f3,
         "security_neutral": bool(f1 is not None and abs(f1) <= 1e-9),
-        "proportion_divergent": prop_div,
-        "conditional_mean_divergence": cond_div,
         "rule_fidelity": fidelity,
         "parsimony": parsimony,
+        "num_invalid_prompts": agg.num_invalid_prompts if agg is not None else None,
+        "failure_counts": agg.failure_counts if agg is not None else {},
+        "total_raw_findings": agg.total_raw_count if agg is not None else None,
+        "total_weighted_score": agg.total_weighted_score if agg is not None else None,
+        "weighted_reduction": agg.total_weighted_reduction if agg is not None else None,
         "f1_advance": bool(accepted and f1 is not None and p_f1 is not None and f1 > p_f1),
         "accepted": accepted,
         "n_prompts_rerun": n_rerun,

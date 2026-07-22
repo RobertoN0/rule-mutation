@@ -243,15 +243,23 @@ class DelftBlueLocalBackend(LLMBackend):
             with torch.no_grad():
                 outputs = model.generate(**generation_kwargs)
 
-            output_tokens = int(outputs.shape[1] - input_tokens)
-            decoded = tokenizer.decode(outputs[0], skip_special_tokens=True)
+            generated_ids = outputs[0, input_tokens:]
+            output_tokens = int(generated_ids.shape[0])
+            content = tokenizer.decode(generated_ids, skip_special_tokens=True)
 
-            # Best-effort extraction of assistant segment
-            content = decoded
-            lower = decoded.lower()
-            if "assistant" in lower:
-                idx = lower.rfind("assistant")
-                content = decoded[idx + len("assistant"):].strip(" :\n")
+            eos_value = generation_config.eos_token_id
+            if eos_value is None:
+                eos_value = tokenizer.eos_token_id
+            eos_ids = (
+                {int(token_id) for token_id in eos_value}
+                if isinstance(eos_value, (list, tuple, set))
+                else ({int(eos_value)} if eos_value is not None else set())
+            )
+            generated_token_ids = [int(token_id) for token_id in generated_ids.tolist()]
+            hit_eos = bool(eos_ids.intersection(generated_token_ids))
+            finish_reason = (
+                "length" if output_tokens >= max_new_tokens and not hit_eos else "stop"
+            )
 
             latency_ms = (time.perf_counter() - start_time) * 1000
 
@@ -261,12 +269,14 @@ class DelftBlueLocalBackend(LLMBackend):
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
                 latency_ms=latency_ms,
-                finish_reason="stop",
+                finish_reason=finish_reason,
                 raw_response={
                     "quantization": self._quantization,
                     "device": str(getattr(model, "device", "unknown")),
                     "do_sample": do_sample,
                     "top_p": top_p,
+                    "max_new_tokens": max_new_tokens,
+                    "hit_eos": hit_eos,
                 },
             )
         except Exception as e:

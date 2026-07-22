@@ -44,14 +44,8 @@ dependencies = [
     "nlpaug>=1.1.11",
     "nltk>=3.8",
 
-    # Code divergence metric (bd-03k Change 3) — CodeBLEU + tree-sitter grammars.
-    # IMPORTANT: codebleu==0.7.0 wants tree-sitter <0.23 internally but does NOT pull
-    # in the per-language grammars. Pinning the grammars to <0.22 keeps codebleu's
-    # bundled tree-sitter==0.22.x compatible. Without this, codebleu silently falls
-    # back to token-BLEU with a misleading "codebleu not installed" message.
-    "codebleu==0.7.0",
-    "tree-sitter-c<0.22",
-    "tree-sitter-python<0.22",
+    # Java output qualification before Semgrep. Python uses the stdlib AST.
+    "tree-sitter==0.22.3",
     "tree-sitter-java<0.22",
 ]
 

@@ -35,6 +35,7 @@ the paired effect (this condition minus the baseline condition) into
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import socket
@@ -48,16 +49,24 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from scripts.experiments.run_experiment import (  # noqa: E402
-    load_prompts_with_rules, create_rule_loader, RULES_DIR,
+    RULES_DIR, create_rule_loader, load_prompts_with_rules,
 )
 from scripts.analyze import stats as S  # noqa: E402
 from src.llm_backends import LLMConfig  # noqa: E402
 from src.llm_backends.delftblue_local_backend import DelftBlueLocalBackend  # noqa: E402
 from src.mutation.base import Mutator, MutationResult  # noqa: E402
-from src.optimizer.engine import ExperimentEngine, SearchConfig  # noqa: E402
+from src.optimizer.engine import (  # noqa: E402
+    EvaluationInfrastructureError,
+    ExperimentEngine,
+    SearchConfig,
+)
+from src.evaluation.output_validation import BaselineOutputError  # noqa: E402
 from src.optimizer.chromosome import RuleSetSpace  # noqa: E402
-from src.evaluation.composite_fitness import CompositeFitnessEvaluator  # noqa: E402
-from src.evaluation.semgrep_runner import configure_semgrep  # noqa: E402
+from src.evaluation.semgrep_runner import (  # noqa: E402
+    configure_semgrep,
+    configure_semgrep_debug,
+    get_semgrep_config,
+)
 
 METRICS = ("raw_findings", "vulnerable_cases", "weighted_fitness")
 
@@ -327,6 +336,36 @@ def main() -> None:
         subprocess_timeout_seconds=args.semgrep_timeout_seconds,
         jobs=args.semgrep_jobs,
     )
+    configure_semgrep_debug(args.output_dir / "semgrep_debug")
+    semgrep_config = get_semgrep_config()
+
+    rule_loader = create_rule_loader(RULES_DIR)
+    print(f"\n=== Condition: {condtag}  (map={Path(rules_map).name}) ===", flush=True)
+    prompts = load_prompts_with_rules(
+        Path(rules_map), rule_loader, n_cases=args.n_cases,
+        languages=[args.language], selection=args.selection, seed=args.seed_base,
+    )
+    overridden_rule_ids: list[str] = []
+    if override_mode:
+        override_texts = _load_override_texts(args.rules_override_dir)
+        overridden_rule_ids = sorted(_apply_overrides(prompts, override_texts))
+        print(f"   Injected mutated text into {len(overridden_rule_ids)} rule(s)", flush=True)
+        if args.only_overridden_prompts:
+            ov = set(overridden_rule_ids)
+            before = len(prompts)
+            prompts = [p for p in prompts if any(r in ov for r in p.rule_ids)]
+            print(f"   Restricted to {len(prompts)}/{before} prompts using an "
+                  f"overridden rule", flush=True)
+    if not prompts:
+        raise SystemExit("No prompts remain after map/language/override selection")
+    print(f"   {len(prompts)} prompts", flush=True)
+
+    # Rule-set space (genome definition) over the possibly-overridden rule texts.
+    _originals: dict[str, str] = {}
+    for _p in prompts:
+        for _rid, _txt in _p.individual_rules.items():
+            _originals.setdefault(_rid, _txt)
+    _space = RuleSetSpace(all_rule_ids=sorted(_originals), originals=_originals)
 
     # ---- Provenance: schema_version-2 run_config.json ----------------------
     # On resume (a prior chunk wrote into this dir) UNION the seed lists and
@@ -361,7 +400,8 @@ def main() -> None:
             "model": args.model,
             "quantization": args.quantization,
             "languages": [args.language],
-            "n_cases": args.n_cases,
+            "n_cases": len(prompts),
+            "n_cases_requested": args.n_cases,
             "selection": args.selection,
             "temperature": args.temperature,
             "condition": condtag,
@@ -369,6 +409,16 @@ def main() -> None:
             "seeds_this_chunk": seeds,     # what this invocation was asked to run
             "seed": args.seed_base,
             "rules_map": str(rules_map),
+            "rules_map_sha256": hashlib.sha256(Path(rules_map).read_bytes()).hexdigest(),
+            "max_output_tokens": 4096,
+            "semgrep_config": str(semgrep_config["rule_config"]),
+            "semgrep_timeout_seconds": semgrep_config["subprocess_timeout_seconds"],
+            "semgrep_jobs": semgrep_config["jobs"],
+            "semgrep_version": semgrep_config["semgrep_version"],
+            "semgrep_rule_config_kind": semgrep_config["rule_config_kind"],
+            "semgrep_rules_sha256": semgrep_config["rule_config_sha256"],
+            "semgrep_rule_file_count": semgrep_config["rule_file_count"],
+            "semgrep_rules_source_commit": semgrep_config["rule_source_commit"],
             "rules_override_dir": (str(args.rules_override_dir) if override_mode else None),
             "only_overridden_prompts": bool(args.only_overridden_prompts) if override_mode else False,
             "baseline_ref": (str(args.baseline_ref) if args.baseline_ref else None),
@@ -392,32 +442,6 @@ def main() -> None:
         sys.exit(1)
     print("   ✅ Model ready", flush=True)
 
-    rule_loader = create_rule_loader(RULES_DIR)
-    print(f"\n=== Condition: {condtag}  (map={Path(rules_map).name}) ===", flush=True)
-    prompts = load_prompts_with_rules(
-        Path(rules_map), rule_loader, n_cases=args.n_cases,
-        languages=[args.language], selection=args.selection, seed=args.seed_base,
-    )
-    overridden_rule_ids: list[str] = []
-    if override_mode:
-        override_texts = _load_override_texts(args.rules_override_dir)
-        overridden_rule_ids = sorted(_apply_overrides(prompts, override_texts))
-        print(f"   Injected mutated text into {len(overridden_rule_ids)} rule(s)", flush=True)
-        if args.only_overridden_prompts:
-            ov = set(overridden_rule_ids)
-            before = len(prompts)
-            prompts = [p for p in prompts if any(r in ov for r in p.rule_ids)]
-            print(f"   Restricted to {len(prompts)}/{before} prompts using an "
-                  f"overridden rule", flush=True)
-    print(f"   {len(prompts)} prompts", flush=True)
-
-    # Rule-set space (genome definition) over the possibly-overridden rule texts.
-    _originals: dict[str, str] = {}
-    for _p in prompts:
-        for _rid, _txt in _p.individual_rules.items():
-            _originals.setdefault(_rid, _txt)
-    _space = RuleSetSpace(all_rule_ids=sorted(_originals), originals=_originals)
-
     # ---- Resume: skip seeds already recorded -------------------------------
     rep_path = args.output_dir / "replicates.jsonl"
     done_seeds = {r["seed"] for r in _load_replicates(args.output_dir, condition=condtag)}
@@ -439,14 +463,19 @@ def main() -> None:
                     save_intermediate=False, enable_validation=False,
                     enable_eval_cache=False,
                 ),
-                composite_evaluator=CompositeFitnessEvaluator(reference_codes={}, lang=args.language),
             )
             # Schema-3 seam: render the (possibly overridden) rule set as the
             # origin chromosome. intermediate/{iter_id}.jsonl (with generated_code)
             # is written inside _evaluate_chromosome.
-            agg, *_rest = hc._evaluate_chromosome(
-                _space.origin(), _space, prompts, iter_id=iter_id,
-            )
+            try:
+                agg, *_rest = hc._evaluate_chromosome(
+                    _space.origin(), _space, prompts, iter_id=iter_id,
+                    baseline_evaluation=True,
+                )
+            except (BaselineOutputError, EvaluationInfrastructureError) as exc:
+                raise SystemExit(
+                    f"Baseline replicate {seed} aborted without a score: {exc}"
+                ) from exc
 
             per_case = [r.raw_count for r in agg.individual_results]
             cases_per_check: Counter = Counter()
@@ -459,7 +488,7 @@ def main() -> None:
                 "n_cases": len(prompts),
                 "raw_findings": int(sum(per_case)),
                 "vulnerable_cases": int(agg.num_vulnerable),
-                "weighted_fitness": float(agg.total_fitness),
+                "weighted_fitness": float(agg.total_weighted_score),
                 "per_case_raw": per_case,
                 "cases_per_check_id": dict(cases_per_check),
                 "rules_override_dir": (str(args.rules_override_dir) if override_mode else None),

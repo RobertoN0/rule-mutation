@@ -92,6 +92,29 @@ class TestSynonymReplacementMutator:
     def result(self) -> MutationResult:
         return SynonymReplacementMutator(seed=SEED).mutate(SAMPLE_RULE_TEXT)
 
+    def test_dependency_preflight_succeeds_with_installed_data(self):
+        SynonymReplacementMutator.validate_runtime_dependencies()
+
+    def test_dependency_preflight_rejects_missing_pos_tagger(self, monkeypatch):
+        import nltk
+
+        def missing_tagger(_tokens):
+            raise LookupError("test-only missing tagger")
+
+        monkeypatch.setattr(nltk, "pos_tag", missing_tagger)
+        with pytest.raises(RuntimeError, match="required NLTK data is missing"):
+            SynonymReplacementMutator.validate_runtime_dependencies()
+
+    def test_cached_runtime_never_attempts_network_download(self, monkeypatch):
+        import nltk
+
+        def forbidden_download(*_args, **_kwargs):
+            raise AssertionError("runtime download attempted")
+
+        monkeypatch.setattr(nltk, "download", forbidden_download)
+        result = SynonymReplacementMutator(seed=SEED).mutate(SAMPLE_RULE_TEXT)
+        assert result.changed
+
     def test_c_b1_changed(self, result: MutationResult):
         assert result.changed
         assert result.change_ratio > 0
@@ -159,14 +182,7 @@ class TestAddRandomWordMutator:
         mutated_words = len(result.mutated.split())
         assert mutated_words > original_words
 
-        # No negation words should be inserted
-        negation_words = {"not", "never", "no", "without", "nor", "neither", "none",
-                          "cannot", "can't", "won't", "shouldn't", "don't", "doesn't"}
-        # Check only inserted words — compare word sets
-        orig_word_list = SAMPLE_RULE_TEXT.lower().split()
-        mut_word_list = result.mutated.lower().split()
-        # Newly inserted words should not include negation words
-        # (This is a heuristic — we check the filler word vocabulary)
+        # The fixed filler vocabulary contains no negation words.
         from src.mutation.rule_based import _SimpleWordInserter
         fillers = set(_SimpleWordInserter._FILLER_WORDS)
         # Mutated text should contain some filler words not in original
@@ -180,6 +196,16 @@ class TestAddRandomWordMutator:
         original_spans = _inline_code_spans(SAMPLE_RULE_TEXT)
         mutated_spans = _inline_code_spans(result.mutated)
         assert original_spans.issubset(mutated_spans)
+
+    def test_internal_failure_is_not_silently_recorded_as_identity(self):
+        class BrokenAugmenter:
+            def augment(self, _text):
+                raise OSError("test-only failure")
+
+        mutator = AddRandomWordMutator(seed=SEED)
+        mutator._aug = BrokenAugmenter()
+        with pytest.raises(RuntimeError, match="refusing to record a silent identity"):
+            mutator.mutate(SAMPLE_RULE_TEXT)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

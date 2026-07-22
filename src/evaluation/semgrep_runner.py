@@ -7,6 +7,8 @@ Used by the SBST rule-set search to score generated code.
 from __future__ import annotations
 
 import json
+import hashlib
+import importlib.metadata
 import os
 import re
 import shutil
@@ -16,6 +18,7 @@ import tempfile
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 
 
@@ -54,6 +57,7 @@ LANG_EXTENSIONS: dict[str, str] = {
     "ruby": ".rb",
     "kotlin": ".kt",
     "scala": ".scala",
+    "bash": ".sh",
 }
 
 # Language → subdirectory name inside a local Semgrep rules directory.
@@ -76,6 +80,7 @@ _LANG_SUBDIR: dict[str, str] = {
     "ruby": "ruby",
     "kotlin": "kotlin",
     "scala": "scala",
+    "bash": "bash",
 }
 
 # Default Semgrep ruleset for security analysis
@@ -120,10 +125,50 @@ def configure_semgrep(
         _semgrep_jobs = int(jobs)
 
 
-def get_semgrep_config() -> dict[str, int | str]:
+@lru_cache(maxsize=8)
+def _rules_fingerprint(path_value: str) -> tuple[str, int]:
+    path = Path(path_value)
+    # Hash only rule definitions.  Operational metadata such as an absolute-path
+    # manifest must not make an otherwise identical ruleset hash differently on
+    # two machines.
+    files = sorted(
+        file
+        for pattern in ("*.yml", "*.yaml")
+        for file in path.rglob(pattern)
+        if file.is_file()
+    )
+    digest = hashlib.sha256()
+    for file in files:
+        digest.update(file.relative_to(path).as_posix().encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(file.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest(), len(files)
+
+
+def get_semgrep_config() -> dict[str, int | str | None]:
     """Return the currently active Semgrep configuration."""
+    resolved = _resolve_rule_config(_semgrep_rule_config)
+    path = Path(resolved)
+    fingerprint: str | None = None
+    file_count: int | None = None
+    source_commit: str | None = None
+    if path.is_dir():
+        fingerprint, file_count = _rules_fingerprint(str(path))
+        source_commit_path = path / "SOURCE_COMMIT"
+        if source_commit_path.is_file():
+            source_commit = source_commit_path.read_text(encoding="utf-8").strip() or None
+    try:
+        semgrep_version = importlib.metadata.version("semgrep")
+    except importlib.metadata.PackageNotFoundError:
+        semgrep_version = "unknown"
     return {
-        "rule_config": _semgrep_rule_config,
+        "rule_config": resolved,
+        "rule_config_kind": "local" if path.exists() else "remote",
+        "rule_config_sha256": fingerprint,
+        "rule_file_count": file_count,
+        "rule_source_commit": source_commit,
+        "semgrep_version": semgrep_version,
         "subprocess_timeout_seconds": _semgrep_subprocess_timeout_seconds,
         "jobs": _semgrep_jobs,
     }
@@ -168,10 +213,10 @@ def _resolve_lang_aware_config_args(
     for lang in sorted(languages):
         subdir_name = _LANG_SUBDIR.get(lang)
         if subdir_name is None:
-            continue  # Unknown language — no subdir exists, skip it.
+            return [resolved]
         subdir = base / subdir_name
         if not subdir.is_dir():
-            continue  # Subdir missing (e.g. cpp) — skip rather than load all rules.
+            return [resolved]
         lang_paths.append(str(subdir))
 
     return lang_paths if lang_paths else [resolved]
@@ -211,6 +256,10 @@ def _write_semgrep_debug(
     proc_result: "subprocess.CompletedProcess | None",
     sem_result: "SemgrepResult",
     semgrep_command: list[str] | None = None,
+    *,
+    include_process_payload: bool = True,
+    batch_sample_index: int | None = None,
+    batch_size: int | None = None,
 ) -> None:
     """Append one debug record to ``semgrep_debug.jsonl`` (no-op if not configured)."""
     global _debug_counter
@@ -227,14 +276,23 @@ def _write_semgrep_debug(
             "language": language,
             "rule_config": rule_config,
             "semgrep_command": semgrep_command,
+            "batch_sample_index": batch_sample_index,
+            "batch_size": batch_size,
             "fences_stripped": fences_stripped,
             "code_raw": code_original,
             "code_analyzed": code_analyzed,
             "semgrep_returncode": proc_result.returncode if proc_result is not None else None,
-            "semgrep_stdout": proc_result.stdout if proc_result is not None else None,
-            "semgrep_stderr": proc_result.stderr if proc_result is not None else None,
+            "semgrep_stdout": (
+                proc_result.stdout
+                if proc_result is not None and include_process_payload else None
+            ),
+            "semgrep_stderr": (
+                proc_result.stderr
+                if proc_result is not None and include_process_payload else None
+            ),
             "findings_count": sem_result.count,
             "error": sem_result.error,
+            "error_kind": sem_result.error_kind,
             "findings": [
                 {
                     "check_id": f.check_id,
@@ -273,6 +331,10 @@ class SemgrepResult:
     
     findings: list[SemgrepFinding] = field(default_factory=list)
     error: str | None = None
+    error_kind: str | None = None
+    """Machine-readable failure class. Prompt-local failures are distinguished
+    from evaluator/infrastructure failures so callers cannot silently score a
+    failed scan as zero findings."""
     
     @property
     def count(self) -> int:
@@ -298,6 +360,42 @@ class SemgrepResult:
     def severities(self) -> list[str]:
         """List of severities for all findings."""
         return [f.severity for f in self.findings]
+
+    @property
+    def is_prompt_error(self) -> bool:
+        return self.error_kind in {
+            "input_validation",
+            "target_parse",
+            "target_analysis",
+            "empty_code",
+            "empty_output",
+            "generation_incomplete",
+            "malformed_output",
+            "language_drift",
+            "multiple_target_blocks",
+            "syntax_invalid",
+            "vacuous_output",
+        }
+
+    @property
+    def is_system_error(self) -> bool:
+        return self.error is not None and not self.is_prompt_error
+
+
+@dataclass(frozen=True)
+class SemgrepSample:
+    """One batch sample with raw and already-selected code kept separate."""
+
+    code_raw: str
+    code_analyzed: str
+    language: str
+    precheck_error: str | None = None
+    precheck_error_kind: str = "input_validation"
+
+    def __iter__(self):
+        """Keep simple test doubles that unpack ``(code, language)`` working."""
+        yield self.code_raw
+        yield self.language
 
 
 def strip_markdown_fences(code: str) -> str:
@@ -356,7 +454,7 @@ def run_semgrep(
 
     # Handle empty code
     if not code_content.strip():
-        sem_result = SemgrepResult(error="Empty code content")
+        sem_result = SemgrepResult(error="Empty code content", error_kind="empty_code")
         if write_debug:
             _write_semgrep_debug(
                 code_original, code_content, language, resolved_rule_config, fences_stripped,
@@ -367,7 +465,8 @@ def run_semgrep(
     base_config = _resolve_rule_config(rule_config)
     if base_config.startswith(("/", ".", "~")) and not Path(base_config).exists():
         sem_result = SemgrepResult(
-            error=f"Local Semgrep config not found: {base_config}"
+            error=f"Local Semgrep config not found: {base_config}",
+            error_kind="invalid_config",
         )
         if write_debug:
             _write_semgrep_debug(
@@ -411,7 +510,8 @@ def run_semgrep(
         # Proceed if stdout has content (even on non-zero exit, e.g. parse warnings).
         if not proc_result.stdout.strip():
             sem_result = SemgrepResult(
-                error=proc_result.stderr or "Semgrep returned no output"
+                error=proc_result.stderr or "Semgrep returned no output",
+                error_kind="process",
             )
         else:
             data = json.loads(proc_result.stdout)
@@ -428,16 +528,46 @@ def run_semgrep(
                     line=r["start"]["line"],
                 ))
 
-            sem_result = SemgrepResult(findings=findings)
+            errors = data.get("errors") or []
+            skipped_rules = data.get("skipped_rules") or []
+            if skipped_rules:
+                sem_result = SemgrepResult(
+                    findings=findings,
+                    error=f"Semgrep skipped {len(skipped_rules)} configured rule(s)",
+                    error_kind="semgrep_system",
+                )
+            elif errors:
+                is_target = all(_is_target_parse_error(error) for error in errors)
+                target_kinds = {_target_error_kind(error) for error in errors}
+                sem_result = SemgrepResult(
+                    findings=findings,
+                    error="; ".join(_semgrep_error_text(error) for error in errors),
+                    error_kind=(
+                        "target_analysis"
+                        if is_target and "target_analysis" in target_kinds
+                        else "target_parse" if is_target else "semgrep_system"
+                    ),
+                )
+            elif proc_result.returncode != 0:
+                sem_result = SemgrepResult(
+                    findings=findings,
+                    error=(
+                        f"Semgrep exited with status {proc_result.returncode}: "
+                        f"{proc_result.stderr.strip()}"
+                    ),
+                    error_kind="process",
+                )
+            else:
+                sem_result = SemgrepResult(findings=findings)
 
     except subprocess.TimeoutExpired:
-        sem_result = SemgrepResult(error="Semgrep timed out")
+        sem_result = SemgrepResult(error="Semgrep timed out", error_kind="timeout")
     except json.JSONDecodeError as e:
-        sem_result = SemgrepResult(error=f"Failed to parse Semgrep output: {e}")
+        sem_result = SemgrepResult(error=f"Failed to parse Semgrep output: {e}", error_kind="json")
     except FileNotFoundError:
-        sem_result = SemgrepResult(error="Semgrep not installed or not in PATH")
+        sem_result = SemgrepResult(error="Semgrep not installed or not in PATH", error_kind="not_installed")
     except Exception as e:
-        sem_result = SemgrepResult(error=f"Unexpected error: {e}")
+        sem_result = SemgrepResult(error=f"Unexpected error: {e}", error_kind="unexpected")
     finally:
         if tmp_path is not None and os.path.exists(tmp_path):
             os.remove(tmp_path)
@@ -450,162 +580,254 @@ def run_semgrep(
     return sem_result
 
 
+def _sample_index_from_path(path: str | None) -> int | None:
+    if not path:
+        return None
+    match = re.search(r"sample_(\d+)", os.path.basename(path))
+    return int(match.group(1)) if match else None
+
+
+def _semgrep_error_text(error: object) -> str:
+    if not isinstance(error, dict):
+        return str(error)
+    parts = [str(error.get(key, "")).strip() for key in ("type", "level", "message")]
+    return ": ".join(part for part in parts if part) or json.dumps(error, sort_keys=True)
+
+
+def _semgrep_error_path(error: object) -> str | None:
+    if not isinstance(error, dict):
+        return None
+    path = error.get("path")
+    if isinstance(path, str):
+        return path
+    spans = error.get("spans")
+    if isinstance(spans, list):
+        for span in spans:
+            if isinstance(span, dict) and isinstance(span.get("file"), str):
+                return span["file"]
+    return None
+
+
+def _is_target_parse_error(error: object) -> bool:
+    text = _semgrep_error_text(error).lower()
+    return any(
+        term in text
+        for term in ("parse", "syntax", "partially parsed", "lexical", "timeout")
+    )
+
+
+def _target_error_kind(error: object) -> str:
+    return "target_analysis" if "timeout" in _semgrep_error_text(error).lower() else "target_parse"
+
+
 def run_semgrep_batch_dir(
-    code_samples: list[tuple[str, str]],
+    code_samples: list[tuple[str, str] | SemgrepSample],
     rule_config: str | None = None,
     strip_fences: bool = True,
 ) -> list[SemgrepResult]:
-    """Run Semgrep on multiple code samples using a single subprocess.
+    """Analyze a batch and preserve prompt-local versus systemic failures.
 
-    Writes all samples to a temporary directory and invokes Semgrep once,
-    eliminating per-sample process startup overhead.  The subprocess timeout
-    is scaled proportionally: ``len(code_samples) × _semgrep_subprocess_timeout_seconds``.
-
-    Args:
-        code_samples: List of ``(code, language)`` tuples to analyze.
-        rule_config: Semgrep ruleset to use. Falls back to global default.
-        strip_fences: Strip markdown code fences before analysis.
-
-    Returns:
-        List of :class:`SemgrepResult` in the same order as *code_samples*.
+    ``SemgrepSample`` inputs carry the raw model output, selected code, and any
+    pre-analysis validation failure. Legacy ``(code, language)`` tuples remain
+    supported for callers outside the optimizer.
     """
     if not code_samples:
         return []
 
-    languages = {lang for _, lang in code_samples}
-    config_args = _resolve_lang_aware_config_args(rule_config, languages)
-    resolved_rule_config = config_args[0]  # used for debug logging / error messages
-    timeout = _semgrep_subprocess_timeout_seconds * len(code_samples)
+    samples: list[SemgrepSample] = []
+    for sample in code_samples:
+        if isinstance(sample, SemgrepSample):
+            samples.append(sample)
+        else:
+            code, language = sample
+            analyzed = strip_markdown_fences(code) if strip_fences else code
+            samples.append(SemgrepSample(code, analyzed, language))
 
-    # Pre-process: strip fences, mark empty samples as None
-    codes_cleaned: list[str | None] = []
-    for code, _ in code_samples:
-        if strip_fences:
-            code = strip_markdown_fences(code)
-        codes_cleaned.append(code if code.strip() else None)
+    active_languages = {
+        sample.language
+        for sample in samples
+        if sample.precheck_error is None and sample.code_analyzed.strip()
+    }
+    config_args = _resolve_lang_aware_config_args(rule_config, active_languages)
+    resolved_rule_config = config_args[0]
+    timeout = _semgrep_subprocess_timeout_seconds * len(samples)
+    codes_cleaned: list[str | None] = [
+        sample.code_analyzed if sample.code_analyzed.strip() else None
+        for sample in samples
+    ]
 
-    # proc/cmd are filled in once the subprocess runs; they stay None on the
-    # error paths that never reach it (config missing, semgrep not installed).
     proc: "subprocess.CompletedProcess | None" = None
     cmd: list[str] | None = None
 
-    def _debug_all(results: list["SemgrepResult"]) -> None:
-        """Write one debug record per sample — covers the success path AND every
-        error path, so a failed/aborted scan always leaves a trace (a record
-        with a non-null ``error``) that is distinguishable from a clean scan
-        with zero findings (``error`` null, ``findings_count`` 0)."""
-        for i, sem_result in enumerate(results):
-            code_raw, lang = code_samples[i]
-            cleaned = codes_cleaned[i] if i < len(codes_cleaned) else None
+    def _debug_all(results: list[SemgrepResult]) -> None:
+        for idx, sem_result in enumerate(results):
+            sample = samples[idx]
+            cleaned = codes_cleaned[idx]
             _write_semgrep_debug(
-                code_raw, cleaned or "", lang, resolved_rule_config,
-                cleaned != code_raw, proc, sem_result, cmd,
+                sample.code_raw,
+                cleaned or "",
+                sample.language,
+                resolved_rule_config,
+                cleaned != sample.code_raw,
+                proc,
+                sem_result,
+                cmd,
+                include_process_payload=(idx == 0),
+                batch_sample_index=idx,
+                batch_size=len(results),
             )
+
+    def _system_results(message: str, kind: str) -> list[SemgrepResult]:
+        return [
+            SemgrepResult(
+                error=sample.precheck_error or message,
+                error_kind=sample.precheck_error_kind if sample.precheck_error else kind,
+            )
+            for sample in samples
+        ]
 
     tmpdir = tempfile.mkdtemp()
     try:
-        # Write non-empty samples to named temp files
         idx_to_path: dict[int, str] = {}
         for idx, code in enumerate(codes_cleaned):
-            if code is None:
+            if code is None or samples[idx].precheck_error is not None:
                 continue
-            _, lang = code_samples[idx]
-            suffix = LANG_EXTENSIONS.get(lang, ".py")
+            suffix = LANG_EXTENSIONS.get(samples[idx].language, ".py")
             filepath = os.path.join(tmpdir, f"sample_{idx:04d}{suffix}")
             with open(filepath, "w", encoding="utf-8") as fh:
                 fh.write(code)
             idx_to_path[idx] = filepath
 
         if not idx_to_path:
-            results = [SemgrepResult(error="Empty code content") for _ in code_samples]
-            _debug_all(results)
-            return results
-
-        base_config = _resolve_rule_config(rule_config)
-        if (
-            base_config.startswith(("/", ".", "~"))
-            and not Path(base_config).exists()
-        ):
-            err = SemgrepResult(error=f"Local Semgrep config not found: {base_config}")
-            results = [err] * len(code_samples)
-            _debug_all(results)
-            return results
-
-        config_flags: list[str] = []
-        for c in config_args:
-            config_flags.extend(["--config", c])
-        cmd = [
-            _resolve_semgrep_executable(), "scan",
-            *config_flags,
-            "--json",
-            "--disable-version-check",
-            "--metrics", "off",
-            "--quiet",
-            "--jobs", str(_semgrep_jobs),
-            tmpdir,
-        ]
-
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-
-        if not proc.stdout.strip():
-            err = SemgrepResult(error=proc.stderr or "Semgrep returned no output")
             results = [
-                err if i in idx_to_path else SemgrepResult(error="Empty code content")
-                for i in range(len(code_samples))
+                SemgrepResult(
+                    error=sample.precheck_error or "Empty code content",
+                    error_kind=sample.precheck_error_kind if sample.precheck_error else "empty_code",
+                )
+                for sample in samples
             ]
             _debug_all(results)
             return results
 
-        data = json.loads(proc.stdout)
+        base_config = _resolve_rule_config(rule_config)
+        if base_config.startswith(("/", ".", "~")) and not Path(base_config).exists():
+            results = _system_results(
+                f"Local Semgrep config not found: {base_config}", "invalid_config"
+            )
+            _debug_all(results)
+            return results
 
-        # Group findings by sample index extracted from filename "sample_NNNN.ext"
-        findings_by_idx: dict[int, list[SemgrepFinding]] = {
-            i: [] for i in range(len(code_samples))
-        }
-        for r in data.get("results", []):
-            basename = os.path.basename(r["path"])
-            try:
-                idx = int(basename.split("_")[1].split(".")[0])
-            except (IndexError, ValueError):
-                continue
-            sev = r["extra"]["severity"].upper()
-            if sev not in DEFAULT_SEVERITY_FILTER:
-                continue
-            findings_by_idx[idx].append(SemgrepFinding(
-                check_id=r["check_id"],
-                message=r["extra"]["message"],
-                severity=sev,
-                line=r["start"]["line"],
-            ))
-
-        results = [
-            SemgrepResult(findings=findings_by_idx.get(i, []))
-            if i in idx_to_path
-            else SemgrepResult(error="Empty code content")
-            for i in range(len(code_samples))
+        config_flags: list[str] = []
+        for config in config_args:
+            config_flags.extend(["--config", config])
+        cmd = [
+            _resolve_semgrep_executable(),
+            "scan",
+            *config_flags,
+            "--json",
+            "--disable-version-check",
+            "--metrics",
+            "off",
+            "--quiet",
+            "--jobs",
+            str(_semgrep_jobs),
+            tmpdir,
         ]
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+
+        if not proc.stdout.strip():
+            results = _system_results(proc.stderr or "Semgrep returned no output", "process")
+            _debug_all(results)
+            return results
+
+        data = json.loads(proc.stdout)
+        findings_by_idx: dict[int, list[SemgrepFinding]] = {
+            idx: [] for idx in range(len(samples))
+        }
+        unmapped_result_paths: list[str] = []
+        for result in data.get("results", []):
+            idx = _sample_index_from_path(result.get("path"))
+            if idx is None or idx not in idx_to_path:
+                unmapped_result_paths.append(str(result.get("path")))
+                continue
+            severity = result["extra"]["severity"].upper()
+            if severity not in DEFAULT_SEVERITY_FILTER:
+                continue
+            findings_by_idx[idx].append(
+                SemgrepFinding(
+                    check_id=result["check_id"],
+                    message=result["extra"]["message"],
+                    severity=severity,
+                    line=result["start"]["line"],
+                )
+            )
+
+        prompt_errors: dict[int, list[str]] = {}
+        prompt_error_kinds: dict[int, str] = {}
+        global_errors: list[str] = []
+        for error in data.get("errors", []):
+            idx = _sample_index_from_path(_semgrep_error_path(error))
+            message = _semgrep_error_text(error)
+            if idx in idx_to_path and _is_target_parse_error(error):
+                prompt_errors.setdefault(idx, []).append(message)
+                prompt_error_kinds[idx] = _target_error_kind(error)
+            else:
+                global_errors.append(message)
+
+        skipped_rules = data.get("skipped_rules") or []
+        if skipped_rules:
+            global_errors.append(f"Semgrep skipped {len(skipped_rules)} configured rule(s)")
+        if unmapped_result_paths:
+            global_errors.append(
+                "Semgrep returned findings for unmapped targets: "
+                + ", ".join(unmapped_result_paths[:3])
+            )
+        if proc.returncode != 0 and not global_errors and not prompt_errors:
+            global_errors.append(
+                f"Semgrep exited with status {proc.returncode}: {proc.stderr.strip()}"
+            )
+
+        if global_errors:
+            results = _system_results("; ".join(global_errors), "semgrep_system")
+            _debug_all(results)
+            return results
+
+        results: list[SemgrepResult] = []
+        for idx, sample in enumerate(samples):
+            if sample.precheck_error is not None:
+                results.append(
+                    SemgrepResult(error=sample.precheck_error, error_kind=sample.precheck_error_kind)
+                )
+            elif idx not in idx_to_path:
+                results.append(SemgrepResult(error="Empty code content", error_kind="empty_code"))
+            elif idx in prompt_errors:
+                results.append(
+                    SemgrepResult(
+                        findings=findings_by_idx[idx],
+                        error="; ".join(prompt_errors[idx]),
+                        error_kind=prompt_error_kinds[idx],
+                    )
+                )
+            else:
+                results.append(SemgrepResult(findings=findings_by_idx[idx]))
 
         _debug_all(results)
         return results
 
     except subprocess.TimeoutExpired:
-        err = SemgrepResult(error=f"Semgrep batch timed out ({timeout}s)")
-        results = [err] * len(code_samples)
+        results = _system_results(f"Semgrep batch timed out ({timeout}s)", "timeout")
         _debug_all(results)
         return results
-    except json.JSONDecodeError as e:
-        err = SemgrepResult(error=f"Failed to parse Semgrep output: {e}")
-        results = [err] * len(code_samples)
+    except json.JSONDecodeError as exc:
+        results = _system_results(f"Failed to parse Semgrep output: {exc}", "json")
         _debug_all(results)
         return results
     except FileNotFoundError:
-        err = SemgrepResult(error="Semgrep not installed or not in PATH")
-        results = [err] * len(code_samples)
+        results = _system_results("Semgrep not installed or not in PATH", "not_installed")
         _debug_all(results)
         return results
-    except Exception as e:
-        err = SemgrepResult(error=f"Unexpected error: {e}")
-        results = [err] * len(code_samples)
+    except Exception as exc:
+        results = _system_results(f"Unexpected error: {exc}", "unexpected")
         _debug_all(results)
         return results
     finally:

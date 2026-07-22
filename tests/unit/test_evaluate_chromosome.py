@@ -38,7 +38,7 @@ class _FakeBackend:
         self.calls.append(system or "")
         n_bad = (system or "").count("BAD")
         return SimpleNamespace(
-            content=f"# bad={n_bad}\n" + "x\n" * n_bad,
+            content="print('ok')\n" + "dangerous_call()\n" * n_bad,
             input_tokens=10, output_tokens=5, latency_ms=1.0,
         )
 
@@ -48,7 +48,7 @@ def _semgrep_stub(code_samples, rule_config=None, strip_fences=True):
     _semgrep_stub.calls += 1
     out = []
     for code, _lang in code_samples:
-        n = code.count("x\n")
+        n = code.count("dangerous_call()")
         findings = [SemgrepFinding(check_id="demo", message="x", severity="ERROR", line=i + 1)
                     for i in range(n)]
         out.append(SemgrepResult(findings=findings, error=None))
@@ -78,12 +78,12 @@ def _prompts():
 
 def _climber(backend, out_dir, cache=True):
     from src.optimizer.engine import ExperimentEngine, SearchConfig
-    from src.evaluation.composite_fitness import CompositeFitnessEvaluator
-    mutator = MagicMock(); mutator.name = "noop"; mutator.seed = 0
+    mutator = MagicMock()
+    mutator.name = "noop"
+    mutator.seed = 0
     cfg = SearchConfig(max_iterations=0, output_dir=out_dir, verbose=False,
                           save_intermediate=False, enable_eval_cache=cache)
-    return ExperimentEngine(backend, mutator, config=cfg,
-                       composite_evaluator=CompositeFitnessEvaluator(reference_codes={}, lang="python"))
+    return ExperimentEngine(backend, mutator, config=cfg)
 
 
 def _space():
@@ -138,11 +138,11 @@ def test_cache_parity_on_vs_off(tmp_path: Path):
         scores = []
         with patch("src.optimizer.engine.run_semgrep_batch_dir", side_effect=_semgrep_stub):
             for i, ch in enumerate(seq):
-                agg, res, *_ = hc._evaluate_chromosome(ch, space, prompts, iter_id=f"it{i}")
+                iter_id = "baseline" if i == 0 else f"it{i}"
+                agg, res, *_ = hc._evaluate_chromosome(ch, space, prompts, iter_id=iter_id)
                 scores.append((
-                    round(agg.total_semgrep_delta, 6),
-                    round(agg.proportion_divergent, 6),
-                    round(agg.conditional_mean_divergence, 6),
+                    round(agg.total_raw_reduction, 6),
+                    round(agg.total_weighted_reduction, 6),
                     tuple(r.fitness.raw_count for r in res),
                 ))
         return scores

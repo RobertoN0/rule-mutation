@@ -14,7 +14,7 @@ only, ``order_priority`` holds bumped rules only. Everything else falls back to
 the originals held by :class:`RuleSetSpace`.
 
 Objectives — the conservative set (all maximised by :class:`ChromosomeArchive`):
-    f1 = vulnerability reduction (severity-weighted Semgrep delta)
+    f1 = vulnerability reduction (raw Semgrep-finding delta)
     f2 = rule fidelity (mean SBERT of mutated rules vs originals)
     f3 = −parsimony (negated count of mutated rules)
 
@@ -92,6 +92,7 @@ class RuleSetChromosome:
     fitness: "AggregatedFitness | None" = None
 
     iteration_added: int = 0
+    evaluation_iteration: int = 0
     parent_id: str | None = None
     cid: str = ""                                                      # stamped by the space
     tried: set = field(default_factory=set)                           # moves tried as a parent
@@ -116,6 +117,11 @@ class RuleSetChromosome:
 
     def score_sum(self) -> float:
         return self.f1 + self.f2 + self.f3
+
+    @property
+    def invalid_prompt_count(self) -> int:
+        """Prompt-local failures in this evaluation (selection tiebreaker only)."""
+        return self.fitness.num_invalid_prompts if self.fitness is not None else 0
 
     # ---- moves (return a fresh child; objectives reset, cid re-stamped by caller)
     def _child(
@@ -181,7 +187,9 @@ class RuleSetChromosome:
             "order_priority": dict(self.order_priority),
             "genes": {rid: g.snapshot() for rid, g in sorted(self.genes.items())},
             "iteration_added": self.iteration_added,
+            "evaluation_iteration": self.evaluation_iteration,
             "parent_id": self.parent_id,
+            "num_invalid_prompts": self.invalid_prompt_count,
         }
 
 
@@ -311,6 +319,8 @@ class ChromosomeArchive:
         self.n_dup_rejected = 0
         self.n_neutral_inserts = 0
         self.restart_history: list[dict[str, Any]] = []
+        self._best_ever = origin
+        self.best_ever_iteration = 0
 
     # ---- parent selection -------------------------------------------------
     def parents(self) -> list[RuleSetChromosome]:
@@ -369,6 +379,9 @@ class ChromosomeArchive:
         Every accepted insertion still resets stagnation because it creates a
         new front/neighbourhood.
         """
+        child.evaluation_iteration = iteration
+        self._consider_best_ever(child, iteration)
+
         if child.cid == self.origin.cid or any(child.cid == e.cid for e in self.entries):
             if count_rejection_for_stagnation:
                 self._attempts_since_insert += 1
@@ -396,7 +409,12 @@ class ChromosomeArchive:
             # the remaining objectives (f2+f3), then age (oldest evicted first).
             evict_idx = min(
                 range(len(old)),
-                key=lambda i: (old[i].f1, old[i].f2 + old[i].f3, old[i].iteration_added),
+                key=lambda i: (
+                    old[i].f1,
+                    old[i].f2 + old[i].f3,
+                    -old[i].invalid_prompt_count,
+                    old[i].iteration_added,
+                ),
             )
             survivors.pop(evict_idx)
 
@@ -411,6 +429,23 @@ class ChromosomeArchive:
 
     def should_restart(self) -> bool:
         return self._attempts_since_insert >= self.restart_h
+
+    @staticmethod
+    def _reporting_key(chromosome: RuleSetChromosome) -> tuple[float, int, float]:
+        return (
+            chromosome.f1,
+            -chromosome.invalid_prompt_count,
+            chromosome.f2 + chromosome.f3,
+        )
+
+    def _consider_best_ever(self, child: RuleSetChromosome, iteration: int) -> None:
+        if child.f1 <= self.origin.f1 + _TOL:
+            return
+        if self._best_ever is self.origin or self._reporting_key(child) > self._reporting_key(
+            self._best_ever
+        ):
+            self._best_ever = child
+            self.best_ever_iteration = iteration
 
     def restart(
         self, iteration: int, reason: str = "stagnation", *, wipe_front: bool = False
@@ -437,17 +472,13 @@ class ChromosomeArchive:
         self._attempts_since_insert = 0
 
     def best(self) -> RuleSetChromosome:
-        """Highest-f1 parent (ties → score_sum), including the origin.
+        """Best raw-count repair evaluated anywhere in the run.
 
-        Returns the origin whenever no candidate strictly improves f1, so
-        ``best().f1`` never drops below baseline and neutral-drift parents are
-        never reported as the best repair. Feeds RQ3 (best_f1)."""
-        best_f1 = max(c.f1 for c in self.parents())
-        if best_f1 <= self.origin.f1 + _TOL:
-            # Neutral-drift entries remain useful parents, but "best repair"
-            # must still report doing nothing when no measured repair exists.
-            return self.origin
-        return max(self.entries, key=lambda c: (c.f1, c.score_sum()))
+        This record survives front eviction and stagnation wipes. The origin is
+        returned unless a candidate strictly improves raw f1; invalid-prompt
+        count and the remaining objectives only break equal-f1 ties.
+        """
+        return self._best_ever
 
     def __len__(self) -> int:
         return len(self.entries)
@@ -467,6 +498,8 @@ class ChromosomeArchive:
             "n_dup_rejected": self.n_dup_rejected,
             "n_neutral_inserts": self.n_neutral_inserts,
             "attempts_since_insert": self._attempts_since_insert,
+            "best_ever_iteration": self.best_ever_iteration,
+            "best_ever": self._best_ever.snapshot(),
             "entries": [c.snapshot() for c in self.entries],
             "restart_history": list(self.restart_history),
         }

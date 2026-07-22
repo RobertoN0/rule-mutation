@@ -1,5 +1,9 @@
 """Regression checks for experiment-script wiring after entrypoint renames."""
 
+from types import SimpleNamespace
+
+import pytest
+
 
 def _recorded_args() -> dict:
     """Minimal schema-4 argument payload consumed by the rerun builders."""
@@ -44,6 +48,31 @@ def test_baseline_harness_uses_current_experiment_entrypoint() -> None:
     assert baseline_harness.load_prompts_with_rules is run_experiment.load_prompts_with_rules
     assert baseline_harness.create_rule_loader is run_experiment.create_rule_loader
     assert baseline_harness.RULES_DIR == run_experiment.RULES_DIR
+
+
+def test_mutator_dependency_preflight_aborts_before_search(monkeypatch) -> None:
+    from scripts.experiments import run_experiment
+    from src.mutation.rule_based import SynonymReplacementMutator
+
+    def unavailable() -> None:
+        raise RuntimeError("test-only missing corpus")
+
+    monkeypatch.setattr(
+        SynonymReplacementMutator,
+        "validate_runtime_dependencies",
+        staticmethod(unavailable),
+    )
+    args = SimpleNamespace(
+        mutators=["synonym_replacement"],
+        seed=42,
+        backend="delftblue",
+        dry_run=False,
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        run_experiment.create_pool(args, backend=object())
+
+    assert exc_info.value.code == 1
 
 
 def test_rerun_api_command_preserves_origin_parent_and_temperature() -> None:

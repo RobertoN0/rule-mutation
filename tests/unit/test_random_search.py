@@ -45,9 +45,7 @@ class IdentityMutator(Mutator):
 def _fit(f1: float) -> AggregatedFitness:
     return AggregatedFitness(
         total_fitness=f1, mean_fitness=f1, max_fitness=f1, num_prompts=1,
-        num_vulnerable=int(f1 > 0), individual_results=[], total_semgrep_delta=f1,
-        total_code_divergence=0.0, n_divergent_prompts=0, mean_code_divergence=0.0,
-        proportion_divergent=0.0, conditional_mean_divergence=0.0,
+        num_vulnerable=int(f1 > 0), individual_results=[], total_raw_reduction=f1,
     )
 
 

@@ -1,7 +1,7 @@
 """End-to-end integration smoke for the chromosome pipeline.
 
 Drives ExperimentEngine.run_search with a deterministic fake backend +
-patched Semgrep (no real LLM/Semgrep) and inspects the schema-4 artifacts:
+patched Semgrep (no real LLM/Semgrep) and inspects the schema-5 run artifacts:
 iterations.jsonl, archive_snapshots/ (EA), mutated_rules/, intermediate/.
 """
 from __future__ import annotations
@@ -11,7 +11,6 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from src.evaluation.composite_fitness import CompositeFitnessEvaluator
 from src.evaluation.rule_mapping import PromptWithRules
 from src.evaluation.semgrep_runner import SemgrepResult, SemgrepFinding
 from src.mutation.base import Mutator, MutationResult
@@ -25,14 +24,14 @@ class _FakeBackend:
 
     def generate(self, system, messages, **kwargs):
         n_bad = (system or "").count("BAD")
-        return SimpleNamespace(content=f"# bad={n_bad}\n" + "x\n" * n_bad,
+        return SimpleNamespace(content="print('ok')\n" + "dangerous_call()\n" * n_bad,
                                input_tokens=10, output_tokens=5, latency_ms=1.0)
 
 
 def _semgrep_stub(code_samples, rule_config=None, strip_fences=True):
     out = []
     for code, _lang in code_samples:
-        n = code.count("x\n")
+        n = code.count("dangerous_call()")
         out.append(SemgrepResult(
             findings=[SemgrepFinding(check_id="d", message="x", severity="ERROR", line=i + 1)
                       for i in range(n)],
@@ -70,8 +69,7 @@ def _climber(tmp_path, optimizer, iters, **cfg_kw):
     cfg = SearchConfig(max_iterations=iters, output_dir=tmp_path, verbose=False,
                           optimizer=optimizer, objective_direction="maximize",
                           archive_cap=4, restart_h=6, max_depth=4, **cfg_kw)
-    return ExperimentEngine(_FakeBackend(), pool, cfg,
-                       composite_evaluator=CompositeFitnessEvaluator(reference_codes={}, lang="python"))
+    return ExperimentEngine(_FakeBackend(), pool, cfg)
 
 
 def test_ea_end_to_end_writes_schema4(tmp_path: Path):
@@ -82,7 +80,7 @@ def test_ea_end_to_end_writes_schema4(tmp_path: Path):
         result = hc.run_search(_prompts())
 
     # more BAD markers ⇒ more findings ⇒ positive f1 under maximize
-    assert result.best_fitness.total_semgrep_delta > 0
+    assert result.best_fitness.total_raw_reduction > 0
 
     iters = [json.loads(line) for line in (tmp_path / "iterations.jsonl").read_text().splitlines() if line]
     assert iters and all(it["strategy"] == "ea" for it in iters)
@@ -130,8 +128,7 @@ def test_ea_saves_every_evaluated_iter_and_identity_keeps_cid(tmp_path: Path):
                           optimizer="ea", objective_direction="maximize", archive_cap=2,
                           restart_h=8, max_depth=4,
                           ea_init_samples=3, ea_injection_every=0)
-    hc = ExperimentEngine(_FakeBackend(), pool, cfg,
-                     composite_evaluator=CompositeFitnessEvaluator({}, "python"))
+    hc = ExperimentEngine(_FakeBackend(), pool, cfg)
     with patch("src.optimizer.engine.run_semgrep_batch_dir", side_effect=_semgrep_stub):
         hc.run_search(_prompts())
 
@@ -175,8 +172,7 @@ def test_validation_metadata_flows_when_enabled(tmp_path: Path):
                           optimizer="ea", objective_direction="maximize", archive_cap=4,
                           restart_h=6, max_depth=4, enable_validation=True,
                           ea_init_samples=2, ea_injection_every=0, order_move_weight=0.0)
-    hc = ExperimentEngine(_FakeBackend(), pool, cfg, validator=_StubValidator(),
-                     composite_evaluator=CompositeFitnessEvaluator({}, "python"))
+    hc = ExperimentEngine(_FakeBackend(), pool, cfg, validator=_StubValidator())
     with patch("src.optimizer.engine.run_semgrep_batch_dir", side_effect=_semgrep_stub):
         hc.run_search(_prompts())
 

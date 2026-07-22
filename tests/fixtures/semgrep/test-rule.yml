@@ -1,0 +1,6 @@
+rules:
+  - id: test-os-system
+    languages: [python]
+    severity: WARNING
+    message: Test fixture detects os.system calls.
+    pattern: os.system(...)

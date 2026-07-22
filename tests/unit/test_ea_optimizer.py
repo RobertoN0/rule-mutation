@@ -35,9 +35,8 @@ class FakeMutator(Mutator):
 def _fit(f1: float, f2: float = 0.0, f3: float = 0.0) -> AggregatedFitness:
     return AggregatedFitness(
         total_fitness=f1, mean_fitness=f1, max_fitness=f1, num_prompts=2,
-        num_vulnerable=int(f1 > 0), individual_results=[], total_semgrep_delta=f1,
-        total_code_divergence=f3 * 2, n_divergent_prompts=int(f2 * 2),
-        mean_code_divergence=f3, proportion_divergent=f2, conditional_mean_divergence=f3,
+        num_vulnerable=int(f1 > 0), individual_results=[], total_raw_reduction=f1,
+        rule_fidelity=f2, parsimony=int(-f3),
     )
 
 

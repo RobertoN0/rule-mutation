@@ -28,33 +28,21 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
 import warnings
 from pathlib import Path
 
-# Silence noisy third-party output that floods the log:
-#   * nlpaug emits SyntaxWarnings about `\s` escape sequences on import.
-#   * nlpaug.SynonymAug calls nltk.download('averaged_perceptron_tagger') on
-#     every augment() — defensive but produces hundreds of "[nltk_data] ..."
-#     lines per experiment. We pre-fetch the corpora once (quiet) so the
-#     defensive download finds them present and stays silent.
+# Silence a harmless SyntaxWarning emitted while importing nlpaug.  NLTK data
+# is deliberately *not* downloaded here: DelftBlue compute nodes are offline,
+# and a failed implicit download must not degrade a mutator into a silent no-op.
 warnings.filterwarnings(
     "ignore",
     category=SyntaxWarning,
     module=r"nlpaug.*",
 )
-try:
-    import nltk  # type: ignore
-    for _pkg in ("wordnet", "omw-1.4", "averaged_perceptron_tagger",
-                 "averaged_perceptron_tagger_eng", "punkt", "punkt_tab"):
-        try:
-            nltk.download(_pkg, quiet=True, raise_on_error=False)
-        except Exception:
-            pass
-except ImportError:
-    pass
 
 
 # Add src to path for imports
@@ -92,13 +80,14 @@ from src.mutation import (
     create_mutator_pool,
 )
 from src.optimizer import ExperimentEngine, SearchConfig
+from src.optimizer.engine import EvaluationInfrastructureError
+from src.evaluation.output_validation import BaselineOutputError
 from src.evaluation import (
     load_rule_mapping,
     create_rule_loader,
     RuleLoader,
     PromptWithRules,
 )
-from src.evaluation.composite_fitness import CompositeFitnessEvaluator
 from src.evaluation.semgrep_runner import (
     configure_semgrep,
     configure_semgrep_debug,
@@ -113,7 +102,7 @@ from src.evaluation.semgrep_runner import (
 # Output schema version written to run_config.json. rerun_from_config and the
 # analysis layer key off it; bump it whenever the run_config arg set or the
 # iterations.jsonl record shape changes.
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 # Default paths (relative to project root)
 DEFAULT_RULES_MAP = (
@@ -569,8 +558,7 @@ def load_prompts_with_rules(
     """Load prompts from the retrieval mapping.
 
     Each RuleMapping entry provides: prompt, language, cwe_id, rules_retrieved.
-    Baseline Semgrep scores and reference codes for code-divergence are computed
-    live at iteration 0 by the engine.
+    Baseline Semgrep scores are computed live at iteration 0 by the engine.
     """
     rule_mapping = load_rule_mapping(rules_map_path)
     mappings = list(rule_mapping.mappings)
@@ -768,11 +756,24 @@ def create_pool(args: argparse.Namespace, backend):
     print(f"\n🧬 Initializing mutator pool: {args.mutators}")
     print(f"   Seed: {args.seed}")
     backend_for_mutator = backend if has_llm_mutator else None
-    return create_mutator_pool(
+    pool = create_mutator_pool(
         args.mutators,
         seed=args.seed,
         backend=backend_for_mutator,
     )
+    # Fail before the first search iteration if an optional mutator dependency
+    # is unavailable.  This is especially important on offline cluster nodes:
+    # nlpaug otherwise tries an implicit NLTK download and its historical
+    # caller swallowed the resulting error as an identity mutation.
+    for mutator in pool.mutators:
+        preflight = getattr(mutator, "validate_runtime_dependencies", None)
+        if preflight is not None:
+            try:
+                preflight()
+            except (ImportError, RuntimeError) as exc:
+                print(f"\n❌ Mutator preflight failed for '{mutator.name}': {exc}")
+                sys.exit(1)
+    return pool
 
 
 def create_validator(args: argparse.Namespace, backend) -> MutationQualityValidator | None:
@@ -879,23 +880,42 @@ def print_results_summary(result, n_prompts: int) -> None:
         f"{result.total_input_tokens + result.total_output_tokens:,}"
     )
     print()
-    orig_raw = sum(r.raw_count for r in result.original_fitness.individual_results)
-    best_raw = sum(r.raw_count for r in result.best_fitness.individual_results)
-    print(f"Original fitness: {result.original_fitness.total_fitness:.1f}")
+    print("Baseline:")
     print(f"  - Vulnerable prompts: {result.original_fitness.num_vulnerable}/{result.original_fitness.num_prompts}")
-    print(f"  - Raw vulnerabilities (total semgrep findings): {orig_raw}")
-    print(f"  - Mean fitness: {result.original_fitness.mean_fitness:.2f}")
+    print(
+        "  - Raw vulnerabilities (primary): "
+        f"{result.original_fitness.total_raw_count}"
+    )
+    print(f"  - Severity-weighted score (diagnostic): {result.original_fitness.total_weighted_score:.1f}")
     print()
-    print(f"Best fitness: {result.best_fitness.total_fitness:.1f}")
+    print("Best evaluated repair (origin is the floor):")
     print(f"  - Vulnerable prompts: {result.best_fitness.num_vulnerable}/{result.best_fitness.num_prompts}")
-    print(f"  - Raw vulnerabilities (total semgrep findings): {best_raw}")
-    print(f"  - Mean fitness: {result.best_fitness.mean_fitness:.2f}")
-    print()
-    print(f"Fitness increase: {result.fitness_increase:+.1f}")
-    print(f"Improvement ratio: {result.improvement_ratio:.2f}x")
+    print(
+        "  - Raw vulnerabilities (primary): "
+        f"{result.best_fitness.total_raw_count}"
+    )
+    print(f"  - Severity-weighted score (diagnostic): {result.best_fitness.total_weighted_score:.1f}")
+    print(
+        f"  - Invalid prompts (baseline-imputed): {result.best_fitness.num_invalid_prompts} "
+        f"{result.best_fitness.failure_counts}"
+    )
+    print(
+        "  - Raw finding reduction (primary f1): "
+        f"{result.original_fitness.total_raw_count - result.best_fitness.total_raw_count:+d}"
+    )
+    print(
+        "  - Weighted-score reduction (diagnostic): "
+        f"{result.original_fitness.total_weighted_score - result.best_fitness.total_weighted_score:+.1f}"
+    )
 
 
-def save_run_config(args: argparse.Namespace, semgrep_config: dict, timestamp: str) -> None:
+def save_run_config(
+    args: argparse.Namespace,
+    semgrep_config: dict,
+    timestamp: str,
+    *,
+    n_prompts_evaluated: int,
+) -> None:
     """Write run_config.json — every CLI arg + provenance, the rerun contract."""
     import subprocess
     try:
@@ -917,7 +937,9 @@ def save_run_config(args: argparse.Namespace, semgrep_config: dict, timestamp: s
             "bnb_compute_dtype":      args.bnb_compute_dtype,
             "temperature":            args.temperature,
             "rules_map":              str(args.rules_map),
-            "n_cases":                args.n_cases,
+            "rules_map_sha256":       hashlib.sha256(args.rules_map.read_bytes()).hexdigest(),
+            "n_cases":                n_prompts_evaluated,
+            "n_cases_requested":      args.n_cases,
             "iterations":             args.iterations,
             "seed":                   args.seed,
             "selection":              args.selection,
@@ -925,6 +947,8 @@ def save_run_config(args: argparse.Namespace, semgrep_config: dict, timestamp: s
             "mutators":               args.mutators,
             "optimizer":              args.optimizer,
             "objective_direction":    args.objective_direction,
+            "fitness_strategy":       "raw_count",
+            "max_output_tokens":      4096,
             "archive_cap":            args.archive_cap,
             "restart_h":              args.restart_h,
             "max_depth":              args.max_depth,
@@ -941,6 +965,11 @@ def save_run_config(args: argparse.Namespace, semgrep_config: dict, timestamp: s
             "semgrep_config":         str(semgrep_config["rule_config"]),
             "semgrep_timeout_seconds": semgrep_config["subprocess_timeout_seconds"],
             "semgrep_jobs":           semgrep_config["jobs"],
+            "semgrep_version":        semgrep_config["semgrep_version"],
+            "semgrep_rule_config_kind": semgrep_config["rule_config_kind"],
+            "semgrep_rules_sha256":   semgrep_config["rule_config_sha256"],
+            "semgrep_rule_file_count": semgrep_config["rule_file_count"],
+            "semgrep_rules_source_commit": semgrep_config["rule_source_commit"],
             "output_dir":             str(args.output_dir),
         },
         "timestamp": timestamp,
@@ -992,22 +1021,29 @@ def main():
         print("❌ Error: No prompts loaded")
         sys.exit(1)
 
-    backend = create_backend(args)
-    pool = create_pool(args, backend)
-    validator = create_validator(args, backend)
-
-    # Composite evaluator is always on — provides the per-prompt semgrep delta
-    # (f1) and the CodeBLEU divergence diagnostics. reference_codes starts
-    # empty; the engine populates it from iteration-0 output.
-    eval_lang = args.languages[0] if args.languages and len(args.languages) == 1 else "python"
-    composite_evaluator = CompositeFitnessEvaluator(reference_codes={}, lang=eval_lang)
-
     config = build_search_config(args)
     print_config_summary(args, config, len(prompts_with_rules))
     semgrep_config = configure_semgrep_from_args(args)
+    if args.output_dir:
+        args.output_dir.mkdir(parents=True, exist_ok=True)
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        # Write provenance before the first model/scanner call so failed
+        # preflights and infrastructure aborts remain attributable.
+        save_run_config(
+            args,
+            semgrep_config,
+            timestamp,
+            n_prompts_evaluated=len(prompts_with_rules),
+        )
 
-    climber = ExperimentEngine(backend, pool, config, validator=validator,
-                          composite_evaluator=composite_evaluator)
+    # Run configuration is durable before model loading, NLTK/SBERT preflight,
+    # or the first generation/scanner call. Infrastructure failures therefore
+    # remain attributable instead of leaving an anonymous partial directory.
+    backend = create_backend(args)
+    pool = create_pool(args, backend)
+    validator = create_validator(args, backend)
+    climber = ExperimentEngine(backend, pool, config, validator=validator)
 
     print("\n" + "=" * 70)
     print(f"🏔️  Starting {args.optimizer} search over per-prompt rule sets")
@@ -1021,20 +1057,17 @@ def main():
     except LLMError as e:
         print(f"\n❌ LLM Error: {e}")
         sys.exit(1)
+    except BaselineOutputError as e:
+        print(f"\n❌ Baseline preflight failed; search was not started:\n{e}")
+        sys.exit(1)
+    except EvaluationInfrastructureError as e:
+        print(f"\n❌ Evaluation infrastructure failure; score was not trusted: {e}")
+        sys.exit(1)
     except KeyboardInterrupt:
         print("\n\n⚠️  Interrupted by user")
         sys.exit(130)
 
     print_results_summary(result, len(prompts_with_rules))
-
-    if args.output_dir:
-        args.output_dir.mkdir(parents=True, exist_ok=True)
-        from datetime import datetime
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        # The per-prompt trajectory (intermediate/), per-iteration records
-        # (iterations.jsonl), archive snapshots, mutated rules, and the run
-        # summary are all written during the run by the engine.
-        save_run_config(args, semgrep_config, timestamp)
 
     print("\n✅ Experiment complete!")
     return 0

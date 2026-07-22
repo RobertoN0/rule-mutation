@@ -1,25 +1,11 @@
-"""Topic E — Fitness strategy unit tests (C-E1, C-E2, C-E8).
-
-Validates calculate_fitness, FitnessResult.fitness(strategy),
-and aggregate_fitness.
-"""
+"""Unit tests for raw-primary and weighted-diagnostic fitness."""
 
 from dataclasses import dataclass
 
 import pytest
 
-from src.evaluation.fitness import (
-    AggregatedFitness,
-    FitnessResult,
-    FitnessStrategy,
-    aggregate_fitness,
-    calculate_fitness,
-)
+from src.evaluation.fitness import FitnessResult, aggregate_fitness, calculate_fitness
 
-
-# ---------------------------------------------------------------------------
-# Helpers — lightweight SemgrepFinding / SemgrepResult stand-ins
-# ---------------------------------------------------------------------------
 
 @dataclass
 class FakeFinding:
@@ -32,160 +18,76 @@ class FakeFinding:
 @dataclass
 class FakeSemgrepResult:
     findings: list[FakeFinding]
+    error: str | None = None
 
 
-def _make_findings(errors: int = 0, warnings: int = 0, infos: int = 0) -> FakeSemgrepResult:
-    """Build a fake SemgrepResult with known severity distribution."""
-    findings = []
-    for i in range(errors):
-        findings.append(FakeFinding(check_id=f"error-rule-{i}", severity="ERROR", line=i + 1))
-    for i in range(warnings):
-        findings.append(FakeFinding(check_id=f"warn-rule-{i}", severity="WARNING", line=100 + i))
-    for i in range(infos):
-        findings.append(FakeFinding(check_id=f"info-rule-{i}", severity="INFO", line=200 + i))
-    return FakeSemgrepResult(findings=findings)
+def _make_findings(errors: int = 0, warnings: int = 0, infos: int = 0):
+    findings = [FakeFinding(f"error-{i}", severity="ERROR") for i in range(errors)]
+    findings += [FakeFinding(f"warning-{i}") for i in range(warnings)]
+    findings += [FakeFinding(f"info-{i}", severity="INFO") for i in range(infos)]
+    return FakeSemgrepResult(findings)
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# C-E1  calculate_fitness computes metrics correctly
-# ═══════════════════════════════════════════════════════════════════════════════
-
-class TestCalculateFitness:
-
-    def test_empty_findings(self):
-        """Zero findings → all metrics zero."""
-        result = calculate_fitness(_make_findings())
-        assert result.raw_count == 0
-        assert result.weighted_score == 0.0
-        assert result.unique_rules == 0
-        assert result.error_count == 0
-        assert result.warning_count == 0
-
-    def test_severity_weights(self):
-        """C-E1: ERROR=3, WARNING=1, INFO=0."""
-        result = calculate_fitness(_make_findings(errors=2, warnings=3, infos=5))
-
-        assert result.raw_count == 10
-        assert result.error_count == 2
-        assert result.warning_count == 3
-        assert result.weighted_score == pytest.approx(2 * 3 + 3 * 1 + 5 * 0)  # 9.0
-        assert result.unique_rules == 10  # all distinct check_ids
-
-    def test_unique_rules_deduplication(self):
-        """Duplicate check_ids are counted once for unique_rules."""
-        findings = [
-            FakeFinding(check_id="rule-1", severity="ERROR", line=1),
-            FakeFinding(check_id="rule-1", severity="ERROR", line=2),  # same rule
-            FakeFinding(check_id="rule-2", severity="WARNING", line=3),
-        ]
-        result = calculate_fitness(FakeSemgrepResult(findings=findings))
-
-        assert result.raw_count == 3
-        assert result.unique_rules == 2
-        assert result.weighted_score == pytest.approx(3 + 3 + 1)  # 7.0
-
-    def test_details_contains_check_ids(self):
-        result = calculate_fitness(_make_findings(errors=1, warnings=1))
-        assert "check_ids" in result.details
-        assert len(result.details["check_ids"]) == 2
+def test_calculate_fitness_uses_raw_count_and_reports_weighted_score() -> None:
+    result = calculate_fitness(_make_findings(errors=2, warnings=3, infos=5))
+    assert result.raw_count == 10
+    assert result.weighted_score == pytest.approx(9.0)
+    assert result.error_count == 2
+    assert result.warning_count == 3
+    assert result.unique_rules == 10
+    assert result.observed_raw_count == 10
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# C-E2  FitnessResult.fitness(strategy) returns the right scalar
-# ═══════════════════════════════════════════════════════════════════════════════
-
-class TestFitnessStrategy:
-
-    @pytest.fixture
-    def result(self) -> FitnessResult:
-        return FitnessResult(
-            raw_count=5,
-            weighted_score=11.0,
-            unique_rules=3,
-            error_count=2,
-            warning_count=3,
-            composite_score=7.5,
-            code_divergence=0.3,
+def test_unique_rules_are_deduplicated() -> None:
+    result = calculate_fitness(
+        FakeSemgrepResult(
+            [
+                FakeFinding("same", severity="ERROR"),
+                FakeFinding("same", severity="ERROR"),
+                FakeFinding("other"),
+            ]
         )
-
-    def test_raw_count(self, result: FitnessResult):
-        assert result.fitness(FitnessStrategy.RAW_COUNT) == 5.0
-
-    def test_severity_weighted(self, result: FitnessResult):
-        assert result.fitness(FitnessStrategy.SEVERITY_WEIGHTED) == 11.0
-
-    def test_default_strategy_is_severity_weighted(self, result: FitnessResult):
-        """C-E2: calling fitness() without argument returns weighted_score."""
-        assert result.fitness() == 11.0
+    )
+    assert result.raw_count == 3
+    assert result.unique_rules == 2
+    assert result.weighted_score == 7
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# C-E8  aggregate_fitness sums fitness(strategy), not weighted_score
-# ═══════════════════════════════════════════════════════════════════════════════
+def test_failed_semgrep_result_cannot_be_scored_as_zero() -> None:
+    with pytest.raises(RuntimeError, match="failed Semgrep"):
+        calculate_fitness(FakeSemgrepResult([], error="scanner failed"))
 
-class TestAggregateFitness:
 
-    def test_empty_results(self):
-        agg = aggregate_fitness([])
-        assert agg.total_fitness == 0.0
-        assert agg.num_prompts == 0
-        assert agg.num_vulnerable == 0
+def test_aggregate_uses_raw_count_as_primary_and_weighted_as_diagnostic() -> None:
+    results = [
+        FitnessResult(3, 7.0, 2, 1, 4, raw_reduction=2, weighted_reduction=4),
+        FitnessResult(0, 0.0, 0, 0, 0, raw_reduction=0, weighted_reduction=0),
+        FitnessResult(5, 15.0, 3, 5, 0, raw_reduction=-1, weighted_reduction=-3),
+    ]
+    agg = aggregate_fitness(results, num_prompts_affected=2)
+    assert agg.total_fitness == 8
+    assert agg.mean_fitness == pytest.approx(8 / 3)
+    assert agg.max_fitness == 5
+    assert agg.total_raw_count == 8
+    assert agg.total_weighted_score == 22
+    assert agg.total_raw_reduction == 1
+    assert agg.total_weighted_reduction == 1
+    assert agg.num_vulnerable == 2
+    assert agg.num_prompts_affected == 2
 
-    def test_aggregation_with_severity_weighted(self):
-        """C-E8: aggregate_fitness uses fitness(strategy) per result."""
-        results = [
-            FitnessResult(raw_count=3, weighted_score=7.0, unique_rules=2,
-                          error_count=1, warning_count=4),
-            FitnessResult(raw_count=0, weighted_score=0.0, unique_rules=0,
-                          error_count=0, warning_count=0),
-            FitnessResult(raw_count=5, weighted_score=15.0, unique_rules=3,
-                          error_count=5, warning_count=0),
-        ]
 
-        agg = aggregate_fitness(results, strategy=FitnessStrategy.SEVERITY_WEIGHTED)
-        assert agg.total_fitness == pytest.approx(22.0)
-        assert agg.mean_fitness == pytest.approx(22.0 / 3)
-        assert agg.max_fitness == pytest.approx(15.0)
-        assert agg.num_prompts == 3
-        assert agg.num_vulnerable == 2  # 2 results with fitness > 0
-
-    def test_aggregation_with_raw_count(self):
-        """Aggregation respects the strategy parameter."""
-        results = [
-            FitnessResult(raw_count=10, weighted_score=20.0, unique_rules=5,
-                          error_count=5, warning_count=5),
-        ]
-        agg = aggregate_fitness(results, strategy=FitnessStrategy.RAW_COUNT)
-        assert agg.total_fitness == pytest.approx(10.0)  # raw_count, not weighted
-
-    def test_aggregate_total_semgrep_delta(self):
-        """C-E8: total_semgrep_delta sums composite_score across results."""
-        results = [
-            FitnessResult(raw_count=3, weighted_score=7.0, unique_rules=2,
-                          error_count=1, warning_count=4, composite_score=2.5),
-            FitnessResult(raw_count=1, weighted_score=3.0, unique_rules=1,
-                          error_count=1, warning_count=0, composite_score=1.0),
-        ]
-        agg = aggregate_fitness(results)
-        assert agg.total_semgrep_delta == pytest.approx(3.5)  # 2.5 + 1.0
-
-    def test_aggregate_total_code_divergence(self):
-        """C-E8: total_code_divergence sums code_divergence across results."""
-        results = [
-            FitnessResult(raw_count=1, weighted_score=3.0, unique_rules=1,
-                          error_count=1, warning_count=0, code_divergence=0.4),
-            FitnessResult(raw_count=2, weighted_score=6.0, unique_rules=2,
-                          error_count=2, warning_count=0, code_divergence=0.2),
-        ]
-        agg = aggregate_fitness(results)
-        assert agg.total_code_divergence == pytest.approx(0.6)
-
-    def test_aggregate_zero_when_no_composite(self):
-        """total_semgrep_delta is 0.0 when no composite_score is set."""
-        results = [
-            FitnessResult(raw_count=1, weighted_score=3.0, unique_rules=1,
-                          error_count=1, warning_count=0),
-        ]
-        agg = aggregate_fitness(results)
-        assert agg.total_semgrep_delta == pytest.approx(0.0)
-        assert agg.total_code_divergence == pytest.approx(0.0)
+def test_aggregate_counts_imputed_prompt_statuses() -> None:
+    valid = FitnessResult(1, 3.0, 1, 1, 0)
+    invalid = FitnessResult(
+        2,
+        4.0,
+        1,
+        1,
+        1,
+        score_source="baseline_imputed",
+        analysis_status="syntax_invalid",
+    )
+    agg = aggregate_fitness([valid, invalid])
+    assert agg.num_valid_prompts == 1
+    assert agg.num_invalid_prompts == 1
+    assert agg.failure_counts == {"syntax_invalid": 1}

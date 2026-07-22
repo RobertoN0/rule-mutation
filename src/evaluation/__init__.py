@@ -5,7 +5,13 @@ Provides run_semgrep() and fitness calculation for the SBST optimizer.
 Also includes CyberSecEval dataset loading utilities.
 """
 
-from .semgrep_runner import run_semgrep, run_semgrep_batch_dir, strip_markdown_fences, LANG_EXTENSIONS
+from .semgrep_runner import (
+    LANG_EXTENSIONS,
+    SemgrepSample,
+    run_semgrep,
+    run_semgrep_batch_dir,
+    strip_markdown_fences,
+)
 from .fitness import calculate_fitness, FitnessResult
 from .dataset import (
     CyberSecEvalDataset,
@@ -19,7 +25,6 @@ from .dataset import (
     load_crypto_prompts,
     load_mvp_prompts,
 )
-from .composite_fitness import CompositeFitnessEvaluator, CompositeFitnessResult
 from .rule_mapping import (
     # Rule mapping types
     RuleMapping,
@@ -39,6 +44,7 @@ __all__ = [
     "run_semgrep_batch_dir",
     "strip_markdown_fences",
     "LANG_EXTENSIONS",
+    "SemgrepSample",
     "calculate_fitness",
     "FitnessResult",
     # Dataset loading
@@ -52,9 +58,6 @@ __all__ = [
     "load_injection_prompts",
     "load_crypto_prompts",
     "load_mvp_prompts",
-    # Composite fitness
-    "CompositeFitnessEvaluator",
-    "CompositeFitnessResult",
     # Rule mapping system
     "RuleMapping",
     "RuleMappingIndex",

@@ -51,7 +51,7 @@ def test_rule_text_reaches_system_prompt(hc, rules_dir):
     """Every combined rule's text appears verbatim in the final system prompt."""
     loader = RuleLoader(rules_dir)
     combined = loader.combine_rules(["rule-a", "rule-b"])
-    sysp = hc._build_system_prompt(combined)
+    sysp = hc._build_system_prompt(combined, "python")
 
     assert sysp != hc.BASELINE_SYSTEM            # rules were injected
     assert "=== CODING GUIDELINES ===" in sysp   # template used
@@ -62,8 +62,8 @@ def test_rule_text_reaches_system_prompt(hc, rules_dir):
 
 def test_norules_uses_clean_baseline(hc):
     """Empty combined_rules → baseline prompt, with no rule text or guideline markers."""
-    sysp = hc._build_system_prompt("")
-    assert sysp == hc.BASELINE_SYSTEM
+    sysp = hc._build_system_prompt("", "python")
+    assert sysp == hc.BASELINE_SYSTEM.format(language="Python")
     assert "=== CODING GUIDELINES ===" not in sysp
     assert RULE_A not in sysp and RULE_B not in sysp
 
@@ -81,7 +81,7 @@ def test_override_injects_mutated_text(hc, rules_dir):
     mutated_a = "RULE-ALPHA-MUTATED: maybe validate SQL when convenient."
     individual["rule-a"] = mutated_a  # the override swap
     combined = SEP.join(individual[r] for r in rule_ids)
-    sysp = hc._build_system_prompt(combined)
+    sysp = hc._build_system_prompt(combined, "python")
 
     assert mutated_a in sysp        # mutated text injected
     assert RULE_A not in sysp       # original text gone

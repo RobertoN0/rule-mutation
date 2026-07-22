@@ -47,6 +47,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     UV_LINK_MODE=copy \
     UV_PROJECT_ENVIRONMENT=/app/.venv \
+    NLTK_DATA=/usr/local/share/nltk_data \
     PATH="/app/.venv/bin:$PATH" \
     PYTHONPATH="/app"
 
@@ -61,6 +62,9 @@ COPY pyproject.toml uv.lock .python-version ./
 # --no-dev   — skip dev extras (pytest, ruff)
 # (Default install: no extras, so the [gpu] group is NOT pulled in.)
 RUN uv sync --frozen --no-dev
+RUN python -m nltk.downloader -d "$NLTK_DATA" \
+        wordnet omw-1.4 \
+        averaged_perceptron_tagger averaged_perceptron_tagger_eng
 
 # --- Source layer ----------------------------------------------------------
 COPY src                 ./src
