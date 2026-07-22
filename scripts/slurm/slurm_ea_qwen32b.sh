@@ -39,17 +39,17 @@
 #            scripts/slurm/slurm_ea_qwen32b.sh
 #
 #   # Full EA — 200 iters python, shuffled prompt order (avoid saturated head)
-#   N_CASES=185 N_ITERATIONS=200 LANGUAGES=python SELECTION=random \
+#   N_CASES=184 N_ITERATIONS=200 LANGUAGES=python SELECTION=random \
 #     sbatch --time=12:00:00 --job-name="ea_python_200" \
 #            scripts/slurm/slurm_ea_qwen32b.sh
 #
 #   # Random-search baseline — python (same budget)
-#   OPTIMIZER=random_search N_CASES=185 N_ITERATIONS=200 LANGUAGES=python SELECTION=random \
+#   OPTIMIZER=random_search N_CASES=184 N_ITERATIONS=200 LANGUAGES=python SELECTION=random \
 #     sbatch --time=12:00:00 --job-name="rand_python_200" \
 #            scripts/slurm/slurm_ea_qwen32b.sh
 #
 #   # Selection-only ablation: EA whose move IS the random sampler
-#   EA_MOVE=random_builder N_CASES=185 N_ITERATIONS=200 LANGUAGES=python SELECTION=random \
+#   EA_MOVE=random_builder N_CASES=184 N_ITERATIONS=200 LANGUAGES=python SELECTION=random \
 #     sbatch --time=12:00:00 --job-name="ea_rb_python_200" \
 #            scripts/slurm/slurm_ea_qwen32b.sh
 #
@@ -213,8 +213,11 @@ export SEMGREP_JOBS
 if [ ! -e "$SEMGREP_RULESET" ]; then
     echo "❌ ERROR: Local Semgrep rules not found: $SEMGREP_RULESET"
     echo "   Run this once on a login node first:"
-    echo "   scripts/setup/download_semgrep_security_audit_rules.sh"
+    echo "   scripts/setup/download_semgrep_security_audit_rules.sh <target-dir> <commit>"
     exit 1
+fi
+if [ ! -s "$SEMGREP_RULESET/SOURCE_COMMIT" ]; then
+    echo "⚠️  WARNING: Semgrep rules lack upstream commit metadata; the run will still record their exact content SHA-256."
 fi
 
 # Build optional language filter argument
@@ -299,12 +302,21 @@ trap - USR1
 # Strip the giant raw semgrep stdout (results/paths/timing) from
 # semgrep_debug.jsonl, keeping each call's findings + an extracted error audit
 # (semgrep_analysis).
-FILTER=/home/rnegro/thesis/rule-mutation/scripts/analyze/filter_semgrep_debug.py
+FILTER=/home/rnegro/thesis/rule-mutation/scripts/experiments/filter_semgrep_debug.py
 if [ -f "$OUTPUT_DIR/semgrep_debug/semgrep_debug.jsonl" ]; then
     echo ""
     echo "→ Filtering semgrep_debug (strip raw stdout, keep findings + error audit)…"
     timeout 250 python "$FILTER" --in-place --audit-json "$OUTPUT_DIR" \
         || echo "⚠️  semgrep_debug filter incomplete/skipped (raw kept — re-run on login)"
+fi
+
+VALIDATOR=/home/rnegro/thesis/rule-mutation/scripts/analyze/validate_schema5_run.py
+if [ "${EXIT_CODE:-1}" -eq 0 ]; then
+    echo "→ Validating schema-5 artifact reconciliation…"
+    if ! python "$VALIDATOR" --write "$OUTPUT_DIR"; then
+        echo "❌ Schema-5 validation failed"
+        EXIT_CODE=3
+    fi
 fi
 
 echo ""

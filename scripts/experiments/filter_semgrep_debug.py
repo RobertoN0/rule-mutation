@@ -22,17 +22,18 @@ Login-node safe: pure stdlib, streaming (never loads the whole file), no GPU.
 Examples
 --------
     # filter one finished run (writes semgrep_debug.filtered.jsonl beside the raw)
-    python scripts/analyze/filter_semgrep_debug.py experiments/results/jobNNN_ea_python_s42_0718
+    python scripts/experiments/filter_semgrep_debug.py experiments/results/jobNNN_ea_python_s42_0718
 
     # filter every finished run in the batch and REPLACE the raw file (reclaim space)
-    python scripts/analyze/filter_semgrep_debug.py --in-place experiments/results/job10462*
+    python scripts/experiments/filter_semgrep_debug.py --in-place experiments/results/job10462*
 
     # just audit errors, write/replace nothing
-    python scripts/analyze/filter_semgrep_debug.py --audit-only <run_dir_or_jsonl>
+    python scripts/experiments/filter_semgrep_debug.py --audit-only <run_dir_or_jsonl>
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -46,8 +47,7 @@ def resolve_jsonl(path: Path) -> tuple[Path | None, Path | None]:
     """Map an input path to (jsonl_file, run_dir).
 
     Accepts a run dir, a ``semgrep_debug`` dir, or the ``.jsonl`` file itself.
-    ``run_dir`` is returned when known so we can check the run actually finished
-    (``run_config.json`` is written only on completion).
+    ``run_dir`` is returned when known so we can check for a final summary.
     """
     if path.is_file() and path.suffix == ".jsonl":
         run_dir = path.parent.parent if path.parent.name == "semgrep_debug" else None
@@ -153,7 +153,13 @@ def process(jsonl: Path, *, in_place: bool, audit_only: bool) -> dict:
                     a["records_with_findings"] += 1
                     a["total_findings"] += fc
 
-                analysis = compact_stdout(rec.pop(RAW_FIELD, None))
+                raw_stdout = rec.pop(RAW_FIELD, None)
+                existing_analysis = rec.get("semgrep_analysis")
+                analysis = (
+                    existing_analysis
+                    if raw_stdout is None and isinstance(existing_analysis, dict)
+                    else compact_stdout(raw_stdout)
+                )
                 if not analysis["stdout_parse_ok"]:
                     a["stdout_parse_failures"] += 1
                 errs = analysis["errors"]
@@ -165,6 +171,11 @@ def process(jsonl: Path, *, in_place: bool, audit_only: bool) -> dict:
                         by_type[_error_signature(e)] += 1
 
                 if out is not None:
+                    raw_code = rec.pop("code_raw", None)
+                    if isinstance(raw_code, str):
+                        rec["code_raw_sha256"] = hashlib.sha256(
+                            raw_code.encode("utf-8")
+                        ).hexdigest()
                     rec["semgrep_analysis"] = analysis
                     out.write(json.dumps(rec, ensure_ascii=False) + "\n")
     finally:
@@ -244,7 +255,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--audit-only", action="store_true",
                    help="only report errors; write nothing")
     p.add_argument("--force", action="store_true",
-                   help="process even runs with no run_config.json (i.e. possibly unfinished)")
+                   help="process even runs with no final summary (i.e. possibly unfinished)")
     p.add_argument("--audit-json", action="store_true",
                    help="also write semgrep_audit.json next to each processed file")
     args = p.parse_args(argv)
@@ -256,8 +267,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"⚠️  no semgrep_debug.jsonl found under {path}", file=sys.stderr)
             failed += 1
             continue
-        if run_dir is not None and not (run_dir / "run_config.json").exists() and not args.force:
-            print(f"⏭️  {run_dir.name}: no run_config.json (run not finished?) — skipping "
+        completed = run_dir is None or any(run_dir.glob("hillclimb_summary_*.json"))
+        if not completed and not args.force:
+            print(f"⏭️  {run_dir.name}: no final summary (run not finished?) — skipping "
                   f"(use --force to override)", file=sys.stderr)
             skipped += 1
             continue

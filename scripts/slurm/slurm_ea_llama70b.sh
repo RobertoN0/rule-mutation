@@ -97,8 +97,7 @@ ENABLE_EVAL_CACHE=${ENABLE_EVAL_CACHE:-1}
 OBJECTIVE_DIRECTION=${OBJECTIVE_DIRECTION:-minimize}
 
 MODEL_ID="meta-llama/Llama-3.3-70B-Instruct"
-# Reusing the Qwen-generated retrieval map for now (same prompts+rules; only the
-# code-gen model changes). Regenerate a Llama-specific map later if needed.
+# Use the model-specific final consensus map.
 RULES_MAP=${RULES_MAP:-"/home/rnegro/thesis/rule-mutation/rule_maps/final_consensus_map_llama.json"}
 
 # Validate OPTIMIZER value
@@ -202,8 +201,11 @@ export SEMGREP_JOBS
 if [ ! -e "$SEMGREP_RULESET" ]; then
     echo "❌ ERROR: Local Semgrep rules not found: $SEMGREP_RULESET"
     echo "   Run this once on a login node first:"
-    echo "   scripts/setup/download_semgrep_security_audit_rules.sh"
+    echo "   scripts/setup/download_semgrep_security_audit_rules.sh <target-dir> <commit>"
     exit 1
+fi
+if [ ! -s "$SEMGREP_RULESET/SOURCE_COMMIT" ]; then
+    echo "⚠️  WARNING: Semgrep rules lack upstream commit metadata; the run will still record their exact content SHA-256."
 fi
 
 # Build optional language filter argument
@@ -284,6 +286,25 @@ while [ "$EXIT_CODE" -gt 128 ]; do
 done
 set -e
 trap - USR1
+
+# Keep the prompt-level audit while removing Semgrep's very large raw JSON
+# payload. This is identical to the Qwen wrapper's post-run handling.
+FILTER=/home/rnegro/thesis/rule-mutation/scripts/experiments/filter_semgrep_debug.py
+if [ -f "$OUTPUT_DIR/semgrep_debug/semgrep_debug.jsonl" ]; then
+    echo ""
+    echo "→ Filtering semgrep_debug (strip raw stdout, keep findings + error audit)…"
+    timeout 250 python "$FILTER" --in-place --audit-json "$OUTPUT_DIR" \
+        || echo "⚠️  semgrep_debug filter incomplete/skipped (raw kept — re-run on login)"
+fi
+
+VALIDATOR=/home/rnegro/thesis/rule-mutation/scripts/analyze/validate_schema5_run.py
+if [ "${EXIT_CODE:-1}" -eq 0 ]; then
+    echo "→ Validating schema-5 artifact reconciliation…"
+    if ! python "$VALIDATOR" --write "$OUTPUT_DIR"; then
+        echo "❌ Schema-5 validation failed"
+        EXIT_CODE=3
+    fi
+fi
 
 echo ""
 echo "=========================================================================="
