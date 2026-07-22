@@ -2,7 +2,7 @@
 """Analyse temp>0 replicate runs produced by ``baseline_harness.py``.
 
 These runs are NOT search trajectories (no mutation/iteration sweep), so the
-EA-oriented ``analyze_run.py`` does not apply. Instead this reports, per
+old EA-oriented trajectory analyzer does not apply. Instead this reports, per
 condition, the mean +/- bootstrap-CI of each replicate-level metric across seeds,
 and — when a baseline condition is present — the paired effect of the rules
 (treatment minus baseline) reusing ``stats.py``.

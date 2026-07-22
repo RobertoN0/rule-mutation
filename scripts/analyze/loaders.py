@@ -1,18 +1,7 @@
-"""
-Shared loaders + derivations for SBST experiment results (schema_version 2).
+"""Small retained loader layer for schema-2 compatibility helpers.
 
-Every analysis script reads a *run directory* produced by
-``scripts/experiments/run_experiment.py``:
-
-    run_config.json                  provenance + all CLI args
-    hillclimb_summary_*.json         run-level totals + mutator_stats + cache stats
-    iterations.jsonl                 one record per search iteration (the trajectory)
-    intermediate/{iter_id}.jsonl     per-prompt evaluation records (baseline + each iter)
-    archive_snapshots/iter*.json     EA only — per-rule Pareto archive snapshots
-    mutated_rules/iterNNN/           the mutated rule text + meta.json
-
-This module never imports matplotlib/scipy — it is pure data loading + derivation
-so it can be unit-tested without the plotting/stats extras.
+The full schema-2 report stack was removed, but `build_repair_overrides.py` and
+the compatibility tests still need these pure IO/derivation helpers.
 """
 
 from __future__ import annotations
@@ -22,18 +11,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-# ---------------------------------------------------------------------------
-# Robust low-level readers
-# ---------------------------------------------------------------------------
-
 def read_jsonl(path: Path) -> list[dict]:
-    """Read a JSONL file, tolerating a truncated final line (partial write).
-
-    A run killed mid-append (rate limit, OOM, SLURM timeout) can leave a half
-    written last line. We parse line-by-line and, on the final line only, fall
-    back to ``raw_decode`` to recover a leading complete object; unrecoverable
-    trailing bytes are dropped with no exception.
-    """
+    """Read JSONL, tolerating a truncated final line from an interrupted write."""
     if not path.exists():
         return []
     records: list[dict] = []
@@ -45,7 +24,6 @@ def read_jsonl(path: Path) -> list[dict]:
         try:
             records.append(json.loads(line))
         except json.JSONDecodeError:
-            # Only tolerate failure on the very last line (a partial write).
             if i == len(lines) - 1:
                 try:
                     obj, _ = json.JSONDecoder().raw_decode(line)
@@ -66,13 +44,9 @@ def load_json(path: Path | None) -> dict:
     return json.loads(path.read_text(encoding="utf-8")) if path and path.exists() else {}
 
 
-# ---------------------------------------------------------------------------
-# Run model
-# ---------------------------------------------------------------------------
-
 @dataclass
 class RunData:
-    """A single experiment run, lazily exposing its derived views."""
+    """A single historical experiment run, lazily exposing derived views."""
 
     run_dir: Path
     run_config: dict
@@ -93,23 +67,16 @@ class RunData:
 
     @property
     def optimizer(self) -> str:
-        return self.args.get("optimizer") or (self.summary.get("pool_arm_stats", {}) or {}).get("strategy", "?")
+        return self.args.get("optimizer") or (
+            self.summary.get("pool_arm_stats", {}) or {}
+        ).get("strategy", "?")
 
     @property
     def objective_direction(self) -> str:
-        """'maximize' (attack: more vulns) | 'minimize' (reward fewer vulns).
-
-        Sign-aware reporting depends on this: under 'minimize' the f1 sign is
-        already flipped at search time, so within the run **higher f1 = SAFER**
-        — the opposite of the toolkit's default 'maximize' narrative. Defaults to
-        'maximize' for legacy runs predating run_config serialization of the
-        field (the two seed-42 minimize runs need their run_config patched, or
-        read the job name / run.log)."""
         return self.args.get("objective_direction", "maximize")
 
     @property
     def strategy(self) -> str:
-        # iterations carry the canonical strategy ("ea" | "random_baseline")
         for it in self.iterations:
             if it.get("strategy"):
                 return it["strategy"]
@@ -142,7 +109,6 @@ class RunData:
         return read_jsonl(self.run_dir / "intermediate" / "baseline.jsonl")
 
     def final_archive(self) -> dict:
-        """Last archive_snapshots/iter*.json (EA only); {} for random."""
         p = find_latest(self.run_dir / "archive_snapshots", "iter*.json")
         return load_json(p)
 
@@ -158,7 +124,6 @@ def load_run(run_dir: Path | str) -> RunData:
 
 
 def discover_runs(paths: list[Path | str]) -> list[RunData]:
-    """Load runs from explicit run dirs and/or parent dirs containing run dirs."""
     runs: list[RunData] = []
     for p in paths:
         p = Path(p)
@@ -167,31 +132,23 @@ def discover_runs(paths: list[Path | str]) -> list[RunData]:
         elif p.is_dir():
             for child in sorted(p.iterdir()):
                 if child.is_dir() and (
-                    (child / "run_config.json").exists() or (child / "iterations.jsonl").exists()
+                    (child / "run_config.json").exists()
+                    or (child / "iterations.jsonl").exists()
                 ):
                     runs.append(load_run(child))
     return runs
 
 
-# ---------------------------------------------------------------------------
-# Derivations
-# ---------------------------------------------------------------------------
-
 def valid_iters(run: RunData) -> list[dict]:
-    """Iterations that produced an evaluated candidate (f1 not None)."""
     return [it for it in run.iterations if it.get("f1") is not None]
 
 
 def best_iteration(run: RunData) -> dict | None:
-    """The iteration with the highest fitness (f1) across the run — direction-correct
-    for both objectives, since f1 is negated at search time under 'minimize', so
-    max f1 is always the safest under 'minimize' / the most vulnerable under 'maximize'."""
     vi = valid_iters(run)
     return max(vi, key=lambda it: it["f1"]) if vi else None
 
 
 def per_rule_best(run: RunData) -> dict[str, dict]:
-    """For each rule_id, the iteration record with the highest f1."""
     best: dict[str, dict] = {}
     for it in valid_iters(run):
         rid = it.get("rule_id")
@@ -203,8 +160,6 @@ def per_rule_best(run: RunData) -> dict[str, dict]:
 
 
 def per_rule_worst(run: RunData) -> dict[str, dict]:
-    """For each rule_id, the iteration record with the LOWEST f1 (most defensive
-    / safest direction — the negative-f1 excursion)."""
     worst: dict[str, dict] = {}
     for it in valid_iters(run):
         rid = it.get("rule_id")
@@ -216,7 +171,6 @@ def per_rule_worst(run: RunData) -> dict[str, dict]:
 
 
 def convergence(run: RunData) -> list[tuple[int, float]]:
-    """Best-so-far f1 over iterations → list of (iter, best_f1_so_far)."""
     out: list[tuple[int, float]] = []
     best = float("-inf")
     for it in sorted(valid_iters(run), key=lambda r: r["iter"]):
@@ -231,7 +185,6 @@ def best_f1(run: RunData) -> float:
 
 
 def iter_to_first_best(run: RunData) -> int | None:
-    """Iteration at which the best-ever f1 first appeared (RQ3 efficiency proxy)."""
     bf = best_f1(run)
     for it in sorted(valid_iters(run), key=lambda r: r["iter"]):
         if it["f1"] >= bf:
@@ -240,16 +193,6 @@ def iter_to_first_best(run: RunData) -> int | None:
 
 
 def direction_terms(objective_direction: str) -> dict[str, str]:
-    """Sign-aware vocabulary + colour keys for f1 reporting.
-
-    f1 is the per-run search signal. Under ``'minimize'`` it is negated at search
-    time, so within the run **higher f1 = SAFER** (fewer vulnerabilities than
-    baseline); under ``'maximize'`` higher f1 = MORE vulnerable. Reporting that
-    does not flip with direction would colour minimize security wins red and call
-    them "most vulnerable". The viz/report layers interpolate these terms; colour
-    values are keys into ``style.OUTCOME_COLORS`` so this module stays
-    matplotlib-free. Pass ``RunData.objective_direction``.
-    """
     if objective_direction == "minimize":
         return {
             "high_label": "largest reduction (safest)",
@@ -257,8 +200,8 @@ def direction_terms(objective_direction: str) -> dict[str, str]:
             "pos_delta_label": "+ = fewer vulnerabilities (safer)",
             "best_f1_label": "largest vulnerability reduction vs baseline",
             "positive_iter_label": "found a safer rephrasing",
-            "high_color": "safer",        # high f1 = safer  → green
-            "low_color": "degraded",      # low  f1 = worse  → red
+            "high_color": "safer",
+            "low_color": "degraded",
             "goal": "minimize vulnerabilities",
         }
     return {
@@ -267,14 +210,13 @@ def direction_terms(objective_direction: str) -> dict[str, str]:
         "pos_delta_label": "+ = more vulnerable",
         "best_f1_label": "largest vulnerability increase vs baseline",
         "positive_iter_label": "found a more-vulnerable rephrasing",
-        "high_color": "degraded",         # high f1 = more vulnerable → red
-        "low_color": "safer",             # low  f1 = safer          → green
+        "high_color": "degraded",
+        "low_color": "safer",
         "goal": "maximize vulnerabilities (attack)",
     }
 
 
 def baseline_findings(run: RunData) -> dict[str, int]:
-    """{test_case_id: raw Semgrep finding count} from intermediate/baseline.jsonl."""
     return {
         str(r["test_case_id"]): int(r["fitness"]["raw_count"])
         for r in run.baseline()
@@ -283,22 +225,19 @@ def baseline_findings(run: RunData) -> dict[str, int]:
 
 
 def iteration_findings(run: RunData, iter_num: int) -> dict[str, int]:
-    """{test_case_id: raw finding count} for a given iteration's per-prompt records."""
     recs = run.intermediate(run.iter_id(iter_num))
-    return {str(r["test_case_id"]): int(r["fitness"]["raw_count"]) for r in recs if "fitness" in r}
+    return {
+        str(r["test_case_id"]): int(r["fitness"]["raw_count"])
+        for r in recs
+        if "fitness" in r
+    }
 
 
 def mutator_stats(run: RunData) -> dict[str, dict[str, int]]:
-    """Per-mutator counters from the summary (shape differs EA vs random)."""
     return (run.summary.get("pool_arm_stats", {}) or {}).get("mutator_stats", {}) or {}
 
 
 def per_mutator_outcomes(run: RunData) -> dict[str, list[int]]:
-    """Per-mutator list of binary f1-advancing outcomes (for bootstrap CIs).
-
-    EA → last-mutator credit (the final element of each chain).
-    random_baseline → whole-chain credit (every mutator in the chain).
-    """
     out: dict[str, list[int]] = {}
     is_ea = run.strategy == "ea"
     for it in valid_iters(run):
@@ -317,11 +256,12 @@ def cache_stats(run: RunData) -> dict:
 
 
 def restart_reason_counts(run: RunData) -> dict[str, int]:
-    return (run.summary.get("pool_arm_stats", {}) or {}).get("restart_reason_counts", {}) or {}
+    return (run.summary.get("pool_arm_stats", {}) or {}).get(
+        "restart_reason_counts", {}
+    ) or {}
 
 
 def identity_rate(run: RunData) -> float:
-    """Fraction of evaluated iterations whose candidate was an identity (no-op)."""
     vi = valid_iters(run)
     if not vi:
         return 0.0
