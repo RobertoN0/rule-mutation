@@ -17,8 +17,8 @@ from .openai_backend import OpenAIBackend, create_openai_backend
 # the package still loads if optional pieces are missing on a reviewer's box.
 try:
     from .delftblue_local_backend import (
-        DelftBlueLocalBackend,
-        create_delftblue_local_backend,
+        DelftBlueLocalBackend as DelftBlueLocalBackend,
+        create_delftblue_local_backend as create_delftblue_local_backend,
     )
     _HAS_DELFTBLUE = True
 except ImportError:

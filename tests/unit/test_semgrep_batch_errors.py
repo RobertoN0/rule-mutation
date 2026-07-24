@@ -48,6 +48,73 @@ def test_batch_maps_target_parse_error_to_only_its_sample() -> None:
     assert results[1].is_prompt_error
 
 
+def test_batch_maps_wrapped_java_finding_line_back_to_generated_snippet() -> None:
+    payload = {
+        "results": [
+            {
+                "path": "/tmp/x/sample_0000.java",
+                "check_id": "demo.rule",
+                "extra": {"severity": "ERROR", "message": "demo"},
+                "start": {"line": 3},
+            }
+        ],
+        "errors": [],
+        "skipped_rules": [],
+    }
+    sample = SemgrepSample(
+        code_raw="System.out.println(user);",
+        code_analyzed=(
+            "class __SemgrepGenerated__ {\n"
+            "void __semgrepSnippet__() {\n"
+            "System.out.println(user);\n"
+            "}\n}"
+        ),
+        language="java",
+        normalization="java_method_wrapper",
+        analysis_line_map=(None, None, 1, None, None),
+    )
+
+    with patch("src.evaluation.semgrep_runner.subprocess.run", return_value=_completed(payload)):
+        finding = run_semgrep_batch_dir([sample])[0].findings[0]
+
+    assert finding.line == 1
+    assert finding.analyzed_line == 3
+
+
+def test_batch_filters_finding_confined_to_synthetic_java_wrapper() -> None:
+    payload = {
+        "results": [
+            {
+                "path": "/tmp/x/sample_0000.java",
+                "check_id": "demo.synthetic-rule",
+                "extra": {"severity": "WARNING", "message": "synthetic"},
+                "start": {"line": 1},
+                "end": {"line": 2},
+            }
+        ],
+        "errors": [],
+        "skipped_rules": [],
+    }
+    sample = SemgrepSample(
+        code_raw="System.out.println(user);",
+        code_analyzed=(
+            "class __SemgrepGenerated__ {\n"
+            "void __semgrepSnippet__() {\n"
+            "System.out.println(user);\n"
+            "}\n}"
+        ),
+        language="java",
+        normalization="java_method_wrapper",
+        analysis_line_map=(None, None, 1, None, None),
+    )
+
+    with patch("src.evaluation.semgrep_runner.subprocess.run", return_value=_completed(payload)):
+        result = run_semgrep_batch_dir([sample])[0]
+
+    assert result.count == 0
+    assert result.synthetic_findings_filtered == 1
+
+
 def test_global_rule_error_fails_every_active_sample() -> None:
     payload = {
         "results": [],
@@ -83,7 +150,7 @@ def test_skipped_rules_are_a_system_failure() -> None:
     assert "skipped 1" in (results[0].error or "").lower()
 
 
-def test_target_timeout_is_prompt_local_not_a_clean_zero() -> None:
+def test_target_timeout_is_task_specific_not_a_clean_zero() -> None:
     payload = {
         "results": [],
         "errors": [

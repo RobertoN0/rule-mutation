@@ -260,6 +260,8 @@ def _write_semgrep_debug(
     include_process_payload: bool = True,
     batch_sample_index: int | None = None,
     batch_size: int | None = None,
+    normalization: str = "none",
+    analysis_line_map: tuple[int | None, ...] = (),
 ) -> None:
     """Append one debug record to ``semgrep_debug.jsonl`` (no-op if not configured)."""
     global _debug_counter
@@ -279,6 +281,8 @@ def _write_semgrep_debug(
             "batch_sample_index": batch_sample_index,
             "batch_size": batch_size,
             "fences_stripped": fences_stripped,
+            "normalization": normalization,
+            "analysis_line_map": list(analysis_line_map),
             "code_raw": code_original,
             "code_analyzed": code_analyzed,
             "semgrep_returncode": proc_result.returncode if proc_result is not None else None,
@@ -291,6 +295,7 @@ def _write_semgrep_debug(
                 if proc_result is not None and include_process_payload else None
             ),
             "findings_count": sem_result.count,
+            "synthetic_findings_filtered": sem_result.synthetic_findings_filtered,
             "error": sem_result.error,
             "error_kind": sem_result.error_kind,
             "findings": [
@@ -298,6 +303,7 @@ def _write_semgrep_debug(
                     "check_id": f.check_id,
                     "severity": f.severity,
                     "line": f.line,
+                    "analyzed_line": f.analyzed_line,
                     "message": f.message,
                 }
                 for f in sem_result.findings
@@ -320,6 +326,7 @@ class SemgrepFinding:
     message: str
     severity: str
     line: int
+    analyzed_line: int | None = None
     
     def __hash__(self) -> int:
         return hash((self.check_id, self.line))
@@ -332,7 +339,8 @@ class SemgrepResult:
     findings: list[SemgrepFinding] = field(default_factory=list)
     error: str | None = None
     error_kind: str | None = None
-    """Machine-readable failure class. Prompt-local failures are distinguished
+    synthetic_findings_filtered: int = 0
+    """Machine-readable failure class. Task-specific failures are distinguished
     from evaluator/infrastructure failures so callers cannot silently score a
     failed scan as zero findings."""
     
@@ -391,11 +399,30 @@ class SemgrepSample:
     language: str
     precheck_error: str | None = None
     precheck_error_kind: str = "input_validation"
+    normalization: str = "none"
+    analysis_line_map: tuple[int | None, ...] = ()
 
     def __iter__(self):
         """Keep simple test doubles that unpack ``(code, language)`` working."""
         yield self.code_raw
         yield self.language
+
+
+def _map_finding_span(
+    sample: SemgrepSample,
+    analyzed_start_line: int,
+    analyzed_end_line: int,
+) -> int | None:
+    """Map a finding to source, dropping matches confined to synthetic wrappers."""
+    if sample.normalization == "none":
+        return analyzed_start_line
+    start = max(analyzed_start_line, 1)
+    end = min(max(analyzed_end_line, start), len(sample.analysis_line_map))
+    for analyzed_line in range(start, end + 1):
+        source_line = sample.analysis_line_map[analyzed_line - 1]
+        if source_line is not None:
+            return source_line
+    return None
 
 
 def strip_markdown_fences(code: str) -> str:
@@ -625,7 +652,7 @@ def run_semgrep_batch_dir(
     rule_config: str | None = None,
     strip_fences: bool = True,
 ) -> list[SemgrepResult]:
-    """Analyze a batch and preserve prompt-local versus systemic failures.
+    """Analyze a batch and preserve task-level versus systemic failures.
 
     ``SemgrepSample`` inputs carry the raw model output, selected code, and any
     pre-analysis validation failure. Legacy ``(code, language)`` tuples remain
@@ -675,6 +702,8 @@ def run_semgrep_batch_dir(
                 include_process_payload=(idx == 0),
                 batch_sample_index=idx,
                 batch_size=len(results),
+                normalization=sample.normalization,
+                analysis_line_map=sample.analysis_line_map,
             )
 
     def _system_results(message: str, kind: str) -> list[SemgrepResult]:
@@ -744,6 +773,7 @@ def run_semgrep_batch_dir(
         findings_by_idx: dict[int, list[SemgrepFinding]] = {
             idx: [] for idx in range(len(samples))
         }
+        synthetic_findings_filtered = {idx: 0 for idx in range(len(samples))}
         unmapped_result_paths: list[str] = []
         for result in data.get("results", []):
             idx = _sample_index_from_path(result.get("path"))
@@ -753,12 +783,25 @@ def run_semgrep_batch_dir(
             severity = result["extra"]["severity"].upper()
             if severity not in DEFAULT_SEVERITY_FILTER:
                 continue
+            analyzed_line = result["start"]["line"]
+            analyzed_end_line = result.get("end", {}).get("line", analyzed_line)
+            source_line = _map_finding_span(
+                samples[idx], analyzed_line, analyzed_end_line
+            )
+            if source_line is None:
+                synthetic_findings_filtered[idx] += 1
+                continue
             findings_by_idx[idx].append(
                 SemgrepFinding(
                     check_id=result["check_id"],
                     message=result["extra"]["message"],
                     severity=severity,
-                    line=result["start"]["line"],
+                    line=source_line,
+                    analyzed_line=(
+                        analyzed_line
+                        if samples[idx].normalization != "none"
+                        else None
+                    ),
                 )
             )
 
@@ -806,10 +849,16 @@ def run_semgrep_batch_dir(
                         findings=findings_by_idx[idx],
                         error="; ".join(prompt_errors[idx]),
                         error_kind=prompt_error_kinds[idx],
+                        synthetic_findings_filtered=synthetic_findings_filtered[idx],
                     )
                 )
             else:
-                results.append(SemgrepResult(findings=findings_by_idx[idx]))
+                results.append(
+                    SemgrepResult(
+                        findings=findings_by_idx[idx],
+                        synthetic_findings_filtered=synthetic_findings_filtered[idx],
+                    )
+                )
 
         _debug_all(results)
         return results

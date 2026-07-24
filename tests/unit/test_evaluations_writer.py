@@ -1,22 +1,16 @@
-"""B1: tests for the atomic iterations.jsonl append (fcntl.flock)."""
+"""Tests for atomic evaluations.jsonl appends."""
 
-import fcntl
 import json
-import os
-import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import pytest
 
 
 # ---------------------------------------------------------------------------
 # Minimal helpers
 # ---------------------------------------------------------------------------
 
-def _make_record(iter_n: int) -> dict:
+def _make_record(evaluation_index: int) -> dict:
     return {
-        "iter": iter_n,
+        "evaluation_index": evaluation_index,
         "timestamp": "2026-05-25T12:00:00Z",
         "strategy": "ea",
         "rule_id": "codeguard-0-test",
@@ -33,7 +27,7 @@ def _make_record(iter_n: int) -> dict:
 class TestAtomicAppend:
 
     def _make_writer_object(self, path: Path):
-        """Minimal object mimicking ExperimentEngine._append_iteration_record."""
+        """Minimal object mimicking the engine's locked evaluation writer."""
         import fcntl
         import json
 
@@ -56,7 +50,7 @@ class TestAtomicAppend:
 
     def test_sequential_writes_produce_clean_jsonl(self, tmp_path):
         """10 sequential writes → all records parse as valid JSON."""
-        jsonl = tmp_path / "iterations.jsonl"
+        jsonl = tmp_path / "evaluations.jsonl"
         writer = self._make_writer_object(jsonl)
         n = 10
         for i in range(1, n + 1):
@@ -67,11 +61,11 @@ class TestAtomicAppend:
         assert len(lines) == n
         for idx, line in enumerate(lines, start=1):
             rec = json.loads(line)
-            assert rec["iter"] == idx
+            assert rec["evaluation_index"] == idx
 
     def test_two_appenders_same_process_no_interleaving(self, tmp_path):
         """Two writer objects appending to the same file alternately produce valid JSONL."""
-        jsonl = tmp_path / "iterations.jsonl"
+        jsonl = tmp_path / "evaluations.jsonl"
         w1 = self._make_writer_object(jsonl)
         w2 = self._make_writer_object(jsonl)
 
@@ -87,11 +81,11 @@ class TestAtomicAppend:
         # Every line must be valid JSON
         for line in lines:
             rec = json.loads(line)
-            assert "iter" in rec
+            assert "evaluation_index" in rec
 
     def test_flock_released_after_write(self, tmp_path):
         """Lock is released (LOCK_UN) after each write so subsequent calls succeed."""
-        jsonl = tmp_path / "iterations.jsonl"
+        jsonl = tmp_path / "evaluations.jsonl"
         writer = self._make_writer_object(jsonl)
         writer.append(_make_record(1))
         writer.append(_make_record(2))

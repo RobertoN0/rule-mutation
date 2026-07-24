@@ -9,9 +9,9 @@ in :mod:`search`. It owns everything they need around them:
 * the evaluation seam ``_evaluate_chromosome`` — render every prompt from a
   chromosome, generate code (with a per-prompt cache under temperature=0),
   run Semgrep, and aggregate the conservative objectives,
-* dispatch to :func:`search.run_ea` (the (1+1) EA) or
+* dispatch to :func:`search.run_ea` (the archive-based EA) or
   :func:`search.run_random_search` (the i.i.d. baseline),
-* persistence: run.log records, iterations.jsonl, archive snapshots,
+* persistence: run.log records, evaluations.jsonl, archive snapshots,
   mutated-rule dumps, and the run summary.
 
 Direction: the search REPAIRS — with ``objective_direction="minimize"``
@@ -33,6 +33,12 @@ from typing import Any, Callable
 
 from ..evaluation import SemgrepSample, run_semgrep_batch_dir, calculate_fitness, FitnessResult
 from ..evaluation.fitness import aggregate_fitness, AggregatedFitness
+from ..evaluation.generation_contract import (
+    BASELINE_SYSTEM_TEMPLATE,
+    DEFAULT_PROMPT_PROFILE,
+    RULES_SYSTEM_TEMPLATE,
+    build_code_generation_system_prompt,
+)
 from ..evaluation.output_validation import (
     BaselineOutputError,
     CodeValidation,
@@ -40,6 +46,7 @@ from ..evaluation.output_validation import (
     normalize_language,
     validate_generated_output,
 )
+from ..evaluation.qualification import population_fingerprint
 from ..evaluation.rule_mapping import PromptWithRules
 from ..llm_backends import LLMBackend
 from ..mutation import Mutator
@@ -119,11 +126,10 @@ class _GeneratedSample:
 class SearchConfig:
     """Configuration for one search run (EA or random search)."""
 
-    max_iterations: int = 20
-    """Maximum number of candidate evaluations. Identity/no-op proposals are
-    logged and retried at the same index; they do not consume this budget. EA
-    init + injection evaluations do count, so both arms compare equal numbers
-    of scored candidates."""
+    main_loop_budget: int = 20
+    """Maximum candidate evaluations after the shared five-candidate
+    initialization. Identity/no-op proposals do not consume this budget. Total
+    candidate evaluations are ``5 + main_loop_budget``."""
 
     objective_direction: str = "minimize"
     """Optimization direction for the f1 raw-finding-reduction objective.
@@ -152,7 +158,7 @@ class SearchConfig:
 
     optimizer: str = "ea"
     """Optimizer family. One of:
-        "ea"            — (1+1) EA over a full-chromosome Pareto archive, with
+        "ea"            — archive-based EA over a full-chromosome Pareto front,
                           random initialization + periodic random injection
         "random_search" — i.i.d. random sampler (independent chromosome per
                           iteration, best-of-budget; no archive)
@@ -160,9 +166,6 @@ class SearchConfig:
 
     archive_cap: int = 6
     """EA only: max Pareto archive size. Sweep-tunable."""
-
-    restart_h: int = 8
-    """EA only: consecutive non-inserts before stagnation restart. Sweep-tunable."""
 
     max_depth: int = 4
     """Per-rule stacked-mutation depth cap (mutations from original), enforced
@@ -174,36 +177,13 @@ class SearchConfig:
     ``n_changes = random(1, 10)``). Used by random search and by the EA's
     init/injection phases."""
 
-    ea_n_mutations: int = 1
-    """EA local move: max mutators stacked on the chosen gene per move. 1
-    (default) = the canonical (1+1) small step; >1 samples a 1..n chain
-    (ablation knob)."""
-
-    ea_init_samples: int = 10
-    """EA: number of initial iterations that sample independent random
-    chromosomes from the origin and offer them to the archive (population-style
-    seeding; supervisor design 2026-07-10)."""
-
     ea_injection_every: int = 10
-    """EA: after init, every N-th iteration injects one origin-based random
+    """EA: every N-th main-loop evaluation injects one origin-based random
     chromosome instead of a parent-based move (diversity maintenance). 0 = off."""
-
-    ea_move: str = "local"
-    """EA move for the post-init iterations:
-        "local"          — mutate ONE gene of the parent (default, main design)
-        "random_builder" — apply the random sampler to the archive parent
-                           (selection-only ablation; not the main design)."""
 
     order_move_weight: float = 0.1
     """Probability of a rule-order move: per EA local move, and per change
     inside the random sampler (keeps the operator pool identical across arms)."""
-
-    ea_origin_parent: bool = True
-    """EA: whether the origin is a *sampleable* parent for local moves. On
-    (default) it always is, so a minimal parsimony-1 single-rule lineage can be
-    seeded any time; off restricts local moves to front members. Either way the
-    origin still anchors dominance and ``best()``. Ablation knob (A/B the
-    minimal-edit anchor)."""
 
     enable_eval_cache: bool = True
     """Reuse cached (code, Semgrep result) for prompts whose assembled rule
@@ -219,6 +199,15 @@ class SearchConfig:
     if bit-identical GPU determinism is required — in which case the cache's
     correctness no longer holds.
     """
+
+    prompt_profile: str = DEFAULT_PROMPT_PROFILE
+    """Named, qualified code-generation system-prompt contract."""
+
+    initialization_bundle: Path | None = None
+    """Optional strictly keyed bundle containing the shared five evaluations."""
+
+    initialization_identity: dict[str, Any] | None = None
+    """Expected bundle identity assembled from the current run configuration."""
 
 
 @dataclass
@@ -268,6 +257,15 @@ class SearchResult:
     total_time_seconds: float
     """Total optimization time."""
 
+    initialization_time_seconds: float
+    """Time spent evaluating or loading the shared five-candidate prefix."""
+
+    main_loop_time_seconds: float
+    """Optimizer wall time after the shared initialization boundary."""
+
+    termination_reason: str
+    """Why the optimizer stopped: budget completion, wall time, or rate limit."""
+
     total_llm_calls: int
     """Total number of LLM API calls."""
 
@@ -275,7 +273,7 @@ class SearchResult:
     """Configuration used."""
 
     pool_arm_stats: dict | None = None
-    """Per-strategy mutator/restart stats from the EA / random-search runner."""
+    """Per-strategy mutator and evaluation-accounting statistics."""
 
     compounding_state: dict | None = None
     """The single chromosome-archive snapshot from the EA runner ({} for random)."""
@@ -297,29 +295,15 @@ class ExperimentEngine:
     search algorithm (:func:`search.run_ea` / :func:`search.run_random_search`),
     serving it whole-chromosome evaluations (LLM code generation + Semgrep,
     cached per prompt under temperature=0) and persisting every artifact
-    (iterations.jsonl, archive snapshots, mutated rules, run summary).
+    (evaluations.jsonl, archive snapshots, mutated rules, run summary).
 
     """
 
     # System prompt template for code generation
-    SYSTEM_TEMPLATE = (
-        "You are a software engineer. Before writing code, carefully review "
-        "and follow all of the coding guidelines provided below. "
-        "The required implementation language is {language}. If the user prompt "
-        "allows a language choice, choose {language}. Return one complete "
-        "implementation only; do not include explanations.\n\n"
-        "=== CODING GUIDELINES ===\n\n"
-        "{rules}"
-        "\n=== END GUIDELINES ==="
-    )
+    SYSTEM_TEMPLATE = RULES_SYSTEM_TEMPLATE
 
     # Baseline system prompt (no rules)
-    BASELINE_SYSTEM = (
-        "You are a software engineer. "
-        "The required implementation language is {language}. If the user prompt "
-        "allows a language choice, choose {language}. Return one complete "
-        "implementation only; do not include explanations."
-    )
+    BASELINE_SYSTEM = BASELINE_SYSTEM_TEMPLATE
 
     def __init__(
         self,
@@ -370,14 +354,14 @@ class ExperimentEngine:
         self._eval_cache_hits = 0
         self._eval_cache_misses = 0
 
-        # Per-iter writer state. iterations.jsonl is opened lazily on first
-        # write and closed by _close_iterations_writer at end of run.
-        self._iterations_jsonl_file: Any | None = None
-        self._iterations_jsonl_path: Any | None = None
+        # Per-evaluation writer state. evaluations.jsonl is opened lazily on
+        # first write and closed at the end of the run.
+        self._evaluations_jsonl_file: Any | None = None
+        self._evaluations_jsonl_path: Any | None = None
 
-    def _open_iterations_writer(self) -> None:
-        """Open iterations.jsonl for append. No-op if output_dir is None."""
-        if self._iterations_jsonl_file is not None:
+    def _open_evaluations_writer(self) -> None:
+        """Open evaluations.jsonl for append. No-op if output_dir is None."""
+        if self._evaluations_jsonl_file is not None:
             return
         output_dir = self.config.output_dir
         if not output_dir:
@@ -385,14 +369,19 @@ class ExperimentEngine:
         from pathlib import Path
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
-        self._iterations_jsonl_path = output_dir / "iterations.jsonl"
-        self._iterations_jsonl_file = open(self._iterations_jsonl_path, "a", encoding="utf-8")
+        self._evaluations_jsonl_path = output_dir / "evaluations.jsonl"
+        self._evaluations_jsonl_file = open(
+            self._evaluations_jsonl_path,
+            "a",
+            encoding="utf-8",
+        )
 
-    def _append_iteration_record(self, record: dict) -> None:
-        """Append a canonical per-iter record to iterations.jsonl.
+    def _append_evaluation_record(self, record: dict) -> None:
+        """Append a canonical per-evaluation record to evaluations.jsonl.
 
-        Record schema:
-            iter, timestamp, strategy, phase, rule_id, mutation_chain,
+        Record contract:
+            evaluation_index, main_loop_iteration, timestamp, strategy, phase,
+            rule_id, mutation_chain,
             chain_length, n_requested_changes, n_attempted_changes,
             n_effective_changes, attempted_operators, attempted_mutators,
             mutation_identity, priority_rule_ids, priority_offset_count,
@@ -400,14 +389,15 @@ class ExperimentEngine:
             accepted, llm_calls_total, input_tokens_total, output_tokens_total,
             validation_metadata {rule_id: quality}, selection_meta {...}
 
-        phase: "init" / "injection" / "ea" (EA strategy) or "random".
+        phase: "initialization" / "injection" / "ea" / "origin_fallback"
+        (EA strategy) or "initialization" / "random" (random search).
         selection_meta carries strategy-specific fields:
-          - ea:            parent_f1, n_eligible_rules, restarts_this_iter
-          - random_search: {} (independent samples — no parent, no restart)
+          - ea: parent_f1 and n_rules_in_space
+          - random_search: {}
         """
-        if self._iterations_jsonl_file is None:
-            self._open_iterations_writer()
-        if self._iterations_jsonl_file is None:
+        if self._evaluations_jsonl_file is None:
+            self._open_evaluations_writer()
+        if self._evaluations_jsonl_file is None:
             return  # no output_dir; silent skip
         if record.get("llm_calls_total") is None:
             record["llm_calls_total"] = self._total_llm_calls
@@ -415,20 +405,20 @@ class ExperimentEngine:
             record["input_tokens_total"] = self._total_input_tokens
         if record.get("output_tokens_total") is None:
             record["output_tokens_total"] = self._total_output_tokens
-        fcntl.flock(self._iterations_jsonl_file.fileno(), fcntl.LOCK_EX)
+        fcntl.flock(self._evaluations_jsonl_file.fileno(), fcntl.LOCK_EX)
         try:
-            self._iterations_jsonl_file.write(json.dumps(record) + "\n")
-            self._iterations_jsonl_file.flush()
+            self._evaluations_jsonl_file.write(json.dumps(record) + "\n")
+            self._evaluations_jsonl_file.flush()
         finally:
-            fcntl.flock(self._iterations_jsonl_file.fileno(), fcntl.LOCK_UN)
+            fcntl.flock(self._evaluations_jsonl_file.fileno(), fcntl.LOCK_UN)
 
-    def _close_iterations_writer(self) -> None:
-        """Close iterations.jsonl. Safe to call multiple times."""
-        if self._iterations_jsonl_file is not None:
+    def _close_evaluations_writer(self) -> None:
+        """Close evaluations.jsonl. Safe to call multiple times."""
+        if self._evaluations_jsonl_file is not None:
             try:
-                self._iterations_jsonl_file.close()
+                self._evaluations_jsonl_file.close()
             finally:
-                self._iterations_jsonl_file = None
+                self._evaluations_jsonl_file = None
 
 
     def _save_intermediate_iter_jsonl(
@@ -436,10 +426,10 @@ class ExperimentEngine:
         iter_id: str,
         results: list[dict],
     ) -> None:
-        """Pack one iteration's per-prompt evaluation records into one JSONL.
+        """Pack one candidate's per-task evaluation records into one JSONL.
 
         Written under <output_dir>/intermediate/{iter_id}.jsonl.
-        iter_id examples: "baseline", "ea_iter0001", "rand_iter0042".
+        ``iter_id`` is ``baseline`` or ``evaluation_NNNN``.
         """
         output_dir = self.config.output_dir
         if not output_dir:
@@ -454,7 +444,7 @@ class ExperimentEngine:
 
     def _save_chromosome_move(
         self,
-        iteration: int,
+        evaluation_index: int,
         chromo: RuleSetChromosome,
         space: RuleSetSpace,
         move_type: str,
@@ -464,24 +454,30 @@ class ExperimentEngine:
         validation_metadata: dict | None = None,
         accepted: bool | None = None,
     ) -> None:
-        """Write a chromosome's mutated-gene texts + a manifest for one iteration.
+        """Write a chromosome's mutated-gene texts and evaluation manifest.
 
         Writes every mutated gene's current allele to
-        ``mutated_rules/iterNNN/<rule>.md`` (so a snapshot entry accepted at
-        iteration NNN can reference its genes there) plus ``meta.json`` describing
-        the move + full chromosome state. Called for every evaluated iteration
-        (EA: accepted or rejected; random: every step)."""
+        ``mutated_rules/evaluation_NNNN/<rule>.md`` plus ``meta.json``
+        describing the move and full chromosome state. Called for every
+        completed candidate evaluation."""
         output_dir = self.config.output_dir
         if not output_dir:
             return
         from pathlib import Path
-        iter_dir = Path(output_dir) / "mutated_rules" / f"iter{iteration:03d}"
-        iter_dir.mkdir(parents=True, exist_ok=True)
+        evaluation_dir = (
+            Path(output_dir)
+            / "mutated_rules"
+            / f"evaluation_{evaluation_index:04d}"
+        )
+        evaluation_dir.mkdir(parents=True, exist_ok=True)
         for rid in sorted(chromo.mutated_rule_ids()):
             short = rid.replace("codeguard-", "cg-")
-            (iter_dir / f"{short}.md").write_text(space.allele(chromo, rid), encoding="utf-8")
+            (evaluation_dir / f"{short}.md").write_text(
+                space.allele(chromo, rid),
+                encoding="utf-8",
+            )
         meta = {
-            "iteration": iteration,
+            "evaluation_index": evaluation_index,
             "chromosome_id": chromo.cid,
             "parent_id": chromo.parent_id,
             "move_type": move_type,
@@ -494,7 +490,10 @@ class ExperimentEngine:
             "accepted": accepted,
             "validation_metadata": validation_metadata or {},
         }
-        (iter_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+        (evaluation_dir / "meta.json").write_text(
+            json.dumps(meta, indent=2),
+            encoding="utf-8",
+        )
 
     def _log_validation(self, rule_id: str | None, chain_names: list[str], meta: dict) -> None:
         """Compact quality-validation log line (B3): passes_all + failure reason."""
@@ -532,13 +531,12 @@ class ExperimentEngine:
             f"keywords={meta.get('keyword_retention')}"
         )
 
-    def _save_chromosome_snapshot(self, iteration: int, snap: dict) -> None:
-        """Dump the single chromosome-archive snapshot (archive sub-schema 4).
+    def _save_chromosome_snapshot(self, evaluation_index: int, snap: dict) -> None:
+        """Dump one full Pareto-archive snapshot.
 
-        Written under ``archive_snapshots/iterNNNN.json`` as a list of full
+        Written under ``archive_snapshots/evaluation_NNNN.json`` as a list of full
         chromosomes (not per-rule archives). Each gene gets a ``text_ref``
-        pointing at ``mutated_rules/iter{iteration_added:03d}/<rule>.md`` (all of
-        an entry's genes were written there on accept)."""
+        pointing at the evaluation directory where the chromosome was saved."""
         output_dir = self.config.output_dir
         if not output_dir:
             return
@@ -548,36 +546,72 @@ class ExperimentEngine:
 
         def _with_refs(entry: dict) -> dict:
             e = dict(entry)
-            it = e.get("iteration_added", 0)
+            added = e.get("evaluation_added", 0)
             genes = {}
             for rid, g in (e.get("genes") or {}).items():
                 gg = dict(g)
                 short = rid.replace("codeguard-", "cg-")
-                gg["text_ref"] = f"mutated_rules/iter{it:03d}/{short}.md"
+                gg["text_ref"] = (
+                    f"mutated_rules/evaluation_{added:04d}/{short}.md"
+                )
                 genes[rid] = gg
             e["genes"] = genes
             return e
 
         payload = {
-            "iter": iteration,
-            "schema_version": 4,
+            "artifact_type": "pareto_archive_snapshot",
+            "evaluation_index": evaluation_index,
             "cap": snap.get("cap"),
-            "restart_h": snap.get("restart_h"),
             "origin": snap.get("origin"),
             "n_inserts": snap.get("n_inserts"),
             "n_rejected": snap.get("n_rejected"),
             "n_dup_rejected": snap.get("n_dup_rejected"),
             "n_neutral_inserts": snap.get("n_neutral_inserts"),
-            "restart_history": snap.get("restart_history", []),
             "chromosomes": [_with_refs(e) for e in snap.get("entries", [])],
         }
-        with open(snap_dir / f"iter{iteration:04d}.json", "w", encoding="utf-8") as f:
+        path = snap_dir / f"evaluation_{evaluation_index:04d}.json"
+        with open(path, "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2)
 
     def _log(self, message: str) -> None:
         """Print if verbose mode enabled."""
         if self.config.verbose:
             print(message)
+
+    def _mutation_llm_usage(self) -> dict[str, Any]:
+        """Return actual LLM usage incurred by mutation operators in this process."""
+        by_mutator: dict[str, dict[str, int | float]] = {}
+        for mutator in self.pool.mutators:
+            attempts = getattr(mutator, "llm_call_attempts", None)
+            if attempts is None:
+                continue
+            by_mutator[mutator.name] = {
+                "call_attempts": int(attempts),
+                "calls_completed": int(
+                    getattr(mutator, "llm_calls_completed", 0)
+                ),
+                "input_tokens": int(getattr(mutator, "llm_input_tokens", 0)),
+                "output_tokens": int(getattr(mutator, "llm_output_tokens", 0)),
+                "latency_ms": float(getattr(mutator, "llm_latency_ms", 0.0)),
+            }
+        return {
+            "call_attempts": sum(
+                int(value["call_attempts"]) for value in by_mutator.values()
+            ),
+            "calls_completed": sum(
+                int(value["calls_completed"]) for value in by_mutator.values()
+            ),
+            "input_tokens": sum(
+                int(value["input_tokens"]) for value in by_mutator.values()
+            ),
+            "output_tokens": sum(
+                int(value["output_tokens"]) for value in by_mutator.values()
+            ),
+            "latency_ms": sum(
+                float(value["latency_ms"]) for value in by_mutator.values()
+            ),
+            "by_mutator": by_mutator,
+        }
 
     def _record_evaluation_failure(
         self,
@@ -615,10 +649,11 @@ class ExperimentEngine:
         Returns:
             System prompt string.
         """
-        display_language = "Python" if language == "python" else "Java"
-        if not rule_text:
-            return self.BASELINE_SYSTEM.format(language=display_language)
-        return self.SYSTEM_TEMPLATE.format(rules=rule_text, language=display_language)
+        return build_code_generation_system_prompt(
+            rule_text,
+            language,
+            profile=self.config.prompt_profile,
+        )
 
     def _generate_code(
         self,
@@ -682,8 +717,11 @@ class ExperimentEngine:
         if duplicate_ids:
             raise ValueError(f"Duplicate test_case_id values are not allowed: {duplicate_ids[:3]}")
 
-        self._log(f"Starting per-prompt-rules optimization: {self.config.max_iterations} iterations, "
-                  f"{len(prompts_with_rules)} prompts")
+        self._log(
+            "Starting per-prompt-rules optimization: "
+            f"5 initialization + {self.config.main_loop_budget} main-loop evaluations, "
+            f"{len(prompts_with_rules)} prompts"
+        )
 
         # Log per-prompt rule assignments
         self._log("\nTest case → Rules mapping:")
@@ -774,6 +812,23 @@ class ExperimentEngine:
         """Dispatch to the chromosome EA / random-search runner and map the result
         back into SearchResult so downstream serialisation keeps working."""
         from .search import run_ea, run_random_search
+        from .initialization import (
+            load_initialization_bundle,
+            restore_runtime_random_state,
+        )
+
+        loaded_initialization = None
+        if self.config.initialization_bundle is not None:
+            if self.config.initialization_identity is None:
+                raise ValueError("initialization bundle requires an expected identity")
+            loaded_initialization = load_initialization_bundle(
+                self.config.initialization_bundle,
+                expected_identity=self.config.initialization_identity,
+            )
+            self._log(
+                "   Reusing shared initialization bundle "
+                f"{loaded_initialization.content_sha256}"
+            )
 
         def evaluate_chromosome_fn(chromo: RuleSetChromosome, iter_id: str):
             return self._evaluate_chromosome(
@@ -781,10 +836,26 @@ class ExperimentEngine:
                 iter_id=iter_id, should_stop_fn=should_stop_fn,
             )
 
-        def save_move_fn(*, iteration, child, space, move_type, rule_id, chain_names,
-                         changes, validation_metadata=None, accepted=None):
+        def save_move_fn(
+            *,
+            evaluation_index,
+            child,
+            space,
+            move_type,
+            rule_id,
+            chain_names,
+            changes,
+            validation_metadata=None,
+            accepted=None,
+        ):
             self._save_chromosome_move(
-                iteration, child, space, move_type, rule_id, chain_names, changes,
+                evaluation_index,
+                child,
+                space,
+                move_type,
+                rule_id,
+                chain_names,
+                changes,
                 validation_metadata=validation_metadata, accepted=accepted,
             )
 
@@ -808,12 +879,131 @@ class ExperimentEngine:
             self._log_validation(rule_id, chain_names, meta)
             return meta
 
-        def snapshot_fn(iteration, snap):
-            self._save_chromosome_snapshot(iteration, snap)
+        def snapshot_fn(evaluation_index, snap):
+            self._save_chromosome_snapshot(evaluation_index, snap)
+
+        def load_precomputed_evidence_fn(evaluation_index: int) -> None:
+            if loaded_initialization is None:
+                return
+            source = (
+                loaded_initialization.path
+                / "intermediate"
+                / f"evaluation_{evaluation_index:04d}.jsonl"
+            )
+            rows: list[dict[str, Any]] = []
+            with source.open(encoding="utf-8") as handle:
+                for line in handle:
+                    if not line.strip():
+                        continue
+                    row = json.loads(line)
+                    row["initialization_source"] = "precomputed_bundle"
+                    row["initialization_bundle_content_sha256"] = (
+                        loaded_initialization.content_sha256
+                    )
+                    row["source_llm_calls_so_far"] = row.get("llm_calls_so_far")
+                    row["source_input_tokens_so_far"] = row.get(
+                        "input_tokens_so_far"
+                    )
+                    row["source_output_tokens_so_far"] = row.get(
+                        "output_tokens_so_far"
+                    )
+                    row["llm_calls_so_far"] = self._total_llm_calls
+                    row["input_tokens_so_far"] = self._total_input_tokens
+                    row["output_tokens_so_far"] = self._total_output_tokens
+                    rows.append(row)
+            if self.config.enable_eval_cache:
+                chromosome = loaded_initialization.candidates[
+                    evaluation_index - 1
+                ].child
+                rows_by_id = {
+                    str(row.get("test_case_id")): row
+                    for row in rows
+                }
+                for prompt_index, prompt in enumerate(prompts_with_rules):
+                    task_id = str(
+                        prompt.metadata.get(
+                            "test_case_id",
+                            f"case_{prompt_index}",
+                        )
+                    )
+                    row = rows_by_id.get(task_id)
+                    if row is None:
+                        raise ValueError(
+                            f"bundle evaluation {evaluation_index} lacks task {task_id}"
+                        )
+                    fitness_payload = row.get("fitness")
+                    if not isinstance(fitness_payload, dict):
+                        raise ValueError(
+                            f"bundle evaluation {evaluation_index} has malformed fitness"
+                        )
+                    fitness = FitnessResult(
+                        raw_count=int(fitness_payload["raw_count"]),
+                        weighted_score=float(fitness_payload["weighted_score"]),
+                        unique_rules=int(fitness_payload["unique_rules"]),
+                        error_count=int(fitness_payload["error_count"]),
+                        warning_count=int(fitness_payload["warning_count"]),
+                        details={
+                            "check_ids": list(fitness_payload.get("check_ids") or []),
+                            "synthetic_findings_filtered": fitness_payload.get(
+                                "synthetic_findings_filtered",
+                                0,
+                            ),
+                            "observed_check_ids": list(
+                                fitness_payload.get("observed_check_ids") or []
+                            ),
+                            "imputation": fitness_payload.get("imputation"),
+                        },
+                        score_source=str(fitness_payload["score_source"]),
+                        analysis_status=str(fitness_payload["analysis_status"]),
+                        observed_raw_count=fitness_payload.get("observed_raw_count"),
+                        observed_weighted_score=fitness_payload.get(
+                            "observed_weighted_score"
+                        ),
+                        raw_reduction=float(fitness_payload["raw_reduction"]),
+                        weighted_reduction=float(
+                            fitness_payload["weighted_reduction"]
+                        ),
+                    )
+                    signature = space.prompt_signature(
+                        chromosome,
+                        prompt.rule_ids,
+                    )
+                    self._eval_cache[(task_id, signature)] = {
+                        "code": str(row.get("generated_code", "")),
+                        "gen_latency_ms": float(
+                            row.get("generation_latency_ms", 0.0)
+                        ),
+                        "finish_reason": str(row.get("finish_reason", "unknown")),
+                        "analysis_latency_ms": float(
+                            row.get("analysis_latency_ms", 0.0)
+                        ),
+                        "fitness_result": fitness,
+                    }
+            self._save_intermediate_iter_jsonl(
+                f"evaluation_{evaluation_index:04d}",
+                rows,
+            )
+
+        def restore_precomputed_state_fn() -> None:
+            if loaded_initialization is not None:
+                restore_runtime_random_state(
+                    loaded_initialization.runtime_random_state,
+                    self.pool.mutators,
+                )
 
         seed = self.pool.seed  # share seed with the mutator pool for reproducibility
+        precomputed = (
+            loaded_initialization.candidates
+            if loaded_initialization is not None
+            else None
+        )
+        runner_random_state = (
+            loaded_initialization.runner_random_state
+            if loaded_initialization is not None
+            else None
+        )
 
-        self._open_iterations_writer()
+        self._open_evaluations_writer()
         try:
             if self.config.optimizer == "ea":
                 run_result = run_ea(
@@ -822,23 +1012,22 @@ class ExperimentEngine:
                     mutators=self.pool.mutators,
                     evaluate_chromosome_fn=evaluate_chromosome_fn,
                     iteration_result_factory=IterationResult,
-                    max_iterations=self.config.max_iterations,
+                    main_loop_budget=self.config.main_loop_budget,
                     archive_cap=self.config.archive_cap,
-                    restart_h=self.config.restart_h,
                     max_depth=self.config.max_depth,
-                    ea_n_mutations=self.config.ea_n_mutations,
-                    ea_move=self.config.ea_move,
-                    init_random_samples=self.config.ea_init_samples,
                     random_injection_every=self.config.ea_injection_every,
                     random_max_changes=self.config.random_max_changes,
                     order_move_weight=self.config.order_move_weight,
-                    ea_origin_parent=self.config.ea_origin_parent,
                     seed=seed, log=self._log,
-                    iter_record_fn=self._append_iteration_record,
+                    iter_record_fn=self._append_evaluation_record,
                     archive_snapshot_fn=snapshot_fn,
                     save_move_fn=save_move_fn,
                     validate_move_fn=validate_move_fn,
                     should_stop_fn=should_stop_fn,
+                    precomputed_initialization=precomputed,
+                    runner_random_state_after_initialization=runner_random_state,
+                    load_precomputed_evidence_fn=load_precomputed_evidence_fn,
+                    restore_precomputed_state_fn=restore_precomputed_state_fn,
                 )
             else:  # "random_search"
                 run_result = run_random_search(
@@ -847,26 +1036,36 @@ class ExperimentEngine:
                     mutators=self.pool.mutators,
                     evaluate_chromosome_fn=evaluate_chromosome_fn,
                     iteration_result_factory=IterationResult,
-                    max_iterations=self.config.max_iterations,
+                    main_loop_budget=self.config.main_loop_budget,
                     max_changes=self.config.random_max_changes,
                     max_depth=self.config.max_depth,
                     order_move_prob=self.config.order_move_weight,
                     seed=seed, log=self._log,
-                    iter_record_fn=self._append_iteration_record,
+                    iter_record_fn=self._append_evaluation_record,
                     save_move_fn=save_move_fn,
                     validate_move_fn=validate_move_fn,
                     should_stop_fn=should_stop_fn,
+                    precomputed_initialization=precomputed,
+                    runner_random_state_after_initialization=runner_random_state,
+                    load_precomputed_evidence_fn=load_precomputed_evidence_fn,
+                    restore_precomputed_state_fn=restore_precomputed_state_fn,
                 )
         finally:
-            self._close_iterations_writer()
+            self._close_evaluations_writer()
 
         total_time = time.perf_counter() - start_time
         best = run_result.best_chromosome
         best_fitness = run_result.best_fitness or original_fitness
+        mutation_llm_usage = self._mutation_llm_usage()
+        precomputed_usage = (
+            loaded_initialization.precomputed_usage
+            if loaded_initialization is not None
+            else {}
+        )
 
         self._log(
             f"\n📦 {self.config.optimizer} run complete: "
-            f"{len(run_result.iterations)} iterations, best f1={best.f1:+.2f} "
+            f"{len(run_result.iterations)} evaluations, best f1={best.f1:+.2f} "
             f"(mutated={sorted(best.mutated_rule_ids())}), {run_result.n_accepted} accepted"
         )
 
@@ -875,20 +1074,33 @@ class ExperimentEngine:
             best_fitness=best_fitness,
             iterations=run_result.iterations,
             total_time_seconds=total_time,
+            initialization_time_seconds=run_result.initialization_time_seconds,
+            main_loop_time_seconds=run_result.main_loop_time_seconds,
+            termination_reason=run_result.termination_reason,
             total_llm_calls=self._total_llm_calls,
             total_input_tokens=self._total_input_tokens,
             total_output_tokens=self._total_output_tokens,
             config=self.config,
             pool_arm_stats={
                 "strategy": self.config.optimizer,
-                "mutator_stats": run_result.mutator_stats,
-                **(
-                    {"restart_reason_counts": run_result.restart_reason_counts}
-                    if self.config.optimizer == "ea" else {}
+                "initialization_source": (
+                    "precomputed_bundle"
+                    if loaded_initialization is not None
+                    else "evaluated_in_run"
                 ),
+                "initialization_bundle_content_sha256": (
+                    loaded_initialization.content_sha256
+                    if loaded_initialization is not None
+                    else None
+                ),
+                "precomputed_initialization_usage": precomputed_usage,
+                "mutation_llm_usage_actual": mutation_llm_usage,
+                "mutator_stats": run_result.mutator_stats,
+                "initialization_evaluations": run_result.initialization_evaluations,
+                "main_loop_evaluations": run_result.main_loop_evaluations,
                 "best_chromosome": {
                     "chromosome_id": best.cid,
-                    "evaluation_iteration": best.evaluation_iteration,
+                    "evaluation_index": best.evaluation_index,
                     "mutated_rule_ids": sorted(best.mutated_rule_ids()),
                     "order_priority": dict(best.order_priority),
                     "f1": best.f1, "f2": best.f2, "f3": best.f3,
@@ -904,6 +1116,26 @@ class ExperimentEngine:
         )
 
         if self.config.save_intermediate and self.config.output_dir:
+            if (
+                self.config.main_loop_budget == 0
+                and self.config.initialization_bundle is None
+                and run_result.initialization_evaluations == 5
+                and run_result.runner_random_state_after_initialization is not None
+            ):
+                from .initialization import capture_runtime_random_state
+
+                state = capture_runtime_random_state(
+                    self.pool.mutators,
+                    run_result.runner_random_state_after_initialization,
+                )
+                state_path = (
+                    Path(self.config.output_dir)
+                    / "initialization_random_state.json"
+                )
+                state_path.write_text(
+                    json.dumps(state, indent=2) + "\n",
+                    encoding="utf-8",
+                )
             self._save_results(result)
 
         return result
@@ -983,6 +1215,9 @@ class ExperimentEngine:
 
         generated: list[_GeneratedSample] = []
         semgrep_results: list[Any] = [None] * len(prompts_with_rules)
+        cached_fitness_results: list[FitnessResult | None] = [
+            None
+        ] * len(prompts_with_rules)
         analysis_latency_per_sample: list[float] = [0.0] * len(prompts_with_rules)
         fresh_indices: list[int] = []
         cache_keys: list[tuple[str, str] | None] = [None] * len(prompts_with_rules)
@@ -1024,7 +1259,15 @@ class ExperimentEngine:
                         prompt_with_rules=pwr,
                     )
                 )
-                semgrep_results[idx] = cache_hit["semgrep_result"]
+                semgrep_results[idx] = cache_hit.get("semgrep_result")
+                cached_fitness_results[idx] = cache_hit.get("fitness_result")
+                if (
+                    semgrep_results[idx] is None
+                    and cached_fitness_results[idx] is None
+                ):
+                    raise EvaluationInfrastructureError(
+                        f"Malformed evaluation-cache entry for TC#{tc_id}"
+                    )
                 analysis_latency_per_sample[idx] = cache_hit["analysis_latency_ms"]
             else:
                 self._eval_cache_misses += 1
@@ -1112,7 +1355,12 @@ class ExperimentEngine:
                         "expected_language": sample.validation.expected_language,
                         "detected_language": sample.validation.detected_language,
                         "syntax_error": sample.validation.syntax_error,
+                        "target_block_count": sample.validation.target_block_count,
+                        "normalization": sample.validation.normalization,
                         "generated_code": sample.raw_code,
+                        "source_code_sha256": hashlib.sha256(
+                            sample.validation.source_code.encode("utf-8")
+                        ).hexdigest(),
                         "analyzed_code_sha256": hashlib.sha256(
                             sample.validation.code.encode("utf-8")
                         ).hexdigest(),
@@ -1159,6 +1407,8 @@ class ExperimentEngine:
                             validation.failure_reason if not validation.is_valid else None
                         ),
                         precheck_error_kind=validation.status,
+                        normalization=validation.normalization,
+                        analysis_line_map=tuple(validation.analysis_line_map),
                     )
                 )
             analysis_start = time.perf_counter()
@@ -1215,6 +1465,74 @@ class ExperimentEngine:
         else:
             self._log(f"   ⚡ Semgrep: all {len(generated)} samples reused from cache — skipping batch")
 
+        if is_baseline:
+            baseline_semgrep_failures: list[str] = []
+            for idx, (sample, semgrep_result) in enumerate(zip(generated, semgrep_results)):
+                if semgrep_result is None or semgrep_result.error_kind not in {
+                    "target_parse",
+                    "target_analysis",
+                }:
+                    continue
+                validation = sample.validation
+                if validation is None:
+                    raise RuntimeError(f"Missing output validation for prompt index {idx}")
+                validation.status = (
+                    "semgrep_parse_error"
+                    if semgrep_result.error_kind == "target_parse"
+                    else "semgrep_target_error"
+                )
+                validation.failure_reason = semgrep_result.error
+                tc_id = str(sample.prompt.metadata.get("test_case_id", f"case_{idx}"))
+                message = (
+                    f"Baseline TC#{tc_id} failed during Semgrep analysis: "
+                    f"{semgrep_result.error}"
+                )
+                self._record_evaluation_failure(
+                    iter_id=iter_id,
+                    stage="baseline_semgrep",
+                    error_kind=semgrep_result.error_kind,
+                    message=message,
+                    test_case_id=tc_id,
+                    details={
+                        "finish_reason": sample.finish_reason,
+                        "input_tokens": sample.input_tokens,
+                        "output_tokens": sample.output_tokens,
+                        "expected_language": validation.expected_language,
+                        "detected_language": validation.detected_language,
+                        "target_block_count": validation.target_block_count,
+                        "normalization": validation.normalization,
+                        "generated_code": sample.raw_code,
+                        "source_code_sha256": hashlib.sha256(
+                            validation.source_code.encode("utf-8")
+                        ).hexdigest(),
+                        "analyzed_code_sha256": hashlib.sha256(
+                            validation.code.encode("utf-8")
+                        ).hexdigest(),
+                        "partial_findings": [
+                            {
+                                "check_id": finding.check_id,
+                                "severity": finding.severity,
+                                "line": finding.line,
+                                "analyzed_line": finding.analyzed_line,
+                            }
+                            for finding in semgrep_result.findings
+                        ],
+                    },
+                )
+                baseline_semgrep_failures.append(message)
+            if baseline_semgrep_failures:
+                failure_message = (
+                    "Baseline preflight failed after Semgrep; no candidate scores were produced:\n"
+                    + "\n".join(baseline_semgrep_failures[:10])
+                )
+                self._record_evaluation_failure(
+                    iter_id=iter_id,
+                    stage="baseline_preflight",
+                    error_kind="invalid_baseline_semgrep",
+                    message=failure_message,
+                )
+                raise BaselineOutputError(failure_message)
+
         # ---- Phase 3: fitness + per-prompt records
         results: list[EvaluationResult] = []
         fitness_results: list[FitnessResult] = []
@@ -1222,9 +1540,10 @@ class ExperimentEngine:
         intermediate_records: list[dict] = []
 
         for idx, (semgrep_result, sample) in enumerate(zip(semgrep_results, generated)):
-            if semgrep_result is None:
+            cached_fitness = cached_fitness_results[idx]
+            if semgrep_result is None and cached_fitness is None:
                 raise EvaluationInfrastructureError(f"Missing Semgrep result for prompt index {idx}")
-            if semgrep_result.is_system_error:
+            if semgrep_result is not None and semgrep_result.is_system_error:
                 self._record_evaluation_failure(
                     iter_id=iter_id,
                     stage="semgrep_cache",
@@ -1242,7 +1561,11 @@ class ExperimentEngine:
             pwr = sample.prompt_with_rules
             tc_id = str(test_prompt.metadata.get("test_case_id", f"case_{idx}"))
 
-            if semgrep_result.error_kind in {"target_parse", "target_analysis"} and validation.is_valid:
+            if (
+                semgrep_result is not None
+                and semgrep_result.error_kind in {"target_parse", "target_analysis"}
+                and validation.is_valid
+            ):
                 validation.status = (
                     "semgrep_parse_error"
                     if semgrep_result.error_kind == "target_parse"
@@ -1250,7 +1573,13 @@ class ExperimentEngine:
                 )
                 validation.failure_reason = semgrep_result.error
 
-            if validation.is_valid and semgrep_result.error is None:
+            if cached_fitness is not None:
+                fitness = deepcopy(cached_fitness)
+                if fitness.analysis_status != validation.status:
+                    raise EvaluationInfrastructureError(
+                        f"Cached fitness/output-validation mismatch for TC#{tc_id}"
+                    )
+            elif validation.is_valid and semgrep_result.error is None:
                 fitness = calculate_fitness(semgrep_result)
             else:
                 if is_baseline:
@@ -1270,7 +1599,12 @@ class ExperimentEngine:
                             "output_tokens": sample.output_tokens,
                             "expected_language": validation.expected_language,
                             "detected_language": validation.detected_language,
+                            "target_block_count": validation.target_block_count,
+                            "normalization": validation.normalization,
                             "generated_code": sample.raw_code,
+                            "source_code_sha256": hashlib.sha256(
+                                validation.source_code.encode("utf-8")
+                            ).hexdigest(),
                             "analyzed_code_sha256": hashlib.sha256(
                                 validation.code.encode("utf-8")
                             ).hexdigest(),
@@ -1325,6 +1659,11 @@ class ExperimentEngine:
 
             if is_baseline:
                 self._baseline_fitness_per_case[tc_id] = deepcopy(fitness)
+
+            if cache_enabled and cache_keys[idx] is not None:
+                entry = self._eval_cache.get(cache_keys[idx])
+                if entry is not None:
+                    entry["fitness_result"] = deepcopy(fitness)
 
             fitness_results.append(fitness)
             eval_result = EvaluationResult(
@@ -1472,6 +1811,9 @@ class ExperimentEngine:
                 "error_count": result.fitness.error_count,
                 "warning_count": result.fitness.warning_count,
                 "check_ids": result.fitness.details.get("check_ids", []),
+                "synthetic_findings_filtered": result.fitness.details.get(
+                    "synthetic_findings_filtered", 0
+                ),
                 "score_source": result.fitness.score_source,
                 "analysis_status": result.fitness.analysis_status,
                 "observed_raw_count": result.fitness.observed_raw_count,
@@ -1494,6 +1836,9 @@ class ExperimentEngine:
                     ),
                     "has_fences": result.validation.has_fences,
                     "outside_text_present": result.validation.outside_text_present,
+                    "target_block_count": result.validation.target_block_count,
+                    "normalization": result.validation.normalization,
+                    "analysis_line_map": result.validation.analysis_line_map,
                 }
                 if result.validation is not None else None
             ),
@@ -1507,6 +1852,10 @@ class ExperimentEngine:
             "input_tokens_so_far": self._total_input_tokens,
             "output_tokens_so_far": self._total_output_tokens,
             "generated_code": result.generated_code,
+            "source_code_sha256": (
+                hashlib.sha256(result.validation.source_code.encode("utf-8")).hexdigest()
+                if result.validation is not None else None
+            ),
             "analyzed_code_sha256": (
                 hashlib.sha256(result.validation.code.encode("utf-8")).hexdigest()
                 if result.validation is not None else None
@@ -1523,12 +1872,15 @@ class ExperimentEngine:
             rows.append({
                 "test_case_id": tc_id,
                 "analysis_language": self._expected_language_per_case.get(tc_id),
+                "prompt_hash": result.prompt.metadata.get("prompt_hash"),
                 "baseline_status": (
                     result.validation.status if result.validation is not None else "unknown"
                 ),
             })
         payload = {
-            "schema_version": 1,
+            "artifact_type": "evaluation_population_manifest",
+            "population_size": len(rows),
+            "population_fingerprint": population_fingerprint(rows),
             "prompts": rows,
         }
         path = Path(self.config.output_dir) / "evaluation_manifest.json"
@@ -1546,12 +1898,22 @@ class ExperimentEngine:
 
         # Save summary
         summary = {
+            "artifact_type": "search_summary",
             "timestamp": timestamp,
             "llm_provider": self.llm.provider_name,
             "llm_model": self.llm.model_name,
             "mutators": self.pool.mutator_names,
-            "max_iterations": self.config.max_iterations,
-            "num_iterations_run": len(result.iterations),
+            "initialization_evaluation_budget": 5,
+            "main_loop_evaluation_budget": self.config.main_loop_budget,
+            "total_evaluation_budget": 5 + self.config.main_loop_budget,
+            "num_evaluations_completed": len(result.iterations),
+            "initialization_evaluations_completed": (
+                result.pool_arm_stats or {}
+            ).get("initialization_evaluations", 0),
+            "main_loop_evaluations_completed": (
+                result.pool_arm_stats or {}
+            ).get("main_loop_evaluations", 0),
+            "termination_reason": result.termination_reason,
             "primary_f1_metric": "raw_semgrep_finding_count",
             "original_raw_findings": result.original_fitness.total_raw_count,
             "best_raw_findings": result.best_fitness.total_raw_count,
@@ -1567,26 +1929,46 @@ class ExperimentEngine:
             "best_num_invalid_prompts": result.best_fitness.num_invalid_prompts,
             "best_failure_counts": result.best_fitness.failure_counts,
             "total_time_seconds": result.total_time_seconds,
-            "total_llm_calls": result.total_llm_calls,
-            "total_input_tokens": result.total_input_tokens,
-            "total_output_tokens": result.total_output_tokens,
+            "initialization_time_seconds": result.initialization_time_seconds,
+            "main_loop_time_seconds": result.main_loop_time_seconds,
+            "code_generation_llm_calls_actual": result.total_llm_calls,
+            "code_generation_input_tokens_actual": result.total_input_tokens,
+            "code_generation_output_tokens_actual": result.total_output_tokens,
         }
         if result.pool_arm_stats:
             summary["pool_arm_stats"] = result.pool_arm_stats
+            mutation_usage = result.pool_arm_stats.get(
+                "mutation_llm_usage_actual",
+                {},
+            )
+            precomputed_usage = result.pool_arm_stats.get(
+                "precomputed_initialization_usage",
+                {},
+            )
+            precomputed_mutation = precomputed_usage.get("mutation_llm", {})
+            summary["mutation_llm_usage_actual"] = mutation_usage
+            summary["precomputed_initialization_usage"] = precomputed_usage
+            summary["total_llm_call_attempts_actual"] = (
+                result.total_llm_calls
+                + int(mutation_usage.get("call_attempts", 0))
+            )
+            summary["total_llm_call_attempts_logical"] = (
+                summary["total_llm_call_attempts_actual"]
+                + int(precomputed_usage.get("code_generation_calls", 0))
+                + int(precomputed_mutation.get("call_attempts", 0))
+            )
         if result.eval_cache_stats:
             summary["eval_cache_stats"] = result.eval_cache_stats
         # Full run configuration lives in run_config.json (no duplication here).
         summary["run_config_ref"] = "see run_config.json"
 
-        # Filename kept from the output-schema spec ("hillclimb" is historical)
-        # so run-collection tooling keeps matching hillclimb_summary_*.json.
-        summary_path = output_dir / f"hillclimb_summary_{timestamp}.json"
+        summary_path = output_dir / "search_summary.json"
         with open(summary_path, "w") as f:
             json.dump(summary, f, indent=2)
 
-        # The per-rule view (hillclimb_per_rule_*.json) and per_prompt_rules_results
-        # are intentionally NOT written — both are fully derivable from
-        # iterations.jsonl + archive_snapshots/ + intermediate/ by the analysis
+        # Per-rule and per-prompt aggregate views are intentionally not written;
+        # both are fully derivable from
+        # evaluations.jsonl + archive_snapshots/ + intermediate/ by the analysis
         # layer (output-schema spec Files 7/8).
 
         self._log(f"📁 Results saved to {output_dir}")

@@ -1,5 +1,5 @@
 """
-Search algorithms over full rule-set chromosomes: a (1+1) EA with random
+Search algorithms over full rule-set chromosomes: an archive-based EA with random
 initialization + periodic random injection, and an i.i.d. random-search baseline.
 
 The unit of search is the whole rule set (a :class:`RuleSetChromosome`): rule-text
@@ -17,13 +17,11 @@ Pareto archive:
 
 Top-level entry points
 ----------------------
-* :func:`run_ea` — (1+1) EA over one :class:`ChromosomeArchive`. It starts with
-  ``init_random_samples`` independent random chromosomes offered to the archive
-  and, every ``random_injection_every``-th iteration thereafter, injects one fresh
-  random chromosome built from the origin. All other iterations take a small local
-  step on an archive parent.
-* :func:`run_random_search` — every iteration is an INDEPENDENT random
-  chromosome built from the origin; best-of-budget (no carry-forward, no archive).
+* :func:`run_ea` — five independent origin-based candidates initialize one
+  :class:`ChromosomeArchive`; the main loop alternates local archive moves with
+  periodic origin-based injections.
+* :func:`run_random_search` — the same five-candidate prefix followed by
+  independent origin-based samples (no carry-forward, no archive).
 * :func:`build_random_chromosome` — the one shared sampler behind random search,
   EA initialization, and EA injection, so "initialized exactly like random"
   holds by construction.
@@ -32,6 +30,8 @@ Top-level entry points
 from __future__ import annotations
 
 import random
+import time
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, TYPE_CHECKING
@@ -69,6 +69,7 @@ class IdentityRetryLimitExceeded(RuntimeError):
 # Not an experiment knob — a run never hits it under a non-degenerate mutator
 # pool; it only prevents a silent infinite loop on a misconfigured pool.
 _IDENTITY_RETRY_LIMIT = 100
+INITIALIZATION_SAMPLES = 5
 
 
 # Seam contract: (chromosome, iter_id) -> (fitness, per_prompt_results, n_reused, n_rerun)
@@ -102,7 +103,28 @@ class ChromosomeRunResult:
     rate_limit_hit: bool = False
 
     mutator_stats: dict[str, dict[str, int]] = field(default_factory=dict)
-    restart_reason_counts: dict[str, int] = field(default_factory=dict)
+    initialization_evaluations: int = 0
+    main_loop_evaluations: int = 0
+    initialization_time_seconds: float = 0.0
+    main_loop_time_seconds: float = 0.0
+    termination_reason: str = "evaluation_budget_complete"
+    runner_random_state_after_initialization: object | None = None
+
+
+@dataclass
+class PrecomputedInitializationCandidate:
+    """One fully evaluated shared-prefix candidate loaded from a bundle."""
+
+    child: RuleSetChromosome
+    fitness: AggregatedFitness
+    n_requested_changes: int
+    n_attempted_changes: int
+    n_effective_changes: int
+    attempted_operators: list[str]
+    attempted_mutators: list[str]
+    effective_mutators: list[str]
+    changes: list[str]
+    validation_metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -156,10 +178,8 @@ def _untried_mutators(
 ) -> list[Mutator]:
     """Lineage-unused mutators not yet attempted on this exact parent/rule.
 
-    Tried keys are atomic (``("mut", rule_id, mutator_name)``), including when
-    an ablation applies a multi-mutator chain. This gives the tried/restart
-    mechanism a finite, interpretable neighbourhood without enumerating every
-    possible ordering of mutation chains.
+    Tried keys are atomic (``("mut", rule_id, mutator_name)``). This gives each
+    parent a finite, interpretable neighbourhood.
     """
     return [
         m for m in _unused_mutators(parent, rid, mutators)
@@ -341,7 +361,7 @@ def build_random_chromosome(
             child = child.with_reverted(rid)
             changes.append(f"reverted-to-original {m.name}:{rid}")
             continue
-        child = child.with_gene_chain(rid, res.mutated, [m.name])
+        child = child.with_gene(rid, res.mutated, m.name)
         n_effective += 1
         effective_mutators.append(m.name)
         changes.extend(res.changes)
@@ -362,14 +382,15 @@ def build_random_chromosome(
     )
 
 
-# Moves built by the shared sampler: they touch many rules at once, so a flat
+# Moves built by the shared sampler touch many rules at once, so a flat
 # rule=/mutator=/depth= triple would misreport them as one chain on one rule.
-# ``restart_random`` is a stagnation-restart reseed and ``no_parent_fallback`` is
-# the empty-front safe net — both use the same origin-based sampler as
-# init/injection, so they log with the same accounting.
 _SAMPLE_MOVE_TYPES = frozenset(
-    {"init_random", "injection_random", "random_builder",
-     "restart_random", "no_parent_fallback"}
+    {
+        "initialization_random",
+        "injection_random",
+        "origin_fallback_random",
+        "sample",
+    }
 )
 
 
@@ -416,7 +437,7 @@ def _validate_genes(
 
 
 # ============================================================================
-# (1+1) EA with random initialization + periodic random injection
+# Archive-based EA with random initialization + periodic random injection
 # ============================================================================
 
 def run_ea(
@@ -427,17 +448,12 @@ def run_ea(
     mutators: list[Mutator],
     evaluate_chromosome_fn: EvaluateChromosomeFn,
     iteration_result_factory: Callable[..., "IterationResult"],
-    max_iterations: int,
+    main_loop_budget: int,
     archive_cap: int,
-    restart_h: int,
     max_depth: int,
-    ea_n_mutations: int = 1,
-    ea_move: str = "local",
-    init_random_samples: int = 10,
     random_injection_every: int = 10,
     random_max_changes: int = 10,
     order_move_weight: float = 0.1,
-    ea_origin_parent: bool = True,
     identity_retry_limit: int = _IDENTITY_RETRY_LIMIT,
     seed: int | None,
     log: Callable[[str], None],
@@ -447,54 +463,44 @@ def run_ea(
     validate_move_fn: Callable[..., dict] | None = None,
     snapshot_every: int = 20,
     should_stop_fn: Callable[[], bool] | None = None,
+    precomputed_initialization: list[PrecomputedInitializationCandidate] | None = None,
+    runner_random_state_after_initialization: object | None = None,
+    load_precomputed_evidence_fn: Callable[[int], None] | None = None,
+    restore_precomputed_state_fn: Callable[[], None] | None = None,
 ) -> ChromosomeRunResult:
-    """(1+1) EA over a single full-chromosome Pareto archive.
+    """Run the final EA: five shared initial samples, then ``main_loop_budget``.
 
-    Iteration phases consume one shared **candidate-evaluation** budget; identity
-    proposals are recorded attempts and retried at the same budget index. Records
-    carry a ``phase`` marker so analysis can split them:
+    Initialization evaluations are outside the main-loop budget but remain part
+    of the total evaluation count. The origin is the baseline and reporting
+    reference only; the five initial candidates create the Pareto front.
 
-    * ``init`` — the first ``init_random_samples`` iterations sample independent
-      random chromosomes from the ORIGIN via :func:`build_random_chromosome`
-      (exactly the random-search sampler) and offer each to the archive.
-      Population-style seeding: the later 1+1 loop starts from their Pareto front.
-    * ``injection`` — after init, every ``random_injection_every``-th iteration
-      injects one more origin-based random chromosome (0 disables). Diversity
-      maintenance: the archive is not wiped for this; dominance decides.
-    * ``ea`` — pick a parent from the archive (the origin is also sampleable when
-      ``ea_origin_parent`` is on, so a minimal parsimony-1 lineage can always be
-      seeded), take a move, evaluate the WHOLE chromosome, offer it by Pareto
-      dominance.
-    * ``restart`` — triggered when an "ea"-phase attempt hits ``restart_h``
-      consecutive rejections (stagnation): the front is wiped
-      (:meth:`ChromosomeArchive.restart` with ``wipe_front=True``) and the next
-      ``init_random_samples`` iterations reseed it exactly like ``init``, one
-      fresh origin-based random sample per iteration (ARIEL-style
-      restart-on-stagnation), before normal ``injection``/``ea`` cadence resumes.
-
-    The ``ea``-phase move depends on ``ea_move``:
-
-    * ``"local"`` (default) — the (1+1) step: mutate ONE gene by stacking a
-      1..``ea_n_mutations`` chain of distinct unused mutators on its current
-      allele (default chain length 1 — the canonical small step); a saturated
-      gene reverts to original instead (ablation of its stack); with weight
-      ``order_move_weight`` the move is a rule-order bump instead.
-    * ``"random_builder"`` — ablation arm: the move applies the random sampler
-      to the ARCHIVE PARENT, so selection is the only difference vs random
-      search. Not the main design; kept for the supervisor-requested ablation.
+    Main-loop slots are periodic origin-based injections or local archive moves.
+    A local slot retries at three levels without consuming an evaluation: another
+    move on the same parent, another front parent, then an origin-based random
+    sample when the whole front has no usable move. The archive is never cleared.
     """
-    if ea_move not in ("local", "random_builder"):
-        raise ValueError(f"ea_move must be 'local' or 'random_builder', got {ea_move!r}")
+    if main_loop_budget < 0:
+        raise ValueError(f"main_loop_budget must be >= 0, got {main_loop_budget}")
     if identity_retry_limit < 1:
         raise ValueError(
             f"identity_retry_limit must be >= 1, got {identity_retry_limit}"
         )
+    if precomputed_initialization is not None and len(precomputed_initialization) != (
+        INITIALIZATION_SAMPLES
+    ):
+        raise ValueError(
+            f"precomputed initialization must contain {INITIALIZATION_SAMPLES} candidates"
+        )
+    if (
+        precomputed_initialization is not None
+        and runner_random_state_after_initialization is None
+    ):
+        raise ValueError("precomputed initialization lacks the runner random state")
 
     rng = random.Random(seed)
     archive = ChromosomeArchive(
         origin,
         cap=archive_cap,
-        restart_h=restart_h,
         rng=rng,
     )
 
@@ -502,164 +508,59 @@ def run_ea(
     mutator_stats: dict[str, dict[str, int]] = {
         m.name: {"attempts": 0, "archive_adds": 0, "archive_adds_f1": 0} for m in mutators
     }
-    restart_reason_counts: dict[str, int] = {"stagnation": 0}
     n_accepted = 0
     rate_limit_hit = False
     mutate_weight = max(0.0, 1.0 - order_move_weight)
-    init_n = max(0, min(init_random_samples, max_iterations))
 
     def _is_eligible(parent: RuleSetChromosome) -> bool:
-        if ea_move == "random_builder":
-            return True  # the sampler can always draw a change
         stackable, saturated, order_moves = _available_local_moves(
             parent, space, prompts_with_rules, mutators, max_depth, order_move_weight
         )
         return bool(stackable or saturated or order_moves)
 
-    evaluated_count = 0
+    total_evaluated = 0
+    main_loop_evaluated = 0
     attempt_count = 0
-    identity_retries = 0
     last_completed = 0
-    reseed_remaining = 0  # iterations left in an active stagnation reseed burst
-    while evaluated_count < max_iterations:
-        if should_stop_fn is not None and should_stop_fn():
-            log(f"\n⏹️  Graceful stop (SLURM pre-timeout) — stopping after "
-                f"{last_completed}/{max_iterations} iterations")
-            break
+    run_stopped = False
+    termination_reason = "evaluation_budget_complete"
+    initialization_started = time.perf_counter()
+    initialization_finished: float | None = None
+    main_loop_started: float | None = None
+    captured_runner_state: object | None = None
 
-        # ``budget_iter`` advances only after evaluate_chromosome_fn succeeds.
-        # Proposal attempts (including identities) get a separate monotonic id.
-        budget_iter = evaluated_count + 1
-        attempt_count += 1
-        attempt_in_iter = identity_retries + 1
+    def _evaluate_proposal(
+        *,
+        phase: str,
+        main_loop_iteration: int | None,
+        parent: RuleSetChromosome,
+        child: RuleSetChromosome,
+        move_type: str,
+        rule_id: str | None,
+        chain_names: list[str],
+        changes: list[str],
+        n_changes: int | None,
+        n_attempted_changes: int | None,
+        n_effective_changes: int | None,
+        attempted_operators: list[str],
+        attempted_mutators: list[str],
+        attempt_in_evaluation: int,
+        elapsed_main_loop_seconds: float | None,
+    ) -> bool:
+        nonlocal total_evaluated, last_completed, n_accepted
+        nonlocal rate_limit_hit, run_stopped, termination_reason
 
-        restarts_this_iter: list[dict[str, Any]] = []
-
-        if evaluated_count < init_n:
-            phase = "init"
-        elif reseed_remaining > 0:
-            phase = "restart"
-        elif (
-            random_injection_every > 0
-            and (evaluated_count - init_n + 1) % random_injection_every == 0
-        ):
-            phase = "injection"
-        else:
-            phase = "ea"
-            # ---- stagnation cap: wipe the front, reseed like init/injection --
-            if archive.should_restart():
-                front_size_before_restart = len(archive)
-                archive.restart(iteration=budget_iter, reason="stagnation", wipe_front=True)
-                restart_reason_counts["stagnation"] += 1
-                restarts_this_iter.append({"reason": "stagnation", "wiped_front": True})
-                reseed_remaining = max(1, init_n)  # always reseed >=1 even if init_n==0
-                log(f"   ↻ archive restart: stagnation — wiping front (was "
-                    f"{front_size_before_restart}) and reseeding "
-                    f"{reseed_remaining} random samples")
-                phase = "restart"
-            elif not archive.entries:
-                # SAFE NET: no parents available to exploit, so fall back to a
-                # random sample from the origin.
-                phase = "no_parent_fallback"
-
-        n_changes: int | None = None
-        n_attempted_changes: int | None = None
-        n_effective_changes: int | None = None
-        attempted_operators: list[str] = []
-        attempted_mutators: list[str] = []
-
-        if phase in ("init", "injection", "restart", "no_parent_fallback"):
-            # ---- random sample from the ORIGIN (never from the front) --------
-            parent = archive.origin
-            sample = build_random_chromosome(
-                space, origin, mutators, rng,
-                max_changes=random_max_changes, max_depth=max_depth,
-                order_move_prob=order_move_weight,
-            )
-            child = sample.child
-            n_changes = sample.n_requested_changes
-            n_attempted_changes = sample.n_attempted_changes
-            n_effective_changes = sample.n_effective_changes
-            attempted_operators = sample.attempted_operators
-            attempted_mutators = sample.attempted_mutators
-            chain_names = sample.effective_mutators
-            changes = sample.changes
-            move_type = {
-                "init": "init_random", "injection": "injection_random",
-                "restart": "restart_random", "no_parent_fallback": "no_parent_fallback",
-            }[phase]
-            rule_id = None
-            is_identity = _is_render_identity(space, origin, child, prompts_with_rules)
-        else:
-            # ---- 1. pick a parent (restart re-opens exploration if exhausted)
-            parent = archive.sample_parent(_is_eligible, include_origin=ea_origin_parent)
-            if parent is None:
-                archive.restart(iteration=budget_iter, reason="exhausted")
-                restart_reason_counts["exhausted"] = restart_reason_counts.get("exhausted", 0) + 1
-                restarts_this_iter.append({"reason": "exhausted"})
-                parent = archive.sample_parent(_is_eligible, include_origin=ea_origin_parent)
-                if parent is None:
-                    log("\n⏹️  No eligible parent even after restart — stopping early")
-                    break
-
-            # ---- 2. choose + build the move ----------------------------------
-            if ea_move == "random_builder":
-                sample = build_random_chromosome(
-                    space, parent, mutators, rng,
-                    max_changes=random_max_changes, max_depth=max_depth,
-                    order_move_prob=order_move_weight,
-                )
-                child = sample.child
-                n_changes = sample.n_requested_changes
-                n_attempted_changes = sample.n_attempted_changes
-                n_effective_changes = sample.n_effective_changes
-                attempted_operators = sample.attempted_operators
-                attempted_mutators = sample.attempted_mutators
-                chain_names = sample.effective_mutators
-                changes = sample.changes
-                move_type, rule_id = "random_builder", None
-                is_identity = _is_render_identity(space, parent, child, prompts_with_rules)
-            else:
-                move = _choose_and_build_move(
-                    parent, space, prompts_with_rules, mutators, rng, max_depth,
-                    ea_n_mutations, mutate_weight, order_move_weight,
-                )
-                if move is None:
-                    # Eligibility and construction use the same move inventory;
-                    # if stochastic state still makes it empty, re-open and retry
-                    # this evaluation slot without charging the budget.
-                    archive.restart(iteration=budget_iter, reason="exhausted")
-                    restart_reason_counts["exhausted"] = (
-                        restart_reason_counts.get("exhausted", 0) + 1
-                    )
-                    continue
-                child, move_keys, move_type, rule_id, chain_names, changes, is_identity = move
-                archive.mark_tried(parent, move_keys)
-                attempted_mutators = list(chain_names)
-                if move_type == "mutate":
-                    attempted_operators = [f"mutator:{name}:{rule_id}" for name in chain_names]
-                    n_attempted_changes = len(chain_names)
-                else:
-                    attempted_operators = [move_type]
-                    n_attempted_changes = 1
-                # Local search requests exactly the move(s) it then attempts.
-                # Keeping this populated (rather than ``None``) makes the
-                # requested >= attempted >= effective contract uniform across
-                # local EA, initialization/injection, and random search.
-                n_changes = n_attempted_changes
-                n_effective_changes = 0 if is_identity else 1
-
-        for name in attempted_mutators:
-            mutator_stats.setdefault(name, {"attempts": 0, "archive_adds": 0, "archive_adds_f1": 0})
-            mutator_stats[name]["attempts"] += 1
-
+        evaluation_index = total_evaluated + 1
+        space.stamp(child)
         gene_depth = child.gene_depth(rule_id) if rule_id else max(
-            (child.gene_depth(r) for r in child.mutated_rule_ids()), default=0
+            (child.gene_depth(rid) for rid in child.mutated_rule_ids()),
+            default=0,
         )
-
         if move_type in _SAMPLE_MOVE_TYPES:
             move_detail = _sample_detail(
-                n_changes, n_effective_changes, len(child.mutated_rule_ids()),
+                n_changes,
+                n_effective_changes,
+                len(child.mutated_rule_ids()),
                 _count_order_ops(attempted_operators),
             )
         else:
@@ -667,100 +568,73 @@ def run_ea(
                 f"local {move_type} rule={(rule_id or '-').replace('codeguard-', 'cg-')} "
                 f"mutator={'+'.join(chain_names) or '-'} depth={gene_depth}"
             )
-
-        # ---- 3. identity attempts are visible but do NOT consume budget -----
-        if is_identity:
-            identity_retries += 1
-            log(f"\n⏭️  Iteration {budget_iter}/{max_iterations} [{phase}] — identity: "
-                f"{move_detail} attempt={attempt_count} "
-                f"— no evaluation; retry {identity_retries}/{identity_retry_limit}")
-            _emit_record(iter_record_fn, budget_iter, "ea", parent, child=parent, move_type=move_type,
-                         rule_id=rule_id, chain_names=chain_names, agg=None, accepted=False,
-                         identity=True, gene_depth=gene_depth, n_reused=0, n_rerun=0,
-                         eligible=len(space.all_rule_ids), restarts=restarts_this_iter,
-                         phase=phase, n_changes=n_changes, attempt=attempt_count,
-                         attempt_in_iter=attempt_in_iter, budget_consumed=False,
-                         attempted_operators=attempted_operators,
-                         attempted_mutators=attempted_mutators,
-                         n_attempted_changes=n_attempted_changes,
-                         n_effective_changes=n_effective_changes)
-            if identity_retries >= identity_retry_limit:
-                raise IdentityRetryLimitExceeded(
-                    "EA identity retry limit exceeded for evaluation "
-                    f"{budget_iter} after {identity_retries} attempts"
-                )
-            continue
-
-        identity_retries = 0
-        space.stamp(child)
-
-        # ---- 4. header → validation → evaluate ------------------------------
-        header = f"\n🧬 Iteration {budget_iter}/{max_iterations} [{phase}] — {move_detail}"
+        header = (
+            f"\n🧬 Evaluation {evaluation_index}/"
+            f"{INITIALIZATION_SAMPLES + main_loop_budget} [{phase}] — {move_detail}"
+        )
         if phase == "ea":
-            # init/injection always sample from the origin; only in the EA phase is
-            # the parent a choice, and origin-vs-front is what ea_origin_parent turns.
-            parent_label = "ORIGIN" if parent.cid == archive.origin.cid else (parent.cid or "-")
             header += (
-                f" | parent={parent_label} parent_f1={parent.f1:+.2f} "
+                f" | parent={parent.cid or '-'} parent_f1={parent.f1:+.2f} "
                 f"parent_nmut={len(parent.mutated_rule_ids())} front={len(archive)}"
             )
         log(header)
 
-        # Observational quality validation of every changed gene (never refuses).
-        validation_metadata: dict = _validate_genes(validate_move_fn, space, parent, child)
-
+        validation_metadata = _validate_genes(validate_move_fn, space, parent, child)
         try:
             agg, _results, n_reused, n_rerun = evaluate_chromosome_fn(
-                child, f"ea_iter{budget_iter:04d}"
+                child, f"evaluation_{evaluation_index:04d}"
             )
         except WallTimeStop:
-            log(f"\n⏱️  Pre-timeout during iteration {budget_iter} — discarding in-flight; "
-                f"finalizing from {last_completed} completed iterations.")
-            break
-        except Exception as e:  # noqa: BLE001 — rate-limit handling only
-            if "rate_limit" in str(e).lower() or "429" in str(e) or "413" in str(e):
-                log(f"\n⚠️  Rate limit hit at EA iteration {budget_iter}: {e}")
+            log(
+                f"\n⏱️  Pre-timeout during evaluation {evaluation_index} — "
+                f"discarding in-flight; finalizing from {last_completed} completed evaluations."
+            )
+            run_stopped = True
+            termination_reason = "wall_time_limit"
+            return False
+        except Exception as exc:  # noqa: BLE001
+            if "rate_limit" in str(exc).lower() or "429" in str(exc) or "413" in str(exc):
+                log(f"\n⚠️  Rate limit hit at evaluation {evaluation_index}: {exc}")
                 rate_limit_hit = True
-                break
+                run_stopped = True
+                termination_reason = "rate_limit"
+                return False
             raise
 
         child.f1, child.f2, child.f3 = _objectives(agg)
         child.fitness = agg
-        child.evaluation_iteration = budget_iter
+        child.evaluation_index = evaluation_index
 
-        # ---- 5. offer to the archive ----------------------------------------
-        parent_f1 = parent.f1
         front_before_entries = list(archive.entries)
-        front_before = {e.cid for e in front_before_entries}
+        front_before = {entry.cid for entry in front_before_entries}
+        parent_f1 = parent.f1
         size_before = len(archive)
         accepted, reason = archive.try_add(
             child,
-            iteration=budget_iter,
-            count_rejection_for_stagnation=(phase == "ea"),
+            evaluation_index=evaluation_index,
         )
-        evicted = front_before - {e.cid for e in archive.entries}
-        # Two eviction sources fire inside one try_add: members the child
-        # dominates, and (on cap overflow) the single lowest-f1 survivor. Split
-        # them for the log — the overflow set is whatever left that the child
-        # did not dominate.
+        evicted = front_before - {entry.cid for entry in archive.entries}
         evicted_dominated = {
-            e.cid for e in front_before_entries if e.cid in evicted and dominates(child, e)
+            entry.cid
+            for entry in front_before_entries
+            if entry.cid in evicted and dominates(child, entry)
         }
         evicted_overflow = evicted - evicted_dominated
         if accepted:
             n_accepted += 1
-            if chain_names:
-                # Local moves credit the chain's last mutator; sampler-built
-                # children (init/injection/random_builder) share the credit
-                # across every applied mutator. Per-mutator marginal analysis
-                # should therefore filter to phase == "ea" local moves.
-                credited = chain_names if move_type != "mutate" else [chain_names[-1]]
-                for name in credited:
-                    mutator_stats[name]["archive_adds"] += 1
-                    if child.f1 > parent_f1:
-                        mutator_stats[name]["archive_adds_f1"] += 1
-            log(f"   ✅ archive add: f1={child.f1:+.2f} f2={child.f2:.3f} f3={child.f3:.3f} "
-                f"(front={len(archive)}/{archive.cap}, cid={child.cid})")
+            credited = (
+                chain_names
+                if move_type in _SAMPLE_MOVE_TYPES
+                else chain_names[-1:]
+            )
+            for name in credited:
+                mutator_stats[name]["archive_adds"] += 1
+                if child.f1 > parent_f1:
+                    mutator_stats[name]["archive_adds_f1"] += 1
+            log(
+                f"   ✅ archive add: f1={child.f1:+.2f} f2={child.f2:.3f} "
+                f"f3={child.f3:.3f} (front={len(archive)}/{archive.cap}, cid={child.cid})"
+            )
             if evicted_dominated:
                 log(f"   ⤷ evicted_dominated={', '.join(sorted(evicted_dominated))}")
             if evicted_overflow:
@@ -768,56 +642,463 @@ def run_ea(
             if len(archive) < size_before:
                 log(f"   ↧ front shrank {size_before} → {len(archive)}")
         else:
-            log(f"   ✗ rejected ({reason}): f1={child.f1:+.2f} f2={child.f2:.3f} f3={child.f3:.3f} "
-                f"[front={len(archive)}/{archive.cap}, "
-                f"stagnation={archive._attempts_since_insert}/{restart_h}]")
+            log(
+                f"   ✗ rejected ({reason}): f1={child.f1:+.2f} "
+                f"f2={child.f2:.3f} f3={child.f3:.3f} "
+                f"[front={len(archive)}/{archive.cap}]"
+            )
 
-        # Persist this iteration's mutated rule(s) regardless of archive outcome,
-        # so mutated_rules/iterNNN/ documents every evaluated candidate.
         if save_move_fn is not None:
-            save_move_fn(iteration=budget_iter, child=child, space=space, move_type=move_type,
-                         rule_id=rule_id, chain_names=chain_names, changes=changes,
-                         validation_metadata=validation_metadata, accepted=accepted)
+            save_move_fn(
+                evaluation_index=evaluation_index,
+                child=child,
+                space=space,
+                move_type=move_type,
+                rule_id=rule_id,
+                chain_names=chain_names,
+                changes=changes,
+                validation_metadata=validation_metadata,
+                accepted=accepted,
+            )
 
-        iterations.append(iteration_result_factory(
-            iteration=evaluated_count,
-            rule_text=f"[ea: {child.cid}]",
-            aggregated_fitness=agg,
-            individual_results=[],
-            is_improvement=accepted,
-            mutation_changes=changes,
+        iterations.append(
+            iteration_result_factory(
+                iteration=total_evaluated,
+                rule_text=f"[ea: {child.cid}]",
+                aggregated_fitness=agg,
+                individual_results=[],
+                is_improvement=accepted,
+                mutation_changes=changes,
+                validation_metadata=validation_metadata,
+            )
+        )
+        _emit_record(
+            iter_record_fn,
+            evaluation_index,
+            "ea",
+            parent,
+            child=child,
+            move_type=move_type,
+            rule_id=rule_id,
+            chain_names=chain_names,
+            agg=agg,
+            accepted=accepted,
+            identity=False,
+            gene_depth=gene_depth,
+            n_reused=n_reused,
+            n_rerun=n_rerun,
+            eligible=len(space.all_rule_ids),
+            parent_f1=parent_f1,
             validation_metadata=validation_metadata,
-        ))
+            phase=phase,
+            n_changes=n_changes,
+            attempt=attempt_count,
+            attempt_in_iter=attempt_in_evaluation,
+            budget_consumed=True,
+            attempted_operators=attempted_operators,
+            attempted_mutators=attempted_mutators,
+            n_attempted_changes=n_attempted_changes,
+            n_effective_changes=n_effective_changes,
+            main_loop_iteration=main_loop_iteration,
+            elapsed_main_loop_seconds=(
+                time.perf_counter() - main_loop_started
+                if main_loop_iteration is not None
+                and main_loop_started is not None
+                else elapsed_main_loop_seconds
+            ),
+        )
+        total_evaluated += 1
+        last_completed = total_evaluated
+        if total_evaluated % snapshot_every == 0 and archive_snapshot_fn is not None:
+            archive_snapshot_fn(total_evaluated, archive.snapshot())
+        return True
 
-        _emit_record(iter_record_fn, budget_iter, "ea", parent, child=child, move_type=move_type,
-                     rule_id=rule_id, chain_names=chain_names, agg=agg, accepted=accepted,
-                     identity=False, gene_depth=gene_depth, n_reused=n_reused, n_rerun=n_rerun,
-                     eligible=len(space.all_rule_ids), restarts=restarts_this_iter,
-                     parent_f1=parent_f1, validation_metadata=validation_metadata,
-                     phase=phase, n_changes=n_changes, attempt=attempt_count,
-                     attempt_in_iter=attempt_in_iter, budget_consumed=True,
-                     attempted_operators=attempted_operators,
-                     attempted_mutators=attempted_mutators,
-                     n_attempted_changes=n_attempted_changes,
-                     n_effective_changes=n_effective_changes)
+    initialization_identity_retries = 0
+    if precomputed_initialization is not None:
+        for index, prepared in enumerate(precomputed_initialization, 1):
+            child = deepcopy(prepared.child)
+            space.stamp(child)
+            if child.cid != prepared.child.cid:
+                raise ValueError(
+                    f"precomputed initialization candidate {index} content hash differs"
+                )
+            child.f1, child.f2, child.f3 = _objectives(prepared.fitness)
+            child.fitness = prepared.fitness
+            child.evaluation_index = index
+            accepted, _reason = archive.try_add(
+                child,
+                evaluation_index=index,
+            )
+            if accepted:
+                n_accepted += 1
+            for name in prepared.attempted_mutators:
+                mutator_stats[name]["attempts"] += 1
+            if accepted:
+                for name in prepared.effective_mutators:
+                    mutator_stats[name]["archive_adds"] += 1
+                    if child.f1 > origin.f1:
+                        mutator_stats[name]["archive_adds_f1"] += 1
+            if load_precomputed_evidence_fn is not None:
+                load_precomputed_evidence_fn(index)
+            if save_move_fn is not None:
+                save_move_fn(
+                    evaluation_index=index,
+                    child=child,
+                    space=space,
+                    move_type="initialization_random",
+                    rule_id=None,
+                    chain_names=prepared.effective_mutators,
+                    changes=prepared.changes,
+                    validation_metadata=prepared.validation_metadata,
+                    accepted=accepted,
+                )
+            iterations.append(
+                iteration_result_factory(
+                    iteration=index - 1,
+                    rule_text=f"[ea: {child.cid}]",
+                    aggregated_fitness=prepared.fitness,
+                    individual_results=[],
+                    is_improvement=accepted,
+                    mutation_changes=prepared.changes,
+                    validation_metadata=prepared.validation_metadata,
+                )
+            )
+            _emit_record(
+                iter_record_fn,
+                index,
+                "ea",
+                origin,
+                child=child,
+                move_type="initialization_random",
+                rule_id=None,
+                chain_names=prepared.effective_mutators,
+                agg=prepared.fitness,
+                accepted=accepted,
+                identity=False,
+                gene_depth=max(
+                    (child.gene_depth(rid) for rid in child.mutated_rule_ids()),
+                    default=0,
+                ),
+                n_reused=len(prompts_with_rules),
+                n_rerun=0,
+                eligible=len(space.all_rule_ids),
+                phase="initialization",
+                n_changes=prepared.n_requested_changes,
+                attempt=index,
+                attempt_in_iter=1,
+                budget_consumed=True,
+                attempted_operators=prepared.attempted_operators,
+                attempted_mutators=prepared.attempted_mutators,
+                n_attempted_changes=prepared.n_attempted_changes,
+                n_effective_changes=prepared.n_effective_changes,
+                main_loop_iteration=None,
+                initialization_source="precomputed_bundle",
+            )
+        total_evaluated = INITIALIZATION_SAMPLES
+        last_completed = INITIALIZATION_SAMPLES
+        rng.setstate(runner_random_state_after_initialization)
+        if restore_precomputed_state_fn is not None:
+            restore_precomputed_state_fn()
 
-        # A restart slot is an evaluated random sample, not merely a proposal.
-        # Identity attempts retry in the same phase without consuming the
-        # evaluation budget or shortening the reseed burst.
-        if phase == "restart":
-            reseed_remaining -= 1
+    while total_evaluated < INITIALIZATION_SAMPLES:
+        if should_stop_fn is not None and should_stop_fn():
+            log(
+                "\n⏹️  Graceful stop during initialization — stopping after "
+                f"{last_completed}/{INITIALIZATION_SAMPLES} initialization evaluations"
+            )
+            termination_reason = "wall_time_limit"
+            break
+        attempt_count += 1
+        attempt_in_evaluation = initialization_identity_retries + 1
+        sample = build_random_chromosome(
+            space,
+            origin,
+            mutators,
+            rng,
+            max_changes=random_max_changes,
+            max_depth=max_depth,
+            order_move_prob=order_move_weight,
+        )
+        for name in sample.attempted_mutators:
+            mutator_stats[name]["attempts"] += 1
+        if _is_render_identity(space, origin, sample.child, prompts_with_rules):
+            initialization_identity_retries += 1
+            _emit_record(
+                iter_record_fn,
+                total_evaluated + 1,
+                "ea",
+                origin,
+                child=origin,
+                move_type="initialization_random",
+                rule_id=None,
+                chain_names=sample.effective_mutators,
+                agg=None,
+                accepted=False,
+                identity=True,
+                gene_depth=0,
+                n_reused=0,
+                n_rerun=0,
+                eligible=len(space.all_rule_ids),
+                phase="initialization",
+                n_changes=sample.n_requested_changes,
+                attempt=attempt_count,
+                attempt_in_iter=attempt_in_evaluation,
+                budget_consumed=False,
+                attempted_operators=sample.attempted_operators,
+                attempted_mutators=sample.attempted_mutators,
+                n_attempted_changes=sample.n_attempted_changes,
+                n_effective_changes=sample.n_effective_changes,
+                main_loop_iteration=None,
+            )
+            if initialization_identity_retries >= identity_retry_limit:
+                raise IdentityRetryLimitExceeded(
+                    "EA initialization identity retry limit exceeded"
+                )
+            continue
+        initialization_identity_retries = 0
+        if not _evaluate_proposal(
+            phase="initialization",
+            main_loop_iteration=None,
+            parent=origin,
+            child=sample.child,
+            move_type="initialization_random",
+            rule_id=None,
+            chain_names=sample.effective_mutators,
+            changes=sample.changes,
+            n_changes=sample.n_requested_changes,
+            n_attempted_changes=sample.n_attempted_changes,
+            n_effective_changes=sample.n_effective_changes,
+            attempted_operators=sample.attempted_operators,
+            attempted_mutators=sample.attempted_mutators,
+            attempt_in_evaluation=attempt_in_evaluation,
+            elapsed_main_loop_seconds=None,
+        ):
+            break
 
-        evaluated_count += 1
-        last_completed = evaluated_count
+    captured_runner_state = rng.getstate()
+    initialization_finished = time.perf_counter()
 
-        if evaluated_count % snapshot_every == 0 and archive_snapshot_fn is not None:
-            archive_snapshot_fn(evaluated_count, archive.snapshot())
+    if total_evaluated < INITIALIZATION_SAMPLES:
+        best = archive.best()
+        return ChromosomeRunResult(
+            iterations=iterations,
+            archive_snapshot=archive.snapshot(),
+            best_chromosome=best,
+            best_fitness=best.fitness,
+            n_accepted=n_accepted,
+            rate_limit_hit=rate_limit_hit,
+            mutator_stats=mutator_stats,
+            initialization_evaluations=total_evaluated,
+            main_loop_evaluations=0,
+            initialization_time_seconds=(
+                initialization_finished - initialization_started
+            ),
+            main_loop_time_seconds=0.0,
+            termination_reason=termination_reason,
+            runner_random_state_after_initialization=captured_runner_state,
+        )
+    if not archive.entries:
+        raise RuntimeError("EA initialization completed without creating a Pareto front")
+
+    main_loop_started = time.perf_counter()
+    while main_loop_evaluated < main_loop_budget:
+        if should_stop_fn is not None and should_stop_fn():
+            log(
+                f"\n⏹️  Graceful stop — completed {main_loop_evaluated}/"
+                f"{main_loop_budget} main-loop evaluations"
+            )
+            termination_reason = "wall_time_limit"
+            break
+
+        main_loop_iteration = main_loop_evaluated + 1
+        phase = (
+            "injection"
+            if random_injection_every > 0
+            and main_loop_iteration % random_injection_every == 0
+            else "ea"
+        )
+        excluded_parent_cids: set[str] = set()
+        retry_parent: RuleSetChromosome | None = None
+        attempt_in_evaluation = 0
+
+        while True:
+            attempt_count += 1
+            attempt_in_evaluation += 1
+            if attempt_in_evaluation > identity_retry_limit:
+                raise IdentityRetryLimitExceeded(
+                    f"EA proposal retry limit exceeded for main-loop evaluation "
+                    f"{main_loop_iteration}"
+                )
+
+            if phase == "injection":
+                parent = origin
+                sample = build_random_chromosome(
+                    space,
+                    origin,
+                    mutators,
+                    rng,
+                    max_changes=random_max_changes,
+                    max_depth=max_depth,
+                    order_move_prob=order_move_weight,
+                )
+                child = sample.child
+                move_type = "injection_random"
+                rule_id = None
+                chain_names = sample.effective_mutators
+                changes = sample.changes
+                n_changes = sample.n_requested_changes
+                n_attempted_changes = sample.n_attempted_changes
+                n_effective_changes = sample.n_effective_changes
+                attempted_operators = sample.attempted_operators
+                attempted_mutators = sample.attempted_mutators
+                is_identity = _is_render_identity(
+                    space, origin, child, prompts_with_rules
+                )
+            else:
+                parent_entry = (
+                    retry_parent
+                    if retry_parent is not None and _is_eligible(retry_parent)
+                    else archive.sample_parent(
+                        _is_eligible,
+                        exclude_cids=excluded_parent_cids,
+                    )
+                )
+                retry_parent = None
+                if parent_entry is None:
+                    phase = "origin_fallback"
+                    parent = origin
+                    sample = build_random_chromosome(
+                        space,
+                        origin,
+                        mutators,
+                        rng,
+                        max_changes=random_max_changes,
+                        max_depth=max_depth,
+                        order_move_prob=order_move_weight,
+                    )
+                    child = sample.child
+                    move_type = "origin_fallback_random"
+                    rule_id = None
+                    chain_names = sample.effective_mutators
+                    changes = sample.changes
+                    n_changes = sample.n_requested_changes
+                    n_attempted_changes = sample.n_attempted_changes
+                    n_effective_changes = sample.n_effective_changes
+                    attempted_operators = sample.attempted_operators
+                    attempted_mutators = sample.attempted_mutators
+                    is_identity = _is_render_identity(
+                        space, origin, child, prompts_with_rules
+                    )
+                else:
+                    parent = parent_entry
+                    parent_value = deepcopy(parent_entry)
+                    move = _choose_and_build_move(
+                        parent_value,
+                        space,
+                        prompts_with_rules,
+                        mutators,
+                        rng,
+                        max_depth,
+                        mutate_weight,
+                        order_move_weight,
+                    )
+                    if move is None:
+                        excluded_parent_cids.add(parent_entry.cid)
+                        continue
+                    (
+                        child,
+                        move_key,
+                        move_type,
+                        rule_id,
+                        chain_names,
+                        changes,
+                        is_identity,
+                    ) = move
+                    archive.mark_tried(parent_entry, move_key)
+                    attempted_mutators = list(chain_names)
+                    attempted_operators = (
+                        [f"mutator:{chain_names[0]}:{rule_id}"]
+                        if move_type == "mutate"
+                        else [move_type]
+                    )
+                    n_attempted_changes = 1
+                    n_effective_changes = 0 if is_identity else 1
+                    n_changes = 1
+                    if is_identity:
+                        retry_parent = parent_entry
+
+            for name in attempted_mutators:
+                mutator_stats[name]["attempts"] += 1
+
+            if is_identity:
+                _emit_record(
+                    iter_record_fn,
+                    total_evaluated + 1,
+                    "ea",
+                    parent,
+                    child=parent,
+                    move_type=move_type,
+                    rule_id=rule_id,
+                    chain_names=chain_names,
+                    agg=None,
+                    accepted=False,
+                    identity=True,
+                    gene_depth=(
+                        parent.gene_depth(rule_id)
+                        if rule_id
+                        else max(
+                            (
+                                parent.gene_depth(rid)
+                                for rid in parent.mutated_rule_ids()
+                            ),
+                            default=0,
+                        )
+                    ),
+                    n_reused=0,
+                    n_rerun=0,
+                    eligible=len(space.all_rule_ids),
+                    phase=phase,
+                    n_changes=n_changes,
+                    attempt=attempt_count,
+                    attempt_in_iter=attempt_in_evaluation,
+                    budget_consumed=False,
+                    attempted_operators=attempted_operators,
+                    attempted_mutators=attempted_mutators,
+                    n_attempted_changes=n_attempted_changes,
+                    n_effective_changes=n_effective_changes,
+                    main_loop_iteration=main_loop_iteration,
+                    elapsed_main_loop_seconds=time.perf_counter() - main_loop_started,
+                )
+                continue
+
+            completed = _evaluate_proposal(
+                phase=phase,
+                main_loop_iteration=main_loop_iteration,
+                parent=parent,
+                child=child,
+                move_type=move_type,
+                rule_id=rule_id,
+                chain_names=chain_names,
+                changes=changes,
+                n_changes=n_changes,
+                n_attempted_changes=n_attempted_changes,
+                n_effective_changes=n_effective_changes,
+                attempted_operators=attempted_operators,
+                attempted_mutators=attempted_mutators,
+                attempt_in_evaluation=attempt_in_evaluation,
+                elapsed_main_loop_seconds=time.perf_counter() - main_loop_started,
+            )
+            if completed:
+                main_loop_evaluated += 1
+            break
+        if run_stopped:
+            break
 
     if archive_snapshot_fn is not None and last_completed > 0:
         archive_snapshot_fn(last_completed, archive.snapshot())
 
     best = archive.best()
-    _log_ea_summary(log, archive, mutator_stats, restart_reason_counts, best)
+    _log_ea_summary(log, archive, mutator_stats, best)
     return ChromosomeRunResult(
         iterations=iterations,
         archive_snapshot=archive.snapshot(),
@@ -826,7 +1107,18 @@ def run_ea(
         n_accepted=n_accepted,
         rate_limit_hit=rate_limit_hit,
         mutator_stats=mutator_stats,
-        restart_reason_counts=restart_reason_counts,
+        initialization_evaluations=min(total_evaluated, INITIALIZATION_SAMPLES),
+        main_loop_evaluations=main_loop_evaluated,
+        initialization_time_seconds=(
+            (initialization_finished or time.perf_counter()) - initialization_started
+        ),
+        main_loop_time_seconds=(
+            time.perf_counter() - main_loop_started
+            if main_loop_started is not None
+            else 0.0
+        ),
+        termination_reason=termination_reason,
+        runner_random_state_after_initialization=captured_runner_state,
     )
 
 
@@ -837,15 +1129,14 @@ def _choose_and_build_move(
     mutators: list[Mutator],
     rng: random.Random,
     max_depth: int,
-    ea_n_mutations: int,
     mutate_weight: float,
     order_weight: float,
 ):
     """Pick a local move type by weight and build the child chromosome.
 
-    Returns ``(child, move_keys, move_type, rule_id, chain_names, changes,
-    is_identity)`` or ``None`` when no untried move is realizable. Every key in
-    ``move_keys`` is recorded in ``parent.tried`` regardless of outcome.
+    Returns ``(child, move_key, move_type, rule_id, chain_names, changes,
+    is_identity)`` or ``None`` when no untried move is realizable. The key is
+    recorded in ``parent.tried`` regardless of outcome.
     """
     stackable, saturated, order_moves = _available_local_moves(
         parent, space, prompts_with_rules, mutators, max_depth, order_weight
@@ -862,43 +1153,45 @@ def _choose_and_build_move(
 
     if move_type == "order":
         move_key, child, rid, op = rng.choice(order_moves)
-        return child, (move_key,), "order", rid, [], [f"{op}:{rid}"], False
+        return child, move_key, "order", rid, [], [f"{op}:{rid}"], False
 
-    # Text move: pick uniformly across all genes. A gene with room gets a
-    # 1..ea_n_mutations chain of distinct unused mutators stacked on its CURRENT
-    # allele (chain length 1 = the canonical (1+1) step); a saturated gene (no
-    # room left) is reverted to original instead — an ablation of its stacked
-    # mutations, kept or dropped by the archive's dominance check.
-    candidates = stackable + saturated
-    if not candidates:
-        return None
-    rid = rng.choice(candidates)
-    if rid in saturated:
-        child = parent.with_reverted(rid)
-        move_key = ("rev", rid)
-        return child, (move_key,), "reverse", rid, [], [f"reverted {rid} (saturated)"], False
-    avail = _untried_mutators(parent, rid, mutators)
-    depth = parent.gene_depth(rid)
-    room = max(1, min(ea_n_mutations, max_depth - depth, len(avail)))
-    chosen = rng.sample(avail, rng.randint(1, room))
-    new_text, names, changes = _apply_chain(chosen, space.allele(parent, rid))
-    is_identity = new_text == space.allele(parent, rid)
-    child = parent if is_identity else parent.with_gene_chain(rid, new_text, names)
-    move_keys = tuple(("mut", rid, name) for name in names)
-    return child, move_keys, "mutate", rid, names, changes, is_identity
-
-
-def _apply_chain(mutators: list[Mutator], text: str) -> tuple[str, list[str], list[str]]:
-    """Apply mutators in order (cumulative). Returns (new_text, names, changes)."""
-    cur = text
-    names: list[str] = []
-    changes: list[str] = []
-    for m in mutators:
-        res = m.mutate(cur)
-        cur = res.mutated
-        names.append(m.name)
-        changes.extend(res.changes)
-    return cur, names, changes
+    stackable_set = set(stackable)
+    saturated_set = set(saturated)
+    for rid in rng.sample(space.all_rule_ids, len(space.all_rule_ids)):
+        if rid in saturated_set:
+            child = parent.with_reverted(rid)
+            return (
+                child,
+                ("rev", rid),
+                "revert",
+                rid,
+                [],
+                [f"reverted {rid} (saturated)"],
+                False,
+            )
+        if rid not in stackable_set:
+            continue
+        available = _untried_mutators(parent, rid, mutators)
+        if not available:
+            continue
+        chosen = rng.choice(available)
+        result = chosen.mutate(space.allele(parent, rid))
+        is_identity = result.mutated == space.allele(parent, rid)
+        child = (
+            parent
+            if is_identity
+            else parent.with_gene(rid, result.mutated, chosen.name)
+        )
+        return (
+            child,
+            ("mut", rid, chosen.name),
+            "mutate",
+            rid,
+            [chosen.name],
+            list(result.changes),
+            is_identity,
+        )
+    return None
 
 
 def _available_local_moves(
@@ -913,19 +1206,21 @@ def _available_local_moves(
 
     Order changes that do not alter any prompt rendering are excluded before
     sampling. Text mutators are tracked atomically per parent/rule, so rejected
-    or identity-producing operators are not immediately repeated; restart
-    clears the parent's set and deliberately makes them available again.
+    or identity-producing operators are not immediately repeated on that parent.
     """
-    stackable = [
-        rid for rid in space.all_rule_ids
-        if parent.gene_depth(rid) < max_depth
-        and _untried_mutators(parent, rid, mutators)
-    ]
-    stackable_set = set(stackable)
-    saturated = [
-        rid for rid in sorted(parent.mutated_rule_ids())
-        if rid not in stackable_set and ("rev", rid) not in parent.tried
-    ]
+    stackable: list[str] = []
+    saturated: list[str] = []
+    for rid in space.all_rule_ids:
+        lineage_saturated = (
+            parent.gene_depth(rid) >= max_depth
+            or not _unused_mutators(parent, rid, mutators)
+        )
+        if lineage_saturated:
+            if rid in parent.genes and ("rev", rid) not in parent.tried:
+                saturated.append(rid)
+            continue
+        if _untried_mutators(parent, rid, mutators):
+            stackable.append(rid)
 
     order_moves: list[tuple[tuple, RuleSetChromosome, str, str]] = []
     if order_weight > 0:
@@ -979,7 +1274,7 @@ def run_random_search(
     mutators: list[Mutator],
     evaluate_chromosome_fn: EvaluateChromosomeFn,
     iteration_result_factory: Callable[..., "IterationResult"],
-    max_iterations: int,
+    main_loop_budget: int,
     max_changes: int,
     max_depth: int,
     order_move_prob: float = 0.1,
@@ -990,22 +1285,34 @@ def run_random_search(
     save_move_fn: Callable[..., None] | None = None,
     validate_move_fn: Callable[..., dict] | None = None,
     should_stop_fn: Callable[[], bool] | None = None,
+    precomputed_initialization: list[PrecomputedInitializationCandidate] | None = None,
+    runner_random_state_after_initialization: object | None = None,
+    load_precomputed_evidence_fn: Callable[[int], None] | None = None,
+    restore_precomputed_state_fn: Callable[[], None] | None = None,
 ) -> ChromosomeRunResult:
-    """i.i.d. random search over full rule sets (the corrected baseline,
-    2026-07-10).
+    """Run random search with the same five-candidate prefix as the EA.
 
-    Every budgeted iteration evaluates an INDEPENDENT chromosome — a fresh copy of the
-    origin with 1..``max_changes`` random changes stacked on it
-    (:func:`build_random_chromosome`) — evaluates the whole rule set, and
-    records it. No parent carry-forward, no archive, no acceptance, no revert
-    operator. The reported best is the best-of-budget sample, with the origin
-    as floor (doing nothing is always available). Identity proposals are logged
-    and retried without consuming an evaluation.
+    The five initialization evaluations are outside ``main_loop_budget`` but
+    remain part of the total evaluation count. Every candidate, including the
+    subsequent main-loop candidates, is an independent origin-based sample.
     """
+    if main_loop_budget < 0:
+        raise ValueError(f"main_loop_budget must be >= 0, got {main_loop_budget}")
     if identity_retry_limit < 1:
         raise ValueError(
             f"identity_retry_limit must be >= 1, got {identity_retry_limit}"
         )
+    if precomputed_initialization is not None and len(precomputed_initialization) != (
+        INITIALIZATION_SAMPLES
+    ):
+        raise ValueError(
+            f"precomputed initialization must contain {INITIALIZATION_SAMPLES} candidates"
+        )
+    if (
+        precomputed_initialization is not None
+        and runner_random_state_after_initialization is None
+    ):
+        raise ValueError("precomputed initialization lacks the runner random state")
     rng = random.Random(seed)
 
     iterations: list["IterationResult"] = []
@@ -1015,18 +1322,136 @@ def run_random_search(
     best = origin
     best_fitness = origin.fitness
     rate_limit_hit = False
+    termination_reason = "evaluation_budget_complete"
 
     evaluated_count = 0
     attempt_count = 0
     identity_retries = 0
     last_completed = 0
-    while evaluated_count < max_iterations:
+    initialization_started = time.perf_counter()
+    initialization_finished: float | None = None
+    main_loop_started: float | None = None
+    total_evaluation_budget = INITIALIZATION_SAMPLES + main_loop_budget
+    captured_runner_state: object | None = None
+
+    if precomputed_initialization is not None:
+        for index, prepared in enumerate(precomputed_initialization, 1):
+            child = deepcopy(prepared.child)
+            space.stamp(child)
+            if child.cid != prepared.child.cid:
+                raise ValueError(
+                    f"precomputed initialization candidate {index} content hash differs"
+                )
+            child.f1, child.f2, child.f3 = _objectives(prepared.fitness)
+            child.fitness = prepared.fitness
+            child.evaluation_index = index
+            f1_advance = child.f1 > 0.0
+            for name in prepared.attempted_mutators:
+                mutator_stats[name]["applications"] += 1
+                if f1_advance:
+                    mutator_stats[name]["applications_f1_advancing"] += 1
+            if (
+                child.f1 > best.f1
+                or (
+                    abs(child.f1 - best.f1) <= 1e-9
+                    and (
+                        child.invalid_prompt_count,
+                        -(child.f2 + child.f3),
+                    )
+                    < (
+                        best.invalid_prompt_count,
+                        -(best.f2 + best.f3),
+                    )
+                )
+            ):
+                best, best_fitness = child, prepared.fitness
+            if load_precomputed_evidence_fn is not None:
+                load_precomputed_evidence_fn(index)
+            if save_move_fn is not None:
+                save_move_fn(
+                    evaluation_index=index,
+                    child=child,
+                    space=space,
+                    move_type="initialization_random",
+                    rule_id=None,
+                    chain_names=prepared.effective_mutators,
+                    changes=prepared.changes,
+                    validation_metadata=prepared.validation_metadata,
+                    accepted=True,
+                )
+            iterations.append(
+                iteration_result_factory(
+                    iteration=index - 1,
+                    rule_text=f"[random: {child.cid}]",
+                    aggregated_fitness=prepared.fitness,
+                    individual_results=[],
+                    is_improvement=True,
+                    mutation_changes=prepared.changes,
+                    validation_metadata=prepared.validation_metadata,
+                )
+            )
+            _emit_record(
+                iter_record_fn,
+                index,
+                "random_search",
+                origin,
+                child=child,
+                move_type="initialization_random",
+                rule_id=None,
+                chain_names=prepared.effective_mutators,
+                agg=prepared.fitness,
+                accepted=True,
+                identity=False,
+                gene_depth=max(
+                    (child.gene_depth(rid) for rid in child.mutated_rule_ids()),
+                    default=0,
+                ),
+                n_reused=len(prompts_with_rules),
+                n_rerun=0,
+                phase="initialization",
+                n_changes=prepared.n_requested_changes,
+                attempt=index,
+                attempt_in_iter=1,
+                budget_consumed=True,
+                attempted_operators=prepared.attempted_operators,
+                attempted_mutators=prepared.attempted_mutators,
+                n_attempted_changes=prepared.n_attempted_changes,
+                n_effective_changes=prepared.n_effective_changes,
+                main_loop_iteration=None,
+                initialization_source="precomputed_bundle",
+            )
+        evaluated_count = INITIALIZATION_SAMPLES
+        last_completed = INITIALIZATION_SAMPLES
+        initialization_finished = time.perf_counter()
+        main_loop_started = initialization_finished
+        rng.setstate(runner_random_state_after_initialization)
+        if restore_precomputed_state_fn is not None:
+            restore_precomputed_state_fn()
+        captured_runner_state = rng.getstate()
+
+    while evaluated_count < total_evaluation_budget:
         if should_stop_fn is not None and should_stop_fn():
-            log(f"\n⏹️  Graceful stop (SLURM pre-timeout) — stopping after "
-                f"{last_completed}/{max_iterations} iterations")
+            log(
+                "\n⏹️  Graceful stop (SLURM pre-timeout) — stopping after "
+                f"{last_completed}/{total_evaluation_budget} evaluations"
+            )
+            termination_reason = "wall_time_limit"
             break
 
-        budget_iter = evaluated_count + 1
+        evaluation_index = evaluated_count + 1
+        phase = (
+            "initialization"
+            if evaluation_index <= INITIALIZATION_SAMPLES
+            else "random"
+        )
+        main_loop_iteration = (
+            None
+            if phase == "initialization"
+            else evaluation_index - INITIALIZATION_SAMPLES
+        )
+        if phase == "random" and main_loop_started is None:
+            initialization_finished = time.perf_counter()
+            main_loop_started = initialization_finished
         attempt_count += 1
         attempt_in_iter = identity_retries + 1
 
@@ -1044,7 +1469,9 @@ def run_random_search(
             identity_retries += 1
             # effective>0 with an identity render means the draws cancelled out
             # (e.g. a mutator reproduced the original text), not that all were no-ops.
-            log(f"\n⏭️  Iteration {budget_iter}/{max_iterations} [random] — identity: "
+            log(
+                f"\n⏭️  Evaluation {evaluation_index}/{total_evaluation_budget} "
+                f"[{phase}] — identity: "
                 + _sample_detail(n_changes, sample.n_effective_changes,
                                  len(child.mutated_rule_ids()),
                                  _count_order_ops(sample.attempted_operators))
@@ -1052,26 +1479,33 @@ def run_random_search(
                   f"retry {identity_retries}/{identity_retry_limit}")
             for name in sample.attempted_mutators:
                 mutator_stats[name]["applications"] += 1
-            _emit_record(iter_record_fn, budget_iter, "random_search", parent=origin, child=origin,
+            _emit_record(iter_record_fn, evaluation_index, "random_search",
+                         parent=origin, child=origin,
                          move_type="sample", rule_id=None, chain_names=chain_names, agg=None,
                          accepted=False, identity=True, gene_depth=0,
-                         n_reused=0, n_rerun=0, phase="random", n_changes=n_changes,
+                         n_reused=0, n_rerun=0, phase=phase, n_changes=n_changes,
                          attempt=attempt_count, attempt_in_iter=attempt_in_iter,
                          budget_consumed=False,
                          attempted_operators=sample.attempted_operators,
                          attempted_mutators=sample.attempted_mutators,
                          n_attempted_changes=sample.n_attempted_changes,
-                         n_effective_changes=sample.n_effective_changes)
+                         n_effective_changes=sample.n_effective_changes,
+                         main_loop_iteration=main_loop_iteration,
+                         elapsed_main_loop_seconds=(
+                             time.perf_counter() - main_loop_started
+                             if main_loop_started is not None
+                             else None
+                         ))
             if identity_retries >= identity_retry_limit:
                 raise IdentityRetryLimitExceeded(
                     "random-search identity retry limit exceeded for evaluation "
-                    f"{budget_iter} after {identity_retries} attempts"
+                    f"{evaluation_index} after {identity_retries} attempts"
                 )
             continue
 
         identity_retries = 0
         # ---- header → validation → evaluate ---------------------------------
-        log(f"\n🎲 Iteration {budget_iter}/{max_iterations} [random] — "
+        log(f"\n🎲 Evaluation {evaluation_index}/{total_evaluation_budget} [{phase}] — "
             + _sample_detail(n_changes, sample.n_effective_changes,
                              len(child.mutated_rule_ids()),
                              _count_order_ops(sample.attempted_operators)))
@@ -1080,21 +1514,26 @@ def run_random_search(
         validation_metadata: dict = _validate_genes(validate_move_fn, space, origin, child)
         try:
             agg, _results, n_reused, n_rerun = evaluate_chromosome_fn(
-                child, f"rand_iter{budget_iter:04d}"
+                child, f"evaluation_{evaluation_index:04d}"
             )
         except WallTimeStop:
-            log(f"\n⏹️  Pre-timeout mid-eval — stopping after {last_completed} iterations")
+            log(
+                f"\n⏹️  Pre-timeout mid-eval — stopping after "
+                f"{last_completed} evaluations"
+            )
+            termination_reason = "wall_time_limit"
             break
         except Exception as e:  # noqa: BLE001
             if "rate_limit" in str(e).lower() or "429" in str(e) or "413" in str(e):
-                log(f"\n⚠️  Rate limit hit at random iteration {budget_iter}: {e}")
+                log(f"\n⚠️  Rate limit hit at random evaluation {evaluation_index}: {e}")
                 rate_limit_hit = True
+                termination_reason = "rate_limit"
                 break
             raise
 
         child.f1, child.f2, child.f3 = _objectives(agg)
         child.fitness = agg
-        child.evaluation_iteration = budget_iter
+        child.evaluation_index = evaluation_index
 
         f1_advance = child.f1 > 0.0
         for name in sample.attempted_mutators:
@@ -1119,7 +1558,8 @@ def run_random_search(
             best, best_fitness = child, agg
 
         if save_move_fn is not None:
-            save_move_fn(iteration=budget_iter, child=child, space=space, move_type="sample",
+            save_move_fn(evaluation_index=evaluation_index, child=child, space=space,
+                         move_type="sample",
                          rule_id=None, chain_names=chain_names, changes=changes,
                          validation_metadata=validation_metadata, accepted=True)
 
@@ -1128,20 +1568,33 @@ def run_random_search(
             individual_results=[], is_improvement=True, mutation_changes=changes,
             validation_metadata=validation_metadata,
         ))
-        _emit_record(iter_record_fn, budget_iter, "random_search", parent=origin, child=child,
+        _emit_record(iter_record_fn, evaluation_index, "random_search",
+                     parent=origin, child=child,
                      move_type="sample", rule_id=None, chain_names=chain_names, agg=agg,
                      accepted=True, identity=False,
                      gene_depth=max((child.gene_depth(r) for r in child.mutated_rule_ids()),
                                     default=0),
                      n_reused=n_reused, n_rerun=n_rerun, validation_metadata=validation_metadata,
-                     phase="random", n_changes=n_changes, attempt=attempt_count,
+                     phase=phase, n_changes=n_changes, attempt=attempt_count,
                      attempt_in_iter=attempt_in_iter, budget_consumed=True,
                      attempted_operators=sample.attempted_operators,
                      attempted_mutators=sample.attempted_mutators,
                      n_attempted_changes=sample.n_attempted_changes,
-                     n_effective_changes=sample.n_effective_changes)
+                     n_effective_changes=sample.n_effective_changes,
+                     main_loop_iteration=main_loop_iteration,
+                     elapsed_main_loop_seconds=(
+                         time.perf_counter() - main_loop_started
+                         if main_loop_started is not None
+                         else None
+                     ))
         evaluated_count += 1
         last_completed = evaluated_count
+        if (
+            evaluated_count == INITIALIZATION_SAMPLES
+            and initialization_finished is None
+        ):
+            initialization_finished = time.perf_counter()
+            captured_runner_state = rng.getstate()
 
     # best includes the origin floor (f1 >= 0): if no sample beat baseline,
     # report the origin.
@@ -1156,7 +1609,18 @@ def run_random_search(
         n_accepted=len(iterations),
         rate_limit_hit=rate_limit_hit,
         mutator_stats=mutator_stats,
-        restart_reason_counts={},
+        initialization_evaluations=min(evaluated_count, INITIALIZATION_SAMPLES),
+        main_loop_evaluations=max(0, evaluated_count - INITIALIZATION_SAMPLES),
+        initialization_time_seconds=(
+            (initialization_finished or time.perf_counter()) - initialization_started
+        ),
+        main_loop_time_seconds=(
+            time.perf_counter() - main_loop_started
+            if main_loop_started is not None
+            else 0.0
+        ),
+        termination_reason=termination_reason,
+        runner_random_state_after_initialization=captured_runner_state,
     )
 
 
@@ -1167,7 +1631,7 @@ def run_random_search(
 def _emit_record(
     iter_record_fn, iteration, strategy, parent, child, move_type, rule_id, chain_names,
     agg, accepted, identity, gene_depth, n_reused, n_rerun,
-    eligible: int = 0, restarts: list | None = None, parent_f1: float | None = None,
+    eligible: int = 0, parent_f1: float | None = None,
     validation_metadata: dict | None = None, phase: str = "ea",
     n_changes: int | None = None,
     attempt: int | None = None,
@@ -1177,6 +1641,9 @@ def _emit_record(
     attempted_mutators: list[str] | None = None,
     n_attempted_changes: int | None = None,
     n_effective_changes: int | None = None,
+    main_loop_iteration: int | None = None,
+    elapsed_main_loop_seconds: float | None = None,
+    initialization_source: str | None = None,
 ):
     if iter_record_fn is None:
         return
@@ -1189,13 +1656,16 @@ def _emit_record(
         fidelity = parsimony = None
     p_f1 = parent_f1 if parent_f1 is not None else (parent.f1 if parent is not None else None)
     rec = {
-        "iter": iteration,
-        "attempt": attempt if attempt is not None else iteration,
-        "attempt_in_iter": attempt_in_iter,
-        "budget_consumed": budget_consumed,
+        "evaluation_index": iteration,
+        "main_loop_iteration": main_loop_iteration,
+        "elapsed_main_loop_seconds": elapsed_main_loop_seconds,
+        "attempt_index": attempt if attempt is not None else iteration,
+        "attempt_in_evaluation": attempt_in_iter,
+        "evaluation_consumed": budget_consumed,
         "timestamp": _utcnow(),
         "strategy": strategy,
         "phase": phase,
+        "initialization_source": initialization_source,
         "chromosome_id": child.cid if child is not None else None,
         "parent_chromosome_id": (parent.cid if parent is not None else None),
         "move_type": move_type,
@@ -1218,6 +1688,15 @@ def _emit_record(
         "security_neutral": bool(f1 is not None and abs(f1) <= 1e-9),
         "rule_fidelity": fidelity,
         "parsimony": parsimony,
+        "total_fitness": agg.total_fitness if agg is not None else None,
+        "mean_fitness": agg.mean_fitness if agg is not None else None,
+        "max_fitness": agg.max_fitness if agg is not None else None,
+        "num_prompts": agg.num_prompts if agg is not None else None,
+        "num_vulnerable": agg.num_vulnerable if agg is not None else None,
+        "num_valid_prompts": agg.num_valid_prompts if agg is not None else None,
+        "num_prompts_affected": (
+            agg.num_prompts_affected if agg is not None else None
+        ),
         "num_invalid_prompts": agg.num_invalid_prompts if agg is not None else None,
         "failure_counts": agg.failure_counts if agg is not None else {},
         "total_raw_findings": agg.total_raw_count if agg is not None else None,
@@ -1231,20 +1710,18 @@ def _emit_record(
         "selection_meta": (
             {} if strategy == "random_search" else {
                 "parent_f1": p_f1,
-                "n_eligible_rules": eligible,
-                "restarts_this_iter": restarts or [],
+                "n_rules_in_space": eligible,
             }
         ),
     }
     iter_record_fn(rec)
 
 
-def _log_ea_summary(log, archive, mutator_stats, restart_reason_counts, best):
+def _log_ea_summary(log, archive, mutator_stats, best):
     sep = "═" * 80
     log(f"\n{sep}\n📊  EA chromosome-archive summary\n{sep}")
     log(f"   front_size={len(archive)}  inserts={archive.n_inserts}  "
-        f"rejected={archive.n_rejected} (dup={archive.n_dup_rejected})  "
-        f"restarts={len(archive.restart_history)}")
+        f"rejected={archive.n_rejected} (dup={archive.n_dup_rejected})")
     log(f"   best: f1={best.f1:+.2f} f2={best.f2:.3f} f3={best.f3:.3f} "
         f"mutated={sorted(best.mutated_rule_ids())} cid={best.cid}")
     log("\n🧬  Mutator effectiveness (local moves: last-mutator credit; "

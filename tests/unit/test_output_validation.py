@@ -25,6 +25,17 @@ def test_primary_python_block_is_scanned_and_other_language_block_is_recorded() 
     assert result.ignored_supplementary_languages == ["html"]
 
 
+def test_single_target_block_is_selected_even_when_supplementary_block_comes_first() -> None:
+    result = _validate(
+        "```html\n<h1>Hello</h1>\n```\n"
+        "```python\nprint('safe')\n```"
+    )
+
+    assert result.is_valid
+    assert result.source_code == "print('safe')"
+    assert result.ignored_supplementary_languages == ["html"]
+
+
 @pytest.mark.parametrize(
     ("output", "status"),
     [
@@ -73,17 +84,64 @@ def test_explanatory_text_around_a_valid_fenced_artifact_is_observational() -> N
 
 
 @pytest.mark.parametrize(
-    "code",
+    ("code", "normalization"),
     [
-        "public class Demo { public static void main(String[] args) { System.out.println(1); } }",
-        "public String value() { return \"ok\"; }",
-        "System.out.println(\"ok\");",
+        (
+            "public class Demo { public static void main(String[] args) { System.out.println(1); } }",
+            "none",
+        ),
+        ("public String value() { return \"ok\"; }", "java_class_wrapper"),
+        ("System.out.println(\"ok\");", "java_method_wrapper"),
     ],
 )
-def test_java_tree_sitter_accepts_units_members_and_snippets(code: str) -> None:
+def test_java_tree_sitter_accepts_units_members_and_snippets(
+    code: str,
+    normalization: str,
+) -> None:
     result = _validate(code, expected="java")
     assert result.is_valid
     assert result.syntax_validation_method == "java_tree_sitter"
+    assert result.normalization == normalization
+    assert result.source_code == code
+    if normalization == "none":
+        assert result.code == code
+        assert result.analysis_line_map == [1]
+    else:
+        assert "class __SemgrepGenerated__" in result.code
+        assert len(result.analysis_line_map) == len(result.code.splitlines())
+
+
+def test_java_wrapper_keeps_imports_and_maps_body_lines_to_the_source() -> None:
+    result = _validate(
+        "import java.io.IOException;\n"
+        "public String value() throws IOException {\n"
+        "    return \"ok\";\n"
+        "}",
+        expected="java",
+    )
+
+    assert result.is_valid
+    assert result.normalization == "java_class_wrapper"
+    assert result.code.splitlines()[0] == "import java.io.IOException;"
+    assert result.analysis_line_map == [1, None, 2, 3, 4, None]
+
+
+def test_java_wrapper_accepts_blank_and_comment_lines_between_imports() -> None:
+    result = _validate(
+        "import java.io.IOException;\n"
+        "\n"
+        "// helper import\n"
+        "import java.util.List;\n"
+        "public String value() throws IOException {\n"
+        "    return List.of(\"ok\").get(0);\n"
+        "}",
+        expected="java",
+    )
+
+    assert result.is_valid
+    assert result.normalization == "java_class_wrapper"
+    assert result.code.splitlines()[3] == "import java.util.List;"
+    assert result.analysis_line_map[:5] == [1, 2, 3, 4, None]
 
 
 @pytest.mark.parametrize(
@@ -104,6 +162,16 @@ def test_map_language_is_authoritative_for_unfenced_drift() -> None:
     assert result.status == "language_drift"
     assert result.expected_language == "python"
     assert result.detected_language == "javascript"
+
+
+def test_multiple_target_blocks_are_counted_but_never_combined() -> None:
+    output = "```python\nprint('first')\n```\n```python\nprint('second')\n```"
+    result = _validate(output)
+
+    assert result.status == "multiple_target_blocks"
+    assert result.target_block_count == 2
+    assert result.source_code == "print('first')"
+    assert result.code == result.source_code
 
 
 def test_unsupported_study_language_fails_configuration() -> None:

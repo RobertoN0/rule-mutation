@@ -3,34 +3,41 @@
 """
 Main experiment runner: rule-set search (EA / random search) over a retrieval map.
 
-Prompts come exclusively from a retrieval map (retrieval_map_*.json / rule_maps/).
-Baseline Semgrep scores are computed live at iteration 0 — no pre-computed
-values are loaded. Direction: REPAIR by default (--objective-direction minimize;
-positive f1 = fewer vulnerabilities than baseline).
+Prompts come exclusively from a retrieval map. Origin-baseline Semgrep scores
+are computed live before the search candidates. Final matched runs may restore
+their shared five-candidate initialization from a strictly keyed bundle.
+Direction is repair by default (``--objective-direction minimize``): positive
+f1 means fewer findings than the origin baseline.
 
 Usage:
     # Smoke: 5 cases, mock backend, no API calls
-    python scripts/experiments/run_experiment.py --n-cases 5 --dry-run
+    python scripts/experiments/run_experiment.py \
+        --n-cases 5 --dry-run --allow-unqualified-map
 
     # Local API smoke (Claude backend; needs ANTHROPIC_API_KEY in .env)
     python scripts/experiments/run_experiment.py \
-        --backend claude --n-cases 10 --iterations 15 \
+        --backend claude --n-cases 10 --main-loop-budget 15 \
+        --allow-unqualified-map \
         --languages python --mutators verb_weakening synonym_replacement \
         --enable-validation
 
     # Full run shape (DelftBlue submits this via scripts/slurm/slurm_ea_qwen32b.sh)
     python scripts/experiments/run_experiment.py \
-        --rules-map rule_maps/final_consensus_map_qwen.json \
+        --rules-map rule_maps/qualified/final_search_map_qwen_python.json \
         --model Qwen/Qwen2.5-Coder-32B-Instruct \
-        --optimizer ea --iterations 200 --enable-validation
+        --optimizer ea --main-loop-budget 100000 --enable-validation \
+        --prompt-profile "$PROMPT_PROFILE"
 """
 
 from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.metadata
 import json
 import os
+import re
+import subprocess
 import sys
 import warnings
 from pathlib import Path
@@ -82,6 +89,12 @@ from src.mutation import (
 from src.optimizer import ExperimentEngine, SearchConfig
 from src.optimizer.engine import EvaluationInfrastructureError
 from src.evaluation.output_validation import BaselineOutputError
+from src.evaluation.generation_contract import (
+    DEFAULT_PROMPT_PROFILE,
+    MAX_OUTPUT_TOKENS,
+    PROMPT_PROFILES,
+    prompt_contract_sha256,
+)
 from src.evaluation import (
     load_rule_mapping,
     create_rule_loader,
@@ -99,15 +112,23 @@ from src.evaluation.semgrep_runner import (
 # CONFIGURATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# Output schema version written to run_config.json. rerun_from_config and the
-# analysis layer key off it; bump it whenever the run_config arg set or the
-# iterations.jsonl record shape changes.
-SCHEMA_VERSION = 5
-
 # Default paths (relative to project root)
 DEFAULT_RULES_MAP = (
     PROJECT_ROOT / "rule_maps" / "final_consensus_map_qwen.json"
 )
+
+
+def _git_commit_sha() -> str | None:
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            cwd=PROJECT_ROOT,
+            stderr=subprocess.DEVNULL,
+        ).decode().strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
 RULES_DIR = PROJECT_ROOT / "project-codeguard" / "skills" / "software-security" / "rules"
 
 # Mutators that issue LLM calls (need a real backend, and cost money on APIs).
@@ -188,16 +209,54 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "order; 'random' shuffles with --seed before selecting N (default: first)"
         ),
     )
+    parser.add_argument(
+        "--allow-unqualified-map",
+        action="store_true",
+        help=(
+            "Allow a non-frozen retrieval map for a non-final smoke/diagnostic "
+            "search. Real final searches reject such maps by default."
+        ),
+    )
     # ----- search budget + direction ------------------------------------------
     parser.add_argument(
-        "--iterations", "-i",
+        "--main-loop-budget", "-i",
         type=int,
         default=5,
-        help="Candidate-evaluation budget (default: 5). Identity/no-op proposals "
-             "are logged and retried without advancing the index; EA "
-             "init/injection evaluations count against this budget too. "
-             "Upper-bound cap: set high for time-bounded "
-             "SLURM runs and let the wall-time signal (SIGUSR1) stop the run."
+        help=(
+            "Candidate evaluations after the shared five-candidate "
+            "initialization (default: 5; total evaluations = 5 + this value). "
+            "Identity/no-op proposals do not consume an evaluation. Set this "
+            "ceiling high for time-bounded SLURM runs."
+        ),
+    )
+    parser.add_argument(
+        "--initialization-bundle",
+        type=Path,
+        default=None,
+        help=(
+            "Reuse a strictly keyed bundle containing the shared five evaluated "
+            "initial candidates. The run is rejected if any provenance or "
+            "population field differs."
+        ),
+    )
+    parser.add_argument(
+        "--wall-time-budget-seconds",
+        type=int,
+        default=(
+            int(os.environ["TIME_BUDGET_SECONDS"])
+            if os.getenv("TIME_BUDGET_SECONDS")
+            else None
+        ),
+        help=(
+            "Declared scheduler allocation used for the primary time-budget "
+            "comparison. Final runs use 86400 seconds."
+        ),
+    )
+    parser.add_argument(
+        "--pretimeout-lead-seconds",
+        type=int,
+        default=int(os.getenv("PRETIMEOUT_LEAD_SECONDS", "300")),
+        help="Seconds before scheduler termination at which SIGUSR1 is delivered.",
     )
     parser.add_argument(
         "--objective-direction",
@@ -264,6 +323,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--prompt-profile",
+        choices=sorted(PROMPT_PROFILES),
+        default=DEFAULT_PROMPT_PROFILE,
+        help="Qualified code-generation system-prompt profile.",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Test pipeline without API calls (mock backend)"
@@ -286,10 +351,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         choices=["ea", "random_search"],
         help=(
             "Optimizer family (default: ea). "
-            "ea = (1+1) EA over a full-chromosome Pareto archive, with random "
-            "initialization + periodic random injection; "
+            "ea = archive-based EA over full rule-set chromosomes, with five "
+            "shared random initial candidates and periodic random injection; "
             "random_search = i.i.d. random sampler (independent chromosome per "
-            "iteration, best-of-budget, no archive)."
+            "evaluation, best-of-budget, no archive)."
         ),
     )
     parser.add_argument(
@@ -297,15 +362,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=int,
         default=6,
         help="EA only: max Pareto archive size (default: 6, sweep-tunable).",
-    )
-    parser.add_argument(
-        "--restart-h",
-        type=int,
-        default=8,
-        help=(
-            "EA only: consecutive non-inserts before stagnation restart "
-            "(default: 8, sweep-tunable)."
-        ),
     )
     parser.add_argument(
         "--max-depth",
@@ -328,43 +384,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "--ea-n-mutations",
-        type=int,
-        default=1,
-        help=(
-            "EA local move: max mutators stacked on the chosen gene per move "
-            "(default: 1 = the canonical (1+1) small step; >1 samples a 1..n "
-            "chain — ablation knob)."
-        ),
-    )
-    parser.add_argument(
-        "--ea-init-samples",
-        type=int,
-        default=10,
-        help=(
-            "EA: number of initial iterations that sample independent random "
-            "chromosomes from the origin and offer them to the archive "
-            "(population-style seeding; default: 10)."
-        ),
-    )
-    parser.add_argument(
         "--ea-injection-every",
         type=int,
         default=10,
         help=(
-            "EA: after init, every N-th iteration injects one origin-based "
+            "EA: every N-th main-loop evaluation injects one origin-based "
             "random chromosome instead of a parent-based move (diversity "
             "maintenance; default: 10; 0 = off)."
-        ),
-    )
-    parser.add_argument(
-        "--ea-move",
-        default="local",
-        choices=["local", "random_builder"],
-        help=(
-            "EA move for post-init iterations: 'local' (default) mutates ONE "
-            "gene of the parent; 'random_builder' applies the random sampler "
-            "to the archive parent (selection-only ablation)."
         ),
     )
     parser.add_argument(
@@ -375,17 +401,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "Probability of a rule-order move: per EA local move AND per change "
             "inside the random sampler, so both arms share one operator pool "
             "(default: 0.1)."
-        ),
-    )
-    parser.add_argument(
-        "--ea-origin-parent",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help=(
-            "EA only: whether the origin is a sampleable parent for local moves "
-            "(default: on). On seeds minimal parsimony-1 single-rule lineages any "
-            "time; --no-ea-origin-parent restricts local moves to front members "
-            "(the origin still anchors dominance and best())."
         ),
     )
     # ----- validation -----------------------------------------------------------
@@ -459,25 +474,25 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "--enable-validation is required for real runs: the f2 rule-fidelity "
             "objective is SBERT-based. Only --dry-run (mock backend) may omit it."
         )
-    if args.iterations < 0:
-        parser.error("--iterations must be >= 0")
+    if args.main_loop_budget < 0:
+        parser.error("--main-loop-budget must be >= 0")
+    if (
+        args.wall_time_budget_seconds is not None
+        and args.wall_time_budget_seconds < 1
+    ):
+        parser.error("--wall-time-budget-seconds must be >= 1")
+    if args.pretimeout_lead_seconds < 1:
+        parser.error("--pretimeout-lead-seconds must be >= 1")
     if args.archive_cap < 1:
         parser.error("--archive-cap must be >= 1")
-    if args.restart_h < 1:
-        parser.error("--restart-h must be >= 1")
     if args.max_depth < 1:
         parser.error("--max-depth must be >= 1")
     if args.random_max_changes < 1:
         parser.error("--random-max-changes must be >= 1")
-    if args.ea_n_mutations < 1:
-        parser.error("--ea-n-mutations must be >= 1")
-    if args.ea_init_samples < 0:
-        parser.error("--ea-init-samples must be >= 0")
     if args.ea_injection_every < 0:
         parser.error("--ea-injection-every must be >= 0")
     if not 0.0 <= args.order_move_weight <= 1.0:
         parser.error("--order-move-weight must be between 0 and 1")
-
     if args.model is None:
         args.model = BACKEND_DEFAULT_MODELS[args.backend]
 
@@ -596,6 +611,7 @@ def load_prompts_with_rules(
             metadata={
                 "test_case_id": str(m.index),
                 "mapping_index": m.index,
+                "prompt_hash": m.prompt_hash,
                 "source": "mapping_only",
             },
         )
@@ -657,7 +673,7 @@ def create_backend(args: argparse.Namespace):
         config = LLMConfig(
             model=args.model,
             temperature=args.temperature,
-            max_tokens=4096,
+            max_tokens=MAX_OUTPUT_TOKENS,
             extra={
                 "quantization": args.quantization,
                 "bnb_4bit_compute_dtype": args.bnb_compute_dtype,
@@ -689,7 +705,7 @@ def create_backend(args: argparse.Namespace):
             model=args.model,
             api_key=api_key,
             temperature=args.temperature,
-            max_tokens=4096,
+            max_tokens=MAX_OUTPUT_TOKENS,
         )
         try:
             backend = ClaudeBackend(config)
@@ -712,7 +728,7 @@ def create_backend(args: argparse.Namespace):
         model=args.model,
         api_key=api_key,
         temperature=args.temperature,
-        max_tokens=4096,
+        max_tokens=MAX_OUTPUT_TOKENS,
     )
     try:
         backend = OpenAIBackend(config)
@@ -806,7 +822,7 @@ def create_validator(args: argparse.Namespace, backend) -> MutationQualityValida
 def build_search_config(args: argparse.Namespace) -> SearchConfig:
     """Map CLI args onto the search configuration."""
     return SearchConfig(
-        max_iterations=args.iterations,
+        main_loop_budget=args.main_loop_budget,
         save_intermediate=True,
         output_dir=args.output_dir,
         verbose=True,
@@ -814,16 +830,13 @@ def build_search_config(args: argparse.Namespace) -> SearchConfig:
         enable_eval_cache=not args.no_eval_cache,
         optimizer=args.optimizer,
         archive_cap=args.archive_cap,
-        restart_h=args.restart_h,
         max_depth=args.max_depth,
         random_max_changes=args.random_max_changes,
-        ea_n_mutations=args.ea_n_mutations,
-        ea_init_samples=args.ea_init_samples,
         ea_injection_every=args.ea_injection_every,
-        ea_move=args.ea_move,
         order_move_weight=args.order_move_weight,
-        ea_origin_parent=args.ea_origin_parent,
         objective_direction=args.objective_direction,
+        prompt_profile=args.prompt_profile,
+        initialization_bundle=args.initialization_bundle,
     )
 
 
@@ -847,16 +860,22 @@ def configure_semgrep_from_args(args: argparse.Namespace) -> dict:
 def print_config_summary(args: argparse.Namespace, config: SearchConfig, n_prompts: int) -> None:
     print("\n⚙️  Search Configuration:")
     print(f"   Test cases: {n_prompts}")
-    print(f"   Evaluation budget: {config.max_iterations}")
+    print(
+        f"   Evaluation budget: 5 initialization + "
+        f"{config.main_loop_budget} main-loop = {5 + config.main_loop_budget} total"
+    )
     print(f"   Direction: {args.objective_direction} "
           f"({'repair — positive f1 = fewer vulns' if args.objective_direction == 'minimize' else 'adversarial'})")
+    print(
+        f"   Prompt profile: {args.prompt_profile} "
+        f"({prompt_contract_sha256(args.prompt_profile)})"
+    )
     if args.optimizer == "ea":
-        print(f"   Optimizer: ea (move={args.ea_move}, chain≤{args.ea_n_mutations}, "
-              f"init={args.ea_init_samples}, inject_every={args.ea_injection_every}, "
-              f"archive_cap={args.archive_cap}, restart_h={args.restart_h}, "
+        print(f"   Optimizer: ea (single local move, "
+              f"init=5, inject_every={args.ea_injection_every}, "
+              f"archive_cap={args.archive_cap}, "
               f"max_depth={args.max_depth}, "
-              f"order_w={args.order_move_weight}, "
-              f"origin_parent={args.ea_origin_parent})")
+              f"order_w={args.order_move_weight})")
     else:
         print(f"   Optimizer: random_search (K={args.random_max_changes}, "
               f"max_depth={args.max_depth}, order_w={args.order_move_weight})")
@@ -871,8 +890,10 @@ def print_results_summary(result, n_prompts: int) -> None:
     print("📊 RESULTS SUMMARY")
     print("=" * 70)
     print(f"Test cases: {n_prompts}")
-    print(f"Iterations run: {len(result.iterations)}")
+    print(f"Evaluations completed: {len(result.iterations)}")
     print(f"Total time: {result.total_time_seconds:.1f}s")
+    print(f"Initialization time: {result.initialization_time_seconds:.1f}s")
+    print(f"Main-loop time: {result.main_loop_time_seconds:.1f}s")
     print(f"LLM calls: {result.total_llm_calls}")
     print(
         f"Tokens: {result.total_input_tokens:,} in + "
@@ -909,38 +930,125 @@ def print_results_summary(result, n_prompts: int) -> None:
     )
 
 
+def _rule_corpus_sha256(prompts_with_rules: list[PromptWithRules]) -> str:
+    originals: dict[str, str] = {}
+    for prompt in prompts_with_rules:
+        for rule_id, text in prompt.individual_rules.items():
+            prior = originals.setdefault(rule_id, text)
+            if prior != text:
+                raise ValueError(f"inconsistent original text for rule {rule_id}")
+    payload = json.dumps(
+        sorted(originals.items()),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _evaluation_population_fingerprint(
+    prompts_with_rules: list[PromptWithRules],
+) -> str:
+    identity = [
+        {
+            "test_case_id": str(
+                prompt.metadata.get("test_case_id", f"case_{index}")
+            ),
+            "analysis_language": prompt.language,
+            "prompt_hash": prompt.metadata.get("prompt_hash")
+            or hashlib.sha256(prompt.prompt.encode("utf-8")).hexdigest(),
+        }
+        for index, prompt in enumerate(prompts_with_rules)
+    ]
+    encoded = json.dumps(
+        identity,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _model_revision(args: argparse.Namespace) -> str | None:
+    if args.dry_run or args.backend != "delftblue":
+        return None
+    from transformers import AutoConfig
+
+    config = AutoConfig.from_pretrained(
+        args.model,
+        local_files_only=True,
+        trust_remote_code=True,
+    )
+    revision = getattr(config, "_commit_hash", None)
+    if re.fullmatch(r"[0-9a-fA-F]{40}", str(revision or "")) is None:
+        raise ValueError(
+            f"could not resolve an exact cached model revision for {args.model}"
+        )
+    return str(revision)
+
+
 def save_run_config(
     args: argparse.Namespace,
     semgrep_config: dict,
     timestamp: str,
     *,
-    n_prompts_evaluated: int,
-) -> None:
+    prompts_with_rules: list[PromptWithRules],
+) -> dict:
     """Write run_config.json — every CLI arg + provenance, the rerun contract."""
-    import subprocess
-    try:
-        git_sha = subprocess.check_output(
-            ["git", "rev-parse", "HEAD"],
-            cwd=PROJECT_ROOT,
-            stderr=subprocess.DEVNULL,
-        ).decode().strip()
-    except Exception:
-        git_sha = None
-
+    git_commit_sha = _git_commit_sha()
+    map_payload = json.loads(args.rules_map.read_text(encoding="utf-8"))
+    map_qualification = map_payload.get("metadata", {}).get("search_qualification")
+    bundle_content_sha256 = None
+    if args.initialization_bundle is not None:
+        bundle_manifest = (
+            args.initialization_bundle / "initialization_bundle.json"
+            if args.initialization_bundle.is_dir()
+            else args.initialization_bundle
+        )
+        bundle_content_sha256 = json.loads(
+            bundle_manifest.read_text(encoding="utf-8")
+        ).get("content_sha256")
+    n_prompts_evaluated = len(prompts_with_rules)
     run_config = {
-        "schema_version": SCHEMA_VERSION,
+        "artifact_type": "search_run_config",
         "argv": sys.argv,
         "args": {
             "backend":                args.backend,
+            "dry_run":                args.dry_run,
             "model":                  args.model,
+            "model_revision":         _model_revision(args),
+            "torch_version":          importlib.metadata.version("torch"),
+            "transformers_version":   importlib.metadata.version("transformers"),
             "quantization":           args.quantization,
             "bnb_compute_dtype":      args.bnb_compute_dtype,
             "temperature":            args.temperature,
+            "prompt_profile":         args.prompt_profile,
+            "prompt_contract_sha256": prompt_contract_sha256(args.prompt_profile),
+            "run_mode":               "search",
+            "allow_unqualified_map":  args.allow_unqualified_map,
             "rules_map":              str(args.rules_map),
             "rules_map_sha256":       hashlib.sha256(args.rules_map.read_bytes()).hexdigest(),
+            "population_fingerprint": (
+                map_qualification.get("qualified_population_fingerprint")
+                if isinstance(map_qualification, dict) else None
+            ),
+            "population_policy": (
+                map_qualification.get("policy")
+                if isinstance(map_qualification, dict) else None
+            ),
+            "population_evidence_status": (
+                map_qualification.get("evidence_status")
+                if isinstance(map_qualification, dict) else None
+            ),
             "n_cases":                n_prompts_evaluated,
+            "evaluation_population_fingerprint": (
+                _evaluation_population_fingerprint(prompts_with_rules)
+            ),
+            "rule_corpus_sha256":      _rule_corpus_sha256(prompts_with_rules),
             "n_cases_requested":      args.n_cases,
-            "iterations":             args.iterations,
+            "initialization_evaluations": 5,
+            "main_loop_budget":       args.main_loop_budget,
+            "total_evaluation_budget": 5 + args.main_loop_budget,
+            "wall_time_budget_seconds": args.wall_time_budget_seconds,
+            "pretimeout_lead_seconds": args.pretimeout_lead_seconds,
             "seed":                   args.seed,
             "selection":              args.selection,
             "languages":              args.languages,
@@ -948,17 +1056,12 @@ def save_run_config(
             "optimizer":              args.optimizer,
             "objective_direction":    args.objective_direction,
             "fitness_strategy":       "raw_count",
-            "max_output_tokens":      4096,
+            "max_output_tokens":      MAX_OUTPUT_TOKENS,
             "archive_cap":            args.archive_cap,
-            "restart_h":              args.restart_h,
             "max_depth":              args.max_depth,
             "random_max_changes":     args.random_max_changes,
-            "ea_n_mutations":         args.ea_n_mutations,
-            "ea_init_samples":        args.ea_init_samples,
             "ea_injection_every":     args.ea_injection_every,
-            "ea_move":                args.ea_move,
             "order_move_weight":      args.order_move_weight,
-            "ea_origin_parent":       args.ea_origin_parent,
             "enable_validation":      args.enable_validation,
             "enable_perplexity":      args.enable_perplexity,
             "enable_eval_cache":      not args.no_eval_cache,
@@ -971,9 +1074,14 @@ def save_run_config(
             "semgrep_rule_file_count": semgrep_config["rule_file_count"],
             "semgrep_rules_source_commit": semgrep_config["rule_source_commit"],
             "output_dir":             str(args.output_dir),
+            "initialization_bundle": (
+                str(args.initialization_bundle.resolve())
+                if args.initialization_bundle is not None else None
+            ),
+            "initialization_bundle_content_sha256": bundle_content_sha256,
         },
         "timestamp": timestamp,
-        "git_sha": git_sha,
+        "git_commit_sha": git_commit_sha,
         "slurm_job_id": os.getenv("SLURM_JOB_ID"),
         "hostname": os.getenv("HOSTNAME") or __import__("socket").gethostname(),
     }
@@ -983,6 +1091,7 @@ def save_run_config(
 
     print("   • run_config.json saved → reproduce with:")
     print(f"       python scripts/experiments/rerun_from_config.py {args.output_dir}")
+    return run_config
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -991,6 +1100,12 @@ def save_run_config(
 
 def main():
     args = parse_args()
+
+    if not args.dry_run and re.fullmatch(
+        r"[0-9a-fA-F]{40}", str(_git_commit_sha() or "")
+    ) is None:
+        print("❌ Error: real search cannot resolve an exact Git commit SHA")
+        return 1
 
     seed_everything(args.seed)
     setup_run_logging(args.output_dir)
@@ -1003,6 +1118,47 @@ def main():
 
     if not args.rules_map.exists():
         print(f"❌ Error: Rules map file not found: {args.rules_map}")
+        sys.exit(1)
+
+    map_payload = json.loads(args.rules_map.read_text(encoding="utf-8"))
+    map_qualification = map_payload.get("metadata", {}).get("search_qualification")
+    frozen_policy = (
+        map_qualification.get("policy") if isinstance(map_qualification, dict) else None
+    )
+    evidence_status = (
+        map_qualification.get("evidence_status")
+        if isinstance(map_qualification, dict) else None
+    )
+    if (
+        not args.dry_run
+        and not args.allow_unqualified_map
+        and (
+            frozen_policy != "frozen_cross_model_temp0_intersection"
+            or evidence_status != "final"
+        )
+    ):
+        print(
+            "❌ Error: final search requires a final frozen cross-model qualified map, " \
+            "safe under temperature-zero code generation (no invalid code generated" \
+            "at baseline). Run run_qualification.py for both models, materialize "
+            "the shared population, or pass --allow-unqualified-map only for an "
+            "explicit non-final smoke."
+        )
+        sys.exit(1)
+    qualified_profile = (
+        map_qualification.get("prompt_profile")
+        if isinstance(map_qualification, dict)
+        else None
+    )
+    if (
+        not args.dry_run
+        and not args.allow_unqualified_map
+        and qualified_profile != args.prompt_profile
+    ):
+        print(
+            "❌ Error: the selected map was not qualified with prompt profile "
+            f"{args.prompt_profile!r}; map records {qualified_profile!r}."
+        )
         sys.exit(1)
 
     rule_loader = create_rule_loader(RULES_DIR)
@@ -1024,18 +1180,54 @@ def main():
     config = build_search_config(args)
     print_config_summary(args, config, len(prompts_with_rules))
     semgrep_config = configure_semgrep_from_args(args)
+    if not args.dry_run:
+        if semgrep_config.get("rule_config_kind") != "local":
+            print("❌ Error: real search requires a pinned local Semgrep ruleset")
+            return 1
+        if re.fullmatch(
+            r"[0-9a-fA-F]{40}", str(semgrep_config.get("rule_source_commit") or "")
+        ) is None:
+            print("❌ Error: local Semgrep rules must contain a 40-hex SOURCE_COMMIT")
+            return 1
+        if semgrep_config.get("semgrep_version") != "1.85.0":
+            print(
+                "❌ Error: comparative runs require Semgrep 1.85.0; found "
+                f"{semgrep_config.get('semgrep_version')}"
+            )
+            return 1
     if args.output_dir:
         args.output_dir.mkdir(parents=True, exist_ok=True)
         from datetime import datetime
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         # Write provenance before the first model/scanner call so failed
         # preflights and infrastructure aborts remain attributable.
-        save_run_config(
+        run_config = save_run_config(
             args,
             semgrep_config,
             timestamp,
-            n_prompts_evaluated=len(prompts_with_rules),
+            prompts_with_rules=prompts_with_rules,
         )
+        from src.optimizer.initialization import (
+            build_initialization_identity,
+            load_initialization_bundle,
+        )
+
+        config.initialization_identity = build_initialization_identity(run_config)
+        if args.initialization_bundle is not None:
+            try:
+                bundle = load_initialization_bundle(
+                    args.initialization_bundle,
+                    expected_identity=config.initialization_identity,
+                )
+            except (OSError, ValueError, json.JSONDecodeError) as exc:
+                print(f"❌ Error: initialization bundle rejected: {exc}")
+                return 1
+            if (
+                run_config["args"]["initialization_bundle_content_sha256"]
+                != bundle.content_sha256
+            ):
+                print("❌ Error: initialization bundle changed while configuring the run")
+                return 1
 
     # Run configuration is durable before model loading, NLTK/SBERT preflight,
     # or the first generation/scanner call. Infrastructure failures therefore

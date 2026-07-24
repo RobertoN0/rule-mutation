@@ -39,22 +39,16 @@ Usage
 
 from __future__ import annotations
 
-import difflib
 import logging
 import re
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from .base import MutationResult
 from .rule_parser import ParsedRule
-
-if TYPE_CHECKING:
-    from .base import Mutator
+from .security_lexicon import get_security_lexicon
 
 log = logging.getLogger(__name__)
-
-from .security_lexicon import get_security_lexicon
 
 # ---------------------------------------------------------------------------
 # Instruction-adherence check specs (per mutator name)

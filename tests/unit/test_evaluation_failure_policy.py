@@ -44,7 +44,7 @@ def _engine(tmp_path: Path) -> ExperimentEngine:
         _Backend(),
         mutator,
         SearchConfig(
-            max_iterations=0,
+            main_loop_budget=0,
             output_dir=tmp_path,
             verbose=False,
             save_intermediate=True,
@@ -201,6 +201,37 @@ def test_system_semgrep_failure_aborts_instead_of_scoring_zero(tmp_path: Path) -
     ]
     assert failures[-1]["stage"] == "semgrep"
     assert failures[-1]["error_kind"] == "timeout"
+
+
+def test_strict_baseline_records_every_task_specific_semgrep_failure_before_abort(
+    tmp_path: Path,
+) -> None:
+    engine = _engine(tmp_path)
+    space = RuleSetSpace(["r"], {"r": "RULE"})
+    semgrep_results = [
+        SemgrepResult(error="parse one", error_kind="target_parse"),
+        SemgrepResult(error="parse two", error_kind="target_parse"),
+    ]
+
+    with patch(
+        "src.optimizer.engine.run_semgrep_batch_dir",
+        return_value=semgrep_results,
+    ):
+        with pytest.raises(BaselineOutputError, match="after Semgrep"):
+            engine._evaluate_chromosome(
+                space.origin(),
+                space,
+                [_prompt("1"), _prompt("2")],
+                iter_id="baseline",
+            )
+
+    failures = [
+        json.loads(line)
+        for line in (tmp_path / "evaluation_failures.jsonl").read_text().splitlines()
+    ]
+    prompt_failures = [row for row in failures if row["stage"] == "baseline_semgrep"]
+    assert [row["test_case_id"] for row in prompt_failures] == ["1", "2"]
+    assert failures[-1]["error_kind"] == "invalid_baseline_semgrep"
 
 
 def test_raw_count_not_severity_weight_drives_f1(tmp_path: Path) -> None:

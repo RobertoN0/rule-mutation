@@ -91,8 +91,8 @@ class RuleSetChromosome:
     f3: float = 0.0
     fitness: "AggregatedFitness | None" = None
 
-    iteration_added: int = 0
-    evaluation_iteration: int = 0
+    evaluation_added: int = 0
+    evaluation_index: int = 0
     parent_id: str | None = None
     cid: str = ""                                                      # stamped by the space
     tried: set = field(default_factory=set)                           # moves tried as a parent
@@ -120,7 +120,7 @@ class RuleSetChromosome:
 
     @property
     def invalid_prompt_count(self) -> int:
-        """Prompt-local failures in this evaluation (selection tiebreaker only)."""
+        """Per-task generation failures in this evaluation (tiebreaker only)."""
         return self.fitness.num_invalid_prompts if self.fitness is not None else 0
 
     # ---- moves (return a fresh child; objectives reset, cid re-stamped by caller)
@@ -139,17 +139,6 @@ class RuleSetChromosome:
         """EA text move: stack one mutation on rid's CURRENT allele (depth += 1)."""
         parent_gene = self.genes.get(rid)
         path = (list(parent_gene.mutation_path) if parent_gene else []) + [mutator_name]
-        genes = dict(self.genes)
-        genes[rid] = GeneState(rule_id=rid, text=new_text, mutation_path=path)
-        return self._child(genes, dict(self.order_priority))
-
-    def with_gene_chain(
-        self, rid: str, new_text: str, chain_names: list[str]
-    ) -> "RuleSetChromosome":
-        """EA text move (multi-mutation): stack a whole chain on rid's current
-        allele. ``with_gene`` is the single-mutator special case."""
-        parent_gene = self.genes.get(rid)
-        path = (list(parent_gene.mutation_path) if parent_gene else []) + list(chain_names)
         genes = dict(self.genes)
         genes[rid] = GeneState(rule_id=rid, text=new_text, mutation_path=path)
         return self._child(genes, dict(self.order_priority))
@@ -186,8 +175,8 @@ class RuleSetChromosome:
             "mutated_rule_ids": sorted(self.genes),
             "order_priority": dict(self.order_priority),
             "genes": {rid: g.snapshot() for rid, g in sorted(self.genes.items())},
-            "iteration_added": self.iteration_added,
-            "evaluation_iteration": self.evaluation_iteration,
+            "evaluation_added": self.evaluation_added,
+            "evaluation_index": self.evaluation_index,
             "parent_id": self.parent_id,
             "num_invalid_prompts": self.invalid_prompt_count,
         }
@@ -272,27 +261,14 @@ class RuleSetSpace:
 class ChromosomeArchive:
     """One Pareto archive over full-chromosome objectives (f1, f2, f3).
 
-    The **origin** chromosome (all-original, conservative objectives ``(0,1,0)``)
-    is held *aside* from
-    the Pareto front: it is never evicted, is always available as a parent (so a
-    fresh lineage can always be started), and participates in dominance for
-    admission (so a candidate worse-or-equal to baseline on every axis is
-    rejected).
+    The all-original chromosome is kept only as the evaluation baseline and
+    best-result reporting floor. It is not a front member, a parent, or an
+    admission threshold. The initial random candidates create the front among
+    themselves.
 
-    Admission is **standard Pareto admission** (a candidate is kept unless the
-    origin or a front member dominates it). A genotype whose objective vector
-    equals the origin's is eligible — neither vector strictly dominates the
-    other — which lets order-only neutral variants act as stepping stones.
-
-    On an ``"exhausted"`` restart (no eligible parent has any move left) the
-    front is kept; only the ``tried`` move sets on all parents are cleared so
-    exhausted neighbourhoods re-open (stochastic mutators get a fresh draw).
-    On a ``"stagnation"`` restart (``restart_h`` consecutive rejected "ea"-phase
-    attempts) the front is wiped outright and the caller reseeds it from a
-    fresh batch of random samples off the origin — an ARIEL-style
-    restart-on-stagnation rather than a mere neighbourhood reopen, since
-    repeatedly reopening the same stuck front's tried-sets was not enough to
-    escape it.
+    Admission is standard Pareto admission against the current front. The
+    archive is never cleared. When it exceeds its configured capacity, one
+    member is removed by the explicit overflow policy below.
     """
 
     def __init__(
@@ -300,102 +276,74 @@ class ChromosomeArchive:
         origin: RuleSetChromosome,
         *,
         cap: int,
-        restart_h: int,
         rng: random.Random,
     ) -> None:
         if cap < 1:
             raise ValueError(f"cap must be >= 1, got {cap}")
-        if restart_h < 1:
-            raise ValueError(f"restart_h must be >= 1, got {restart_h}")
         self.origin = origin
         self.cap = cap
-        self.restart_h = restart_h
         self._rng = rng
 
         self.entries: list[RuleSetChromosome] = []
-        self._attempts_since_insert = 0
         self.n_inserts = 0
         self.n_rejected = 0
         self.n_dup_rejected = 0
         self.n_neutral_inserts = 0
-        self.restart_history: list[dict[str, Any]] = []
         self._best_ever = origin
-        self.best_ever_iteration = 0
+        self.best_ever_evaluation = 0
 
     # ---- parent selection -------------------------------------------------
     def parents(self) -> list[RuleSetChromosome]:
-        """Sampleable parents: the Pareto front plus the always-available origin."""
-        return self.entries + [self.origin]
+        """Sampleable parents are exactly the current Pareto-front members."""
+        return list(self.entries)
 
     def sample_parent(
         self,
         is_eligible: Callable[[RuleSetChromosome], bool],
         *,
-        include_origin: bool = True,
+        exclude_cids: set[str] | None = None,
     ) -> RuleSetChromosome | None:
-        """Uniform sample among parents with ≥1 available move (``is_eligible``).
-
-        ``include_origin`` (the EA's ``ea_origin_parent`` knob) decides whether the
-        origin is a *sampleable* parent for local moves. With it on (default) the
-        origin is always in the pool, so a minimal single-rule (parsimony-1)
-        lineage can always be started and the sampler never returns None. With it
-        off, only front members are drawn — the origin still anchors dominance and
-        ``best()``, it just stops seeding fresh minimal edits; the pool can then be
-        empty (an empty front) and this returns None, which the caller handles.
-        """
-        pool = self.parents() if include_origin else list(self.entries)
-        candidates = [c for c in pool if is_eligible(c)]
+        """Uniformly sample an eligible front parent not already tried this slot."""
+        excluded = exclude_cids or set()
+        candidates = [
+            chromosome
+            for chromosome in self.entries
+            if chromosome.cid not in excluded and is_eligible(chromosome)
+        ]
         if not candidates:
             return None
         return self._rng.choice(candidates)
 
     def mark_tried(self, parent: RuleSetChromosome, move: tuple) -> None:
         """Record ``move`` as attempted on ``parent`` (call regardless of outcome)."""
-        # Multi-mutator local moves return a tuple of atomic move keys. Keeping
-        # each atom separate makes eligibility finite without enumerating every
-        # possible chain ordering.
-        if move and isinstance(move[0], tuple):
-            parent.tried.update(move)
-        else:
-            parent.tried.add(move)
+        parent.tried.add(move)
 
     # ---- insertion --------------------------------------------------------
     def try_add(
         self,
         child: RuleSetChromosome,
-        iteration: int,
-        *,
-        count_rejection_for_stagnation: bool = True,
+        evaluation_index: int,
     ) -> tuple[bool, str]:
         """Offer ``child`` to the archive. Returns ``(accepted, reason)``.
 
         Rejected if its ``cid`` duplicates an existing member (incl. origin) or
-        if it is dominated by the origin/front. On accept it evicts every front
+        if it is dominated by a front member. On accept it evicts every front
         member it dominates and, on overflow, the lowest-f1 member
         (lexicographic: f1, then f2+f3, then age; the just-added child is safe).
-
-        ``count_rejection_for_stagnation=False`` is used for EA initialization
-        and injection: rejected global samples do not advance local stagnation.
-        Every accepted insertion still resets stagnation because it creates a
-        new front/neighbourhood.
         """
-        child.evaluation_iteration = iteration
-        self._consider_best_ever(child, iteration)
+        child.evaluation_index = evaluation_index
+        self._consider_best_ever(child, evaluation_index)
 
         if child.cid == self.origin.cid or any(child.cid == e.cid for e in self.entries):
-            if count_rejection_for_stagnation:
-                self._attempts_since_insert += 1
             self.n_rejected += 1
             self.n_dup_rejected += 1
             return False, "duplicate"
 
-        if dominates(self.origin, child) or any(dominates(e, child) for e in self.entries):
-            if count_rejection_for_stagnation:
-                self._attempts_since_insert += 1
+        if any(dominates(e, child) for e in self.entries):
             self.n_rejected += 1
             return False, "dominated"
 
-        child.iteration_added = iteration
+        child.evaluation_added = evaluation_index
         survivors = [e for e in self.entries if not dominates(child, e)]
         survivors.append(child)  # child is always last
 
@@ -413,22 +361,18 @@ class ChromosomeArchive:
                     old[i].f1,
                     old[i].f2 + old[i].f3,
                     -old[i].invalid_prompt_count,
-                    old[i].iteration_added,
+                    old[i].evaluation_added,
                 ),
             )
             survivors.pop(evict_idx)
 
         self.entries = survivors
-        self._attempts_since_insert = 0
         self.n_inserts += 1
         if abs(child.f1 - self.origin.f1) <= _TOL:
             self.n_neutral_inserts += 1
         return True, "accepted"
 
-    # ---- restart / inspection --------------------------------------------
-
-    def should_restart(self) -> bool:
-        return self._attempts_since_insert >= self.restart_h
+    # ---- inspection -------------------------------------------------------
 
     @staticmethod
     def _reporting_key(chromosome: RuleSetChromosome) -> tuple[float, int, float]:
@@ -438,44 +382,24 @@ class ChromosomeArchive:
             chromosome.f2 + chromosome.f3,
         )
 
-    def _consider_best_ever(self, child: RuleSetChromosome, iteration: int) -> None:
+    def _consider_best_ever(
+        self,
+        child: RuleSetChromosome,
+        evaluation_index: int,
+    ) -> None:
         if child.f1 <= self.origin.f1 + _TOL:
             return
         if self._best_ever is self.origin or self._reporting_key(child) > self._reporting_key(
             self._best_ever
         ):
             self._best_ever = child
-            self.best_ever_iteration = iteration
-
-    def restart(
-        self, iteration: int, reason: str = "stagnation", *, wipe_front: bool = False
-    ) -> None:
-        """Re-open exploration. Always clears ``tried`` move sets on the parents.
-
-        ``wipe_front=True`` additionally discards the current front (``entries``
-        emptied) — used for stagnation-cap restarts, so the caller can reseed a
-        fresh random population instead of re-exploring the same stuck front.
-        Recorded ``front_size``/``parents_reopened`` reflect the pre-wipe state.
-        """
-        front_size = len(self.entries)
-        self.restart_history.append({
-            "iteration": iteration,
-            "reason": reason,
-            "front_size": front_size,
-            "parents_reopened": front_size + 1,
-            "wiped_front": wipe_front,
-        })
-        if wipe_front:
-            self.entries = []
-        for c in self.parents():
-            c.tried = set()
-        self._attempts_since_insert = 0
+            self.best_ever_evaluation = evaluation_index
 
     def best(self) -> RuleSetChromosome:
         """Best raw-count repair evaluated anywhere in the run.
 
-        This record survives front eviction and stagnation wipes. The origin is
-        returned unless a candidate strictly improves raw f1; invalid-prompt
+        This record survives bounded-front overflow eviction. The origin is
+        returned unless a candidate strictly improves raw f1; invalid-output
         count and the remaining objectives only break equal-f1 ties.
         """
         return self._best_ever
@@ -486,7 +410,6 @@ class ChromosomeArchive:
     def snapshot(self) -> dict[str, Any]:
         return {
             "cap": self.cap,
-            "restart_h": self.restart_h,
             "origin": {
                 "cid": self.origin.cid,
                 "f1": round(self.origin.f1, 6),
@@ -497,9 +420,7 @@ class ChromosomeArchive:
             "n_rejected": self.n_rejected,
             "n_dup_rejected": self.n_dup_rejected,
             "n_neutral_inserts": self.n_neutral_inserts,
-            "attempts_since_insert": self._attempts_since_insert,
-            "best_ever_iteration": self.best_ever_iteration,
+            "best_ever_evaluation": self.best_ever_evaluation,
             "best_ever": self._best_ever.snapshot(),
             "entries": [c.snapshot() for c in self.entries],
-            "restart_history": list(self.restart_history),
         }

@@ -45,7 +45,7 @@ class FitnessResult:
     """Additional details (e.g., specific rule IDs)."""
 
     score_source: str = "semgrep"
-    """``semgrep`` for a valid scan or ``baseline_imputed`` when a prompt-local
+    """``semgrep`` for a valid scan or ``baseline_imputed`` when a task-level
     generation/parse failure is conservatively assigned its baseline score."""
 
     analysis_status: str = "valid"
@@ -90,7 +90,7 @@ class AggregatedFitness:
     """Sum of baseline-minus-candidate raw findings across prompts (f1)."""
 
     total_raw_count: int = 0
-    """Effective raw findings after prompt-local baseline imputation."""
+    """Effective raw findings after task-level baseline imputation."""
 
     total_weighted_score: float = 0.0
     """Effective severity-weighted score, reported as a diagnostic."""
@@ -102,7 +102,7 @@ class AggregatedFitness:
     """Prompts with a valid generation and completed Semgrep analysis."""
 
     num_invalid_prompts: int = 0
-    """Prompt-local failures scored by conservative baseline imputation."""
+    """Task-level failures scored by conservative baseline imputation."""
 
     failure_counts: dict[str, int] = field(default_factory=dict)
     """Counts by prompt-level analysis status."""
@@ -160,6 +160,9 @@ def calculate_fitness(
         warning_count=warning_count,
         details={
             "check_ids": sorted({f.check_id for f in findings}),
+            "synthetic_findings_filtered": getattr(
+                semgrep_result, "synthetic_findings_filtered", 0
+            ),
         },
         observed_raw_count=raw_count,
         observed_weighted_score=float(weighted_score),

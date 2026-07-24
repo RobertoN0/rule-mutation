@@ -97,6 +97,7 @@ class CodeValidation:
     """The selected target-language artifact and its qualification state."""
 
     code: str
+    source_code: str
     expected_language: str
     detected_language: str | None
     finish_reason: str
@@ -108,6 +109,9 @@ class CodeValidation:
     ignored_supplementary_languages: list[str] = field(default_factory=list)
     has_fences: bool = False
     outside_text_present: bool = False
+    target_block_count: int = 0
+    normalization: str = "none"
+    analysis_line_map: list[int | None] = field(default_factory=list)
 
     @property
     def is_valid(self) -> bool:
@@ -238,39 +242,119 @@ def _java_parser():
     return Parser(Language(tree_sitter_java.language()))
 
 
-def _parse_java(code: str):
-    """Parse full units, standalone members, and statement snippets."""
+def _java_parse_candidates(
+    code: str,
+) -> tuple[tuple[str, str, list[int | None]], ...]:
+    """Build deterministic scanner inputs for Java units, members, and snippets."""
     prefix: list[str] = []
     body: list[str] = []
-    for line in code.splitlines():
-        if not body and line.lstrip().startswith(("package ", "import ")):
+    prefix_line_numbers: list[int] = []
+    body_line_numbers: list[int] = []
+    in_leading_block_comment = False
+    for line_number, line in enumerate(code.splitlines(), start=1):
+        stripped = line.lstrip()
+        is_prefix_line = (
+            not body
+            and (
+                not stripped
+                or stripped.startswith(("package ", "import ", "//"))
+                or stripped.startswith("/*")
+                or in_leading_block_comment
+            )
+        )
+        if is_prefix_line:
             prefix.append(line)
+            prefix_line_numbers.append(line_number)
+            if stripped.startswith("/*") and "*/" not in stripped:
+                in_leading_block_comment = True
+            if in_leading_block_comment and "*/" in stripped:
+                in_leading_block_comment = False
         else:
             body.append(line)
-    prefix_text = "\n".join(prefix)
-    body_text = "\n".join(body)
-    candidates = (
-        code,
-        f"{prefix_text}\nclass __Generated__ {{\n{body_text}\n}}",
-        (
-            f"{prefix_text}\nclass __Generated__ {{\n"
-            f"void __snippet__() {{\n{body_text}\n}}\n}}"
-        ),
+            body_line_numbers.append(line_number)
+
+    source_lines = code.splitlines()
+    compilation_unit = ("none", code, list(range(1, len(source_lines) + 1)))
+
+    class_lines = [*prefix, "class __SemgrepGenerated__ {", *body, "}"]
+    class_line_map: list[int | None] = [
+        *prefix_line_numbers,
+        None,
+        *body_line_numbers,
+        None,
+    ]
+    method_lines = [
+        *prefix,
+        "class __SemgrepGenerated__ {",
+        "void __semgrepSnippet__() {",
+        *body,
+        "}",
+        "}",
+    ]
+    method_line_map: list[int | None] = [
+        *prefix_line_numbers,
+        None,
+        None,
+        *body_line_numbers,
+        None,
+        None,
+    ]
+    return (
+        compilation_unit,
+        ("java_class_wrapper", "\n".join(class_lines), class_line_map),
+        ("java_method_wrapper", "\n".join(method_lines), method_line_map),
     )
+
+
+def _parse_java(code: str):
+    """Return the first complete Java parse and its exact scanner representation."""
     parser = _java_parser()
-    roots = [parser.parse(candidate.encode("utf-8")).root_node for candidate in candidates]
-    for root in roots:
-        if not root.has_error:
-            return root, None
-    root = roots[0]
+    candidates = _java_parse_candidates(code)
+    allowed_compilation_unit_children = {
+        "package_declaration",
+        "import_declaration",
+        "class_declaration",
+        "interface_declaration",
+        "enum_declaration",
+        "record_declaration",
+        "annotation_type_declaration",
+        "module_declaration",
+        "line_comment",
+        "block_comment",
+    }
+    first_root = None
+    for normalization, candidate_code, line_map in candidates:
+        root = parser.parse(candidate_code.encode("utf-8")).root_node
+        if first_root is None:
+            first_root = root
+        raw_is_compilation_unit = normalization != "none" or all(
+            child.type in allowed_compilation_unit_children
+            for child in root.named_children
+        )
+        if not root.has_error and raw_is_compilation_unit:
+            return root, None, candidate_code, normalization, line_map
+    assert first_root is not None
+    root = first_root
     stack = [root]
     while stack:
         node = stack.pop()
         if node.type == "ERROR" or node.is_missing:
             row, column = node.start_point
-            return None, f"tree-sitter error at line {row + 1}, column {column + 1}"
+            return (
+                None,
+                f"tree-sitter error at line {row + 1}, column {column + 1}",
+                code,
+                "none",
+                list(range(1, len(code.splitlines()) + 1)),
+            )
         stack.extend(reversed(node.children))
-    return None, "tree-sitter reported an unspecified parse error"
+    return (
+        None,
+        "tree-sitter reported an unspecified parse error",
+        code,
+        "none",
+        list(range(1, len(code.splitlines()) + 1)),
+    )
 
 
 _JAVA_SUBSTANTIVE_NODES = frozenset(
@@ -323,17 +407,31 @@ def validate_generated_output(
     finish = (finish_reason or "unknown").strip().lower()
     parsed = parse_fenced_output(raw_output)
     blocks = list(parsed.blocks)
-    primary_code = blocks[0].code if blocks else raw_output.strip()
-    tagged_language = blocks[0].language if blocks else None
+    target_block_indices = [
+        idx
+        for idx, block in enumerate(blocks)
+        if block.code.strip() and block.language in {None, expected}
+    ]
+    if len(target_block_indices) == 1:
+        primary_index = target_block_indices[0]
+    else:
+        primary_index = target_block_indices[0] if target_block_indices else 0
+    primary_code = blocks[primary_index].code if blocks else raw_output.strip()
+    tagged_language = blocks[primary_index].language if blocks else None
     detected = tagged_language or _looks_like_language(primary_code)
     validation = CodeValidation(
         code=primary_code,
+        source_code=primary_code,
         expected_language=expected,
         detected_language=detected,
         finish_reason=finish,
         fence_languages=[block.language for block in blocks],
         has_fences=parsed.has_fences,
         outside_text_present=bool(parsed.outside_text),
+        target_block_count=(
+            len(target_block_indices) if blocks else int(bool(primary_code.strip()))
+        ),
+        analysis_line_map=list(range(1, len(primary_code.splitlines()) + 1)),
     )
 
     if finish in _ABNORMAL_FINISH_REASONS:
@@ -359,12 +457,7 @@ def validate_generated_output(
             f"generated code appears to be {detected}, expected {expected}",
         )
 
-    extra_target_blocks = [
-        block
-        for block in blocks[1:]
-        if block.code.strip() and block.language in {None, expected}
-    ]
-    if extra_target_blocks:
+    if len(target_block_indices) > 1:
         return _invalid(
             validation,
             "multiple_target_blocks",
@@ -372,7 +465,8 @@ def validate_generated_output(
         )
     validation.ignored_supplementary_languages = [
         block.language
-        for block in blocks[1:]
+        for idx, block in enumerate(blocks)
+        if idx != primary_index
         if block.code.strip() and block.language not in {None, expected}
     ]
 
@@ -396,7 +490,7 @@ def validate_generated_output(
             )
     else:
         validation.syntax_validation_method = "java_tree_sitter"
-        root, syntax_error = _parse_java(primary_code)
+        root, syntax_error, analyzed_code, normalization, line_map = _parse_java(primary_code)
         if syntax_error is not None:
             return _invalid(
                 validation,
@@ -404,6 +498,9 @@ def validate_generated_output(
                 "Java tree-sitter parsing failed",
                 syntax_error=syntax_error,
             )
+        validation.code = analyzed_code
+        validation.normalization = normalization
+        validation.analysis_line_map = line_map
         if not _java_tree_is_substantive(root):
             return _invalid(
                 validation,

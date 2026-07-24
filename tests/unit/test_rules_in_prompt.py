@@ -71,7 +71,7 @@ def test_norules_uses_clean_baseline(hc):
 def test_override_injects_mutated_text(hc, rules_dir):
     """Harness override path: mutated rule text replaces the original in the prompt.
 
-    Mirrors baseline_harness._apply_overrides (swap individual_rules text, rebuild
+    Mirrors run_replicates._apply_overrides (swap individual_rules text, rebuild
     combined_rules with the same separator), then checks the prompt.
     """
     loader = RuleLoader(rules_dir)

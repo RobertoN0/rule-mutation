@@ -1,7 +1,7 @@
 """
 Search over rule-set chromosomes.
 
-* ``search``     — the algorithms: (1+1) EA (random init + periodic injection)
+* ``search``     — the algorithms: archive EA (random init + periodic injection)
                    and the i.i.d. random-search baseline, over one shared
                    random-chromosome sampler.
 * ``engine``     — the experiment engine around them: baseline evaluation, the

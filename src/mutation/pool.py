@@ -1,5 +1,5 @@
 """
-Mutator container for the (1+1) EA and random-baseline optimizers.
+Mutator container for the archive EA and random-search optimizers.
 
 Both optimizers do their own constrained random selection — the EA samples a
 parent-eligible archive entry then an untried mutator; the random baseline

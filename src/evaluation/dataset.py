@@ -115,7 +115,7 @@ class DatasetStats:
     def summary(self) -> str:
         """Human-readable summary."""
         lines = [
-            f"📊 Dataset Statistics",
+            "📊 Dataset Statistics",
             f"   Total prompts: {self.total_prompts}",
             f"   Languages ({len(self.languages)}): {', '.join(self.languages)}",
             f"   CWEs ({len(self.cwes)}): {', '.join(self.cwes[:5])}{'...' if len(self.cwes) > 5 else ''}",
@@ -350,5 +350,4 @@ def load_mvp_prompts() -> list[TestPrompt]:
         limit_per_cwe=2,
         limit_total=5,
     )
-
 

@@ -71,7 +71,7 @@ def _silent(_: str) -> None:
     pass
 
 
-def _run(mutators, *, max_iterations, K, seed, ev=None, order_move_prob=0.0, **kw):
+def _run(mutators, *, main_loop_budget, K, seed, ev=None, order_move_prob=0.0, **kw):
     space = _space()
     if ev is None:
         def ev(chromo, iter_id):
@@ -79,7 +79,8 @@ def _run(mutators, *, max_iterations, K, seed, ev=None, order_move_prob=0.0, **k
     return run_random_search(
         space=space, origin=_origin(space), prompts_with_rules=_prompts(),
         mutators=mutators, evaluate_chromosome_fn=ev,
-        iteration_result_factory=IterationResult, max_iterations=max_iterations,
+        iteration_result_factory=IterationResult,
+        main_loop_budget=main_loop_budget,
         max_changes=K, max_depth=4, order_move_prob=order_move_prob,
         seed=seed, log=_silent, **kw,
     )
@@ -164,7 +165,7 @@ class TestRandomSearch:
             seen_parents.append(chromo.parent_id)
             seen_sizes.append(len(chromo.mutated_rule_ids()))
             return _fit(1.0), [], 0, 0
-        _run(_muts(4), max_iterations=25, K=3, seed=3, ev=ev)
+        _run(_muts(4), main_loop_budget=25, K=3, seed=3, ev=ev)
         origin_cid = RuleSetSpace(all_rule_ids=["r1", "r2", "r3"],
                                   originals={"r1": "R1", "r2": "R2", "r3": "R3"}).origin().cid
         assert all(p == origin_cid for p in seen_parents)
@@ -176,32 +177,38 @@ class TestRandomSearch:
 
     def test_n_changes_recorded_and_bounded(self):
         recs = []
-        _run(_muts(3), max_iterations=20, K=5, seed=7, iter_record_fn=recs.append)
+        _run(_muts(3), main_loop_budget=20, K=5, seed=7, iter_record_fn=recs.append)
         assert recs
         assert all(1 <= r["n_changes"] <= 5 for r in recs)
         assert all(r["n_requested_changes"] == r["n_changes"] for r in recs)
         assert all(0 <= r["n_effective_changes"] <= r["n_attempted_changes"] <= r["n_changes"]
                    for r in recs)
         assert all(len(r["attempted_operators"]) == r["n_attempted_changes"] for r in recs)
-        assert all(r["phase"] == "random" for r in recs)
+        evaluated = [record for record in recs if record["evaluation_consumed"]]
+        assert [record["phase"] for record in evaluated[:5]] == ["initialization"] * 5
+        assert all(record["phase"] == "random" for record in evaluated[5:])
 
     def test_identity_sample_hits_guard_without_consuming_budget(self):
         recs = []
         with pytest.raises(search.IdentityRetryLimitExceeded, match="identity retry limit"):
-            _run([IdentityMutator()], max_iterations=6, K=2, seed=1,
+            _run([IdentityMutator()], main_loop_budget=6, K=2, seed=1,
                  identity_retry_limit=3, iter_record_fn=recs.append)
         assert all(r["mutation_identity"] for r in recs)
         assert len(recs) == 3
-        assert all(r["iter"] == 1 and not r["budget_consumed"] for r in recs)
+        assert all(
+            r["evaluation_index"] == 1 and not r["evaluation_consumed"]
+            for r in recs
+        )
         assert all(r["attempted_mutators"] and set(r["attempted_mutators"]) == {"identity"}
                    for r in recs)
         assert all(r["n_attempted_changes"] == len(r["attempted_mutators"])
                    and r["n_effective_changes"] == 0 for r in recs)
 
     def test_no_archive_snapshot(self):
-        res = _run(_muts(2), max_iterations=10, K=2, seed=2)
+        res = _run(_muts(2), main_loop_budget=10, K=2, seed=2)
         assert res.archive_snapshot == {}
-        assert res.restart_reason_counts == {}
+        assert res.initialization_evaluations == 5
+        assert res.main_loop_evaluations == 10
 
     def test_best_is_argmax_with_origin_floor(self):
         scores = iter([0.5, 3.0, 1.0, 2.0, 0.1])
@@ -210,24 +217,24 @@ class TestRandomSearch:
             f1 = next(scores)
             best_seen[chromo.cid] = f1
             return _fit(f1), [], 0, 0
-        res = _run(_muts(3), max_iterations=5, K=2, seed=9, ev=ev)
+        res = _run(_muts(3), main_loop_budget=0, K=2, seed=9, ev=ev)
         assert res.best_chromosome.f1 == 3.0
 
         def ev_neg(chromo, iter_id):
             return _fit(-2.0), [], 0, 0
-        res2 = _run(_muts(3), max_iterations=5, K=2, seed=9, ev=ev_neg)
+        res2 = _run(_muts(3), main_loop_budget=0, K=2, seed=9, ev=ev_neg)
         assert res2.best_chromosome.mutated_rule_ids() == set()  # origin wins
 
     def test_reproducible_and_seed_sensitive(self):
-        a = _run(_muts(3), max_iterations=15, K=3, seed=11)
-        b = _run(_muts(3), max_iterations=15, K=3, seed=11)
-        c = _run(_muts(3), max_iterations=15, K=3, seed=99)
+        a = _run(_muts(3), main_loop_budget=15, K=3, seed=11)
+        b = _run(_muts(3), main_loop_budget=15, K=3, seed=11)
+        c = _run(_muts(3), main_loop_budget=15, K=3, seed=99)
         assert a.best_chromosome.cid == b.best_chromosome.cid
         assert a.best_chromosome.cid != c.best_chromosome.cid
 
     def test_records_are_random_search_strategy_with_empty_selection_meta(self):
         recs = []
-        _run(_muts(2), max_iterations=8, K=2, seed=4, iter_record_fn=recs.append)
+        _run(_muts(2), main_loop_budget=8, K=2, seed=4, iter_record_fn=recs.append)
         real = [r for r in recs if not r["mutation_identity"]]
         assert real and all(r["strategy"] == "random_search" for r in real)
         assert all(r["selection_meta"] == {} and r["accepted"] for r in real)
@@ -237,7 +244,7 @@ class TestRandomSearch:
         """With order_move_prob=1 every change is an order bump; a bump that
         re-ranks the prompt's rules must be evaluated (not identity-skipped)."""
         recs = []
-        _run(_muts(2), max_iterations=10, K=3, seed=6, order_move_prob=1.0,
+        _run(_muts(2), main_loop_budget=10, K=3, seed=6, order_move_prob=1.0,
              iter_record_fn=recs.append)
         real = [r for r in recs if not r["mutation_identity"]]
         assert real  # at least one reorder changed a render and was evaluated

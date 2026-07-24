@@ -267,7 +267,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"⚠️  no semgrep_debug.jsonl found under {path}", file=sys.stderr)
             failed += 1
             continue
-        completed = run_dir is None or any(run_dir.glob("hillclimb_summary_*.json"))
+        completed = run_dir is None or any(
+            (run_dir / marker).is_file()
+            for marker in (
+                "search_summary.json",
+                "qualification_manifest.json",
+                "replicate_summary.json",
+            )
+        )
         if not completed and not args.force:
             print(f"⏭️  {run_dir.name}: no final summary (run not finished?) — skipping "
                   f"(use --force to override)", file=sys.stderr)

@@ -81,7 +81,7 @@ def _climber(backend, out_dir, cache=True):
     mutator = MagicMock()
     mutator.name = "noop"
     mutator.seed = 0
-    cfg = SearchConfig(max_iterations=0, output_dir=out_dir, verbose=False,
+    cfg = SearchConfig(main_loop_budget=0, output_dir=out_dir, verbose=False,
                           save_intermediate=False, enable_eval_cache=cache)
     return ExperimentEngine(backend, mutator, config=cfg)
 
