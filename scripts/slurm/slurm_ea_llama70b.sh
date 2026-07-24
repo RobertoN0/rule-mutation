@@ -19,10 +19,10 @@
 #   70B-4bit needs ~35 GB weights + KV cache → fits on ONE A100 80GB.
 #   bf16 compute dtype (Llama-3.3 is bf16-native; fp16 dequant can overflow).
 #
-# Choose wall time at submission from the run objective. Use a short smoke,
-# up to 12h for extended behavior validation, and 24h for a final run. Always
-# calibrate from the same frozen population/model; old subset timings are not
-# reliable for final-run sizing.
+# Choose wall time at submission from the run objective. Use a short smoke, an
+# extended behavior validation, or the supervisor-approved final allocation.
+# Always calibrate from the same frozen population/model; old subset timings
+# are not reliable for final-run sizing.
 #
 # Mirrors scripts/slurm/slurm_ea_qwen32b.sh; only the model, default
 # quantization (4bit) and compute dtype (bf16) differ. OPTIMIZER ∈ {ea,
@@ -39,17 +39,17 @@
 #
 #   # Full-population final candidate. Wall time is the primary budget.
 #   N_CASES=all MAIN_LOOP_BUDGET="$EVALUATION_CEILING" LANGUAGES=python SELECTION=first \
-#     sbatch --time=24:00:00 --job-name="ea_llama_python_final" \
+#     sbatch --time="$APPROVED_SLURM_TIME" --job-name="ea_llama_python_final" \
 #            scripts/slurm/slurm_ea_llama70b.sh
 #
 #   # Full-population Java
 #   N_CASES=all MAIN_LOOP_BUDGET="$EVALUATION_CEILING" LANGUAGES=java SELECTION=first \
-#     sbatch --time=24:00:00 --job-name="ea_llama_java_final" \
+#     sbatch --time="$APPROVED_SLURM_TIME" --job-name="ea_llama_java_final" \
 #            scripts/slurm/slurm_ea_llama70b.sh
 #
-#   # Pure random baseline for ablation — python
+#   # Independent random-search comparison — Python
 #   OPTIMIZER=random_search N_CASES=all MAIN_LOOP_BUDGET="$EVALUATION_CEILING" LANGUAGES=python SELECTION=first \
-#     sbatch --time=24:00:00 --job-name="rand_llama_python_final" \
+#     sbatch --time="$APPROVED_SLURM_TIME" --job-name="rand_llama_python_final" \
 #            scripts/slurm/slurm_ea_llama70b.sh
 #
 #   # Override quantization back to fp16 (will NOT fit 70B on one 80GB GPU;
@@ -91,7 +91,6 @@ OBJECTIVE_DIRECTION=${OBJECTIVE_DIRECTION:-minimize}
 ALLOW_UNQUALIFIED_MAP=${ALLOW_UNQUALIFIED_MAP:-0}
 REPO_ROOT=${REPO_ROOT:-/home/rnegro/thesis/rule-mutation}
 OUTPUT_BASE=${OUTPUT_BASE:-"$REPO_ROOT/experiments/results"}
-PROMPT_PROFILE=${PROMPT_PROFILE:?Set PROMPT_PROFILE after reviewing qualification results}
 INITIALIZATION_BUNDLE=${INITIALIZATION_BUNDLE:-}
 TIME_BUDGET_SECONDS=${TIME_BUDGET_SECONDS:-}
 PRETIMEOUT_LEAD_SECONDS=${PRETIMEOUT_LEAD_SECONDS:-300}
@@ -149,7 +148,6 @@ echo "  Mutators:        $MUTATORS"
 echo "  Validation:      $ENABLE_VALIDATION (1=enabled)"
 echo "  Perplexity gate: $ENABLE_PERPLEXITY (1=enabled; requires ENABLE_VALIDATION=1)"
 echo "  Eval cache:      $ENABLE_EVAL_CACHE (0=disabled)"
-echo "  Prompt profile:  $PROMPT_PROFILE"
 echo "  Init bundle:     ${INITIALIZATION_BUNDLE:-none}"
 echo "  Time budget:     ${TIME_BUDGET_SECONDS:-not declared} seconds"
 echo "  Pretimeout lead: ${PRETIMEOUT_LEAD_SECONDS}s"
@@ -281,7 +279,6 @@ python scripts/experiments/run_experiment.py \
     --random-max-changes "$RANDOM_MAX_CHANGES" \
     --ea-injection-every "$EA_INJECTION_EVERY" \
     --order-move-weight "$ORDER_MOVE_WEIGHT" \
-    --prompt-profile "$PROMPT_PROFILE" \
     $INITIALIZATION_BUNDLE_FLAG \
     $TIME_BUDGET_FLAG \
     --pretimeout-lead-seconds "$PRETIMEOUT_LEAD_SECONDS" \

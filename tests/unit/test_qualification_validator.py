@@ -8,10 +8,7 @@ from unittest.mock import patch
 
 from scripts.analyze import validate_qualification_run
 from scripts.analyze.validate_qualification_run import validate_qualification
-from src.evaluation.generation_contract import (
-    CURRENT_LANGUAGE_COMPLETE,
-    prompt_contract_sha256,
-)
+from src.evaluation.generation_contract import prompt_contract_sha256
 from src.evaluation.output_validation import validate_generated_output
 from src.evaluation.qualification import population_fingerprint, qualify_search_population
 from src.evaluation.rule_mapping import PromptWithRules
@@ -84,7 +81,6 @@ def test_qualification_validator_reconciles_valid_and_excluded_rows(tmp_path: Pa
             _Backend(),
             prompts,
             output_dir=tmp_path,
-            prompt_profile=CURRENT_LANGUAGE_COMPLETE,
         )
 
     source_map = tmp_path / "source_map.json"
@@ -110,10 +106,7 @@ def test_qualification_validator_reconciles_valid_and_excluded_rows(tmp_path: Pa
             "run_mode": "qualification",
             "torch_version": "2.0",
             "transformers_version": "5.0",
-            "prompt_profile": CURRENT_LANGUAGE_COMPLETE,
-            "prompt_contract_sha256": prompt_contract_sha256(
-                CURRENT_LANGUAGE_COMPLETE
-            ),
+            "prompt_contract_sha256": prompt_contract_sha256(),
             "temperature": 0.0,
             "max_output_tokens": 4096,
             "n_cases_requested": None,
@@ -208,7 +201,6 @@ def test_qualification_validator_uses_each_rows_normalization(tmp_path: Path) ->
             "test_case_id": str(idx),
             "analysis_language": "java",
             "prompt_hash": f"hash-{idx}",
-            "prompt_profile": CURRENT_LANGUAGE_COMPLETE,
             "system_prompt_sha256": hashlib.sha256(
                 f"system-{idx}".encode()
             ).hexdigest(),
@@ -261,10 +253,7 @@ def test_qualification_validator_uses_each_rows_normalization(tmp_path: Path) ->
             "run_mode": "qualification",
             "torch_version": "2.0",
             "transformers_version": "5.0",
-            "prompt_profile": CURRENT_LANGUAGE_COMPLETE,
-            "prompt_contract_sha256": prompt_contract_sha256(
-                CURRENT_LANGUAGE_COMPLETE
-            ),
+            "prompt_contract_sha256": prompt_contract_sha256(),
             "temperature": 0.0,
             "max_output_tokens": 4096,
             "n_cases_requested": None,
@@ -290,10 +279,7 @@ def test_qualification_validator_uses_each_rows_normalization(tmp_path: Path) ->
                 "temperature": 0.0,
                 "model": "fake/model",
                 "analysis_languages": ["java"],
-                "prompt_profile": CURRENT_LANGUAGE_COMPLETE,
-                "prompt_contract_sha256": prompt_contract_sha256(
-                    CURRENT_LANGUAGE_COMPLETE
-                ),
+                "prompt_contract_sha256": prompt_contract_sha256(),
                 "total_prompts": 2,
                 "valid_prompts": 2,
                 "excluded_prompts": 0,

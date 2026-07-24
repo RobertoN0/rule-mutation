@@ -90,7 +90,6 @@ def _build_api_command(args: dict, output_dir: str) -> list[str]:
         "--main-loop-budget", str(args["main_loop_budget"]),
         "--seed", str(args["seed"]),
         "--selection", str(args["selection"]),
-        "--prompt-profile", str(args["prompt_profile"]),
     ]
     if args.get("initialization_bundle"):
         cmd += ["--initialization-bundle", str(args["initialization_bundle"])]
@@ -142,8 +141,6 @@ def _build_qualification_api_command(args: dict, output_dir: str) -> list[str]:
         str(args["rules_map"]),
         "--languages",
         *[str(value) for value in args["languages"]],
-        "--prompt-profile",
-        str(args["prompt_profile"]),
         "--seed",
         str(args["seed"]),
         "--semgrep-config",
@@ -174,7 +171,6 @@ def _build_slurm_env(args: dict) -> dict[str, str]:
         "MAIN_LOOP_BUDGET": str(args["main_loop_budget"]),
         "SEED": str(args["seed"]),
         "SELECTION": str(args["selection"]),
-        "PROMPT_PROFILE": str(args["prompt_profile"]),
         "ARCHIVE_CAP": str(args["archive_cap"]),
         "MAX_DEPTH": str(args["max_depth"]),
         "RANDOM_MAX_CHANGES": str(args.get("random_max_changes", 10)),
@@ -218,7 +214,6 @@ def _build_qualification_slurm_env(args: dict) -> dict[str, str]:
     return {
         "MODEL": model_alias,
         "LANGUAGES": str(languages[0]),
-        "PROMPT_PROFILE": str(args["prompt_profile"]),
         "RULES_MAP": str(args["rules_map"]),
         "SEMGREP_RULESET": str(args["semgrep_config"]),
         "SEMGREP_TIMEOUT_SECONDS": str(args["semgrep_timeout_seconds"]),

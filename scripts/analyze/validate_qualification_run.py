@@ -17,10 +17,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.evaluation.output_validation import validate_generated_output  # noqa: E402
 from src.evaluation.qualification import population_fingerprint  # noqa: E402
-from src.evaluation.generation_contract import (  # noqa: E402
-    PROMPT_PROFILES,
-    prompt_contract_sha256,
-)
+from src.evaluation.generation_contract import prompt_contract_sha256  # noqa: E402
 
 
 def _json(path: Path) -> dict[str, Any]:
@@ -100,12 +97,7 @@ def validate_qualification(run_dir: Path) -> dict[str, Any]:
             issues.append("DelftBlue qualification lacks an exact model revision")
         if args.get("temperature") != 0.0 or args.get("max_output_tokens") != 4096:
             issues.append("qualification did not use temperature=0 and max_output_tokens=4096")
-        prompt_profile = args.get("prompt_profile")
-        if prompt_profile not in PROMPT_PROFILES:
-            issues.append(f"unknown prompt profile: {prompt_profile!r}")
-        elif args.get("prompt_contract_sha256") != prompt_contract_sha256(
-            prompt_profile
-        ):
+        if args.get("prompt_contract_sha256") != prompt_contract_sha256():
             issues.append("run_config prompt-contract hash does not reconcile")
         if args.get("n_cases_requested") is not None or args.get("selection") != "first":
             issues.append("qualification did not use the full source map in deterministic order")
@@ -151,8 +143,6 @@ def validate_qualification(run_dir: Path) -> dict[str, Any]:
             issues.append("manifest model differs from run_config")
         if manifest.get("analysis_languages") != languages:
             issues.append("manifest language differs from run_config")
-        if manifest.get("prompt_profile") != prompt_profile:
-            issues.append("manifest prompt profile differs from run_config")
         if manifest.get("prompt_contract_sha256") != args.get(
             "prompt_contract_sha256"
         ):
@@ -182,7 +172,6 @@ def validate_qualification(run_dir: Path) -> dict[str, Any]:
                 "test_case_id",
                 "analysis_language",
                 "prompt_hash",
-                "prompt_profile",
                 "system_prompt_sha256",
                 "finish_reason",
                 "generated_code",
@@ -199,8 +188,6 @@ def validate_qualification(run_dir: Path) -> dict[str, Any]:
             if not isinstance(output_validation, dict):
                 issues.append(f"task {task_id}: missing output_validation")
                 continue
-            if row.get("prompt_profile") != prompt_profile:
-                issues.append(f"task {task_id}: prompt profile differs from run_config")
             if re.fullmatch(
                 r"[0-9a-f]{64}",
                 str(row.get("system_prompt_sha256", "")),

@@ -28,7 +28,6 @@ def _recorded_args() -> dict:
         "random_max_changes": 10,
         "ea_injection_every": 10,
         "order_move_weight": 0.1,
-        "prompt_profile": "original_no_language",
         "initialization_bundle": None,
         "enable_validation": True,
         "enable_perplexity": False,
@@ -72,19 +71,18 @@ def test_mutator_dependency_preflight_aborts_before_search(monkeypatch) -> None:
     assert exc_info.value.code == 1
 
 
-def test_rerun_api_command_preserves_final_budget_profile_and_temperature() -> None:
+def test_rerun_api_command_preserves_final_budget_and_temperature() -> None:
     from scripts.experiments.rerun_from_config import _build_api_command
 
     cmd = _build_api_command(_recorded_args(), "rerun-output")
 
     assert cmd[cmd.index("--temperature") + 1] == "0.25"
     assert cmd[cmd.index("--main-loop-budget") + 1] == "20"
-    assert cmd[cmd.index("--prompt-profile") + 1] == "original_no_language"
     assert "--ea-origin-parent" not in cmd
     assert "--restart-h" not in cmd
 
 
-def test_rerun_slurm_env_preserves_final_budget_profile_and_dtype() -> None:
+def test_rerun_slurm_env_preserves_final_budget_and_dtype() -> None:
     from scripts.experiments.rerun_from_config import _build_slurm_env
 
     env = _build_slurm_env(_recorded_args())
@@ -92,7 +90,6 @@ def test_rerun_slurm_env_preserves_final_budget_profile_and_dtype() -> None:
     assert env["TEMPERATURE"] == "0.25"
     assert env["BNB_COMPUTE_DTYPE"] == "bfloat16"
     assert env["MAIN_LOOP_BUDGET"] == "20"
-    assert env["PROMPT_PROFILE"] == "original_no_language"
     assert "EA_ORIGIN_PARENT" not in env
     assert env["N_CASES"] == "2"
 
@@ -114,7 +111,6 @@ def test_rerun_qualification_uses_dedicated_wrapper_contract() -> None:
         {
             "model": "Qwen/Qwen2.5-Coder-32B-Instruct",
             "languages": ["python"],
-            "prompt_profile": "original_no_language",
         }
     )
 
@@ -122,7 +118,6 @@ def test_rerun_qualification_uses_dedicated_wrapper_contract() -> None:
 
     assert env["MODEL"] == "qwen"
     assert env["LANGUAGES"] == "python"
-    assert env["PROMPT_PROFILE"] == "original_no_language"
     assert env["RULES_MAP"] == "rules.json"
 
 
@@ -135,14 +130,12 @@ def test_rerun_qualification_api_uses_dedicated_entrypoint() -> None:
     args.update(
         {
             "languages": ["python"],
-            "prompt_profile": "original_with_language",
         }
     )
 
     cmd = _build_qualification_api_command(args, "rerun-output")
 
     assert "scripts/experiments/run_qualification.py" in cmd
-    assert cmd[cmd.index("--prompt-profile") + 1] == "original_with_language"
     assert "--iterations" not in cmd
 
 
@@ -198,8 +191,6 @@ def test_qualification_wrapper_is_full_population_and_self_validating() -> None:
 
     assert "#SBATCH --time=02:00:00" in text
     assert "run_qualification.py" in text
-    assert "PROMPT_PROFILE=${PROMPT_PROFILE:-original_with_language}" in text
-    assert '--prompt-profile "$PROMPT_PROFILE"' in text
     assert "--n-cases" not in text
     assert "validate_qualification_run.py" in text
     assert "final_consensus_map_${MODEL}_${LANGUAGES}.json" in text
@@ -237,14 +228,11 @@ def test_qualification_has_a_dedicated_full_population_cli() -> None:
             "map.json",
             "--output-dir",
             "out",
-            "--prompt-profile",
-            "original_no_language",
         ]
     )
     assert args.temperature == 0.0
     assert args.selection == "first"
     assert args.n_cases is None
-    assert args.prompt_profile == "original_no_language"
     with pytest.raises(SystemExit):
         parse_args(
             [
@@ -255,8 +243,7 @@ def test_qualification_has_a_dedicated_full_population_cli() -> None:
                 "map.json",
                 "--output-dir",
                 "out",
-                "--prompt-profile",
-                "unknown",
+                "--unknown-option",
             ]
         )
 

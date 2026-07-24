@@ -16,10 +16,10 @@
 # SBST Experiment: archive EA (shared init + injection) OR i.i.d. random search.
 #
 # Historical small-subset timings do not predict the frozen full population.
-# Choose wall time at submission from the run objective: short smoke, up to 12h
-# for extended behavior validation, and 24h for a final run. The pre-timeout
-# signal preserves the last completed candidate. Final comparisons use the same
-# 24-hour wall-clock budget; evaluation-index curves are secondary analyses.
+# Choose wall time at submission from the run objective: short smoke, an
+# extended behavior validation, or the supervisor-approved final allocation.
+# The pre-timeout signal preserves the last completed candidate. Final
+# comparisons use the same allocation; evaluation-index curves are secondary.
 #
 # This file is the only mutation-run launcher: OPTIMIZER ∈ {ea, random_search}.
 # Validation is ON by default — the f2 rule-fidelity objective needs SBERT.
@@ -35,12 +35,12 @@
 #
 #   # Full-population EA. Use a high evaluation ceiling; wall time is primary.
 #   N_CASES=all MAIN_LOOP_BUDGET="$EVALUATION_CEILING" LANGUAGES=python SELECTION=first \
-#     sbatch --time=24:00:00 --job-name="ea_python_final" \
+#     sbatch --time="$APPROVED_SLURM_TIME" --job-name="ea_python_final" \
 #            scripts/slurm/slurm_ea_qwen32b.sh
 #
 #   # Random search — same initialization, population, and wall-clock budget.
 #   OPTIMIZER=random_search N_CASES=all MAIN_LOOP_BUDGET="$EVALUATION_CEILING" LANGUAGES=python SELECTION=first \
-#     sbatch --time=24:00:00 --job-name="rand_python_final" \
+#     sbatch --time="$APPROVED_SLURM_TIME" --job-name="rand_python_final" \
 #            scripts/slurm/slurm_ea_qwen32b.sh
 #############################################################################
 
@@ -82,7 +82,6 @@ OBJECTIVE_DIRECTION=${OBJECTIVE_DIRECTION:-minimize}
 ALLOW_UNQUALIFIED_MAP=${ALLOW_UNQUALIFIED_MAP:-0}
 REPO_ROOT=${REPO_ROOT:-/home/rnegro/thesis/rule-mutation}
 OUTPUT_BASE=${OUTPUT_BASE:-"$REPO_ROOT/experiments/results"}
-PROMPT_PROFILE=${PROMPT_PROFILE:?Set PROMPT_PROFILE after reviewing qualification results}
 INITIALIZATION_BUNDLE=${INITIALIZATION_BUNDLE:-}
 TIME_BUDGET_SECONDS=${TIME_BUDGET_SECONDS:-}
 PRETIMEOUT_LEAD_SECONDS=${PRETIMEOUT_LEAD_SECONDS:-300}
@@ -142,7 +141,6 @@ echo "  Validation:      $ENABLE_VALIDATION (1=enabled)"
 echo "  Perplexity gate: $ENABLE_PERPLEXITY (1=enabled; requires ENABLE_VALIDATION=1)"
 echo "  Eval cache:      $ENABLE_EVAL_CACHE (0=disabled)"
 echo "  Objective dir:   $OBJECTIVE_DIRECTION (minimize=reward fewer vulns)"
-echo "  Prompt profile:  $PROMPT_PROFILE"
 echo "  Init bundle:     ${INITIALIZATION_BUNDLE:-none}"
 echo "  Time budget:     ${TIME_BUDGET_SECONDS:-not declared} seconds"
 echo "  Pretimeout lead: ${PRETIMEOUT_LEAD_SECONDS}s"
@@ -275,7 +273,6 @@ python scripts/experiments/run_experiment.py \
     --random-max-changes "$RANDOM_MAX_CHANGES" \
     --ea-injection-every "$EA_INJECTION_EVERY" \
     --order-move-weight "$ORDER_MOVE_WEIGHT" \
-    --prompt-profile "$PROMPT_PROFILE" \
     $INITIALIZATION_BUNDLE_FLAG \
     $TIME_BUDGET_FLAG \
     --pretimeout-lead-seconds "$PRETIMEOUT_LEAD_SECONDS" \

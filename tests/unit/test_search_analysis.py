@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from scripts.analyze import analyze_search_runs
 
 
@@ -13,6 +15,7 @@ def _write_run(
     f1_values: list[float],
     elapsed: list[float],
     git_commit_sha: str = "d" * 40,
+    wall_time_budget_seconds: int = 7_200,
 ) -> Path:
     run_dir = root / optimizer
     run_dir.mkdir(parents=True)
@@ -22,11 +25,10 @@ def _write_run(
         "seed": 42,
         "optimizer": optimizer,
         "temperature": 0.0,
-        "prompt_profile": "profile",
         "rules_map_sha256": "a" * 64,
         "evaluation_population_fingerprint": "b" * 64,
         "initialization_bundle_content_sha256": "c" * 64,
-        "wall_time_budget_seconds": 86_400,
+        "wall_time_budget_seconds": wall_time_budget_seconds,
     }
     (run_dir / "run_config.json").write_text(
         json.dumps({"git_commit_sha": git_commit_sha, "args": args}),
@@ -102,6 +104,7 @@ def test_analysis_uses_wall_time_primary_and_evaluation_curves(
     )
 
     assert result["analysis_policy"]["primary_budget"] == "equal_scheduler_wall_time"
+    assert result["analysis_policy"]["wall_time_budget_seconds"] == 7_200
     assert result["paired_runs"][0]["best_f1_difference_ea_minus_random"] == 1
     assert result["analysis_policy"]["inference_unit"] == (
         "matched seed within model/language"
@@ -148,6 +151,44 @@ def test_final_analysis_rejects_an_unmatched_optimizer(
         assert "requires complete EA/random-search pairs" in str(exc)
     else:
         raise AssertionError("unmatched final analysis should fail")
+
+
+def test_final_analysis_rejects_mixed_wall_time_budgets(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    ea = _write_run(
+        tmp_path,
+        optimizer="ea",
+        f1_values=[0, 1, 0, 1, 0, 2],
+        elapsed=[10],
+        wall_time_budget_seconds=7_200,
+    )
+    random_run = _write_run(
+        tmp_path,
+        optimizer="random_search",
+        f1_values=[0, 1, 0, 1, 0, 3],
+        elapsed=[10],
+        wall_time_budget_seconds=10_800,
+    )
+    monkeypatch.setattr(
+        analyze_search_runs,
+        "validate_run",
+        lambda _path: {
+            "status": "VALID",
+            "issues": [],
+            "final_search_eligible": True,
+        },
+    )
+
+    with pytest.raises(ValueError, match="one common positive scheduler"):
+        analyze_search_runs.analyze(
+            [ea, random_run],
+            allow_diagnostic=False,
+            bootstrap_samples=10,
+            bootstrap_seed=7,
+            time_step_seconds=10,
+        )
 
 
 def test_diagnostic_analysis_reports_an_unmatched_optimizer(

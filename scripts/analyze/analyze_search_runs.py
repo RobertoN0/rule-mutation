@@ -124,7 +124,7 @@ def _load_run(run_dir: Path, *, allow_diagnostic: bool) -> dict[str, Any]:
     if not allow_diagnostic and not validation["final_search_eligible"]:
         raise ValueError(
             f"{run_dir}: run is valid but not eligible for the final "
-            "24-hour full-population comparison"
+            "equal-wall-time full-population comparison"
         )
     config = _json(run_dir / "run_config.json")
     args = config["args"]
@@ -147,7 +147,6 @@ def _load_run(run_dir: Path, *, allow_diagnostic: bool) -> dict[str, Any]:
         "bnb_compute_dtype": args.get("bnb_compute_dtype"),
         "language": language,
         "temperature": args.get("temperature"),
-        "prompt_profile": args.get("prompt_profile"),
         "prompt_contract_sha256": args.get("prompt_contract_sha256"),
         "rules_map_sha256": args.get("rules_map_sha256"),
         "population_fingerprint": args.get("population_fingerprint"),
@@ -187,7 +186,6 @@ def _load_run(run_dir: Path, *, allow_diagnostic: bool) -> dict[str, Any]:
         "seed": int(args["seed"]),
         "optimizer": args["optimizer"],
         "temperature": float(args["temperature"]),
-        "prompt_profile": args["prompt_profile"],
         "rules_map_sha256": args["rules_map_sha256"],
         "evaluation_population_fingerprint": args[
             "evaluation_population_fingerprint"
@@ -366,6 +364,27 @@ def analyze(
     time_step_seconds: int,
 ) -> dict[str, Any]:
     runs = [_load_run(path, allow_diagnostic=allow_diagnostic) for path in run_dirs]
+    wall_time_budgets = sorted(
+        {
+            int(run["wall_time_budget_seconds"])
+            for run in runs
+            if isinstance(run.get("wall_time_budget_seconds"), int)
+            and not isinstance(run.get("wall_time_budget_seconds"), bool)
+            and int(run["wall_time_budget_seconds"]) > 0
+        }
+    )
+    if not allow_diagnostic and (
+        len(wall_time_budgets) != 1 or len(wall_time_budgets) != len(
+            {
+                run.get("wall_time_budget_seconds")
+                for run in runs
+            }
+        )
+    ):
+        raise ValueError(
+            "final analysis requires one common positive scheduler wall-time "
+            "budget across every run"
+        )
     identities = [(run["run_dir"], _pair_contract(run)) for run in runs]
     seen: set[tuple[tuple[Any, ...], str]] = set()
     for run_dir, contract in identities:
@@ -485,7 +504,11 @@ def analyze(
         "artifact_type": "search_analysis",
         "analysis_policy": {
             "primary_budget": "equal_scheduler_wall_time",
-            "required_final_wall_time_seconds": 86_400,
+            "wall_time_budget_seconds": (
+                wall_time_budgets[0]
+                if len(wall_time_budgets) == 1
+                else wall_time_budgets
+            ),
             "primary_endpoint": "best_f1_at_termination",
             "secondary_axes": [
                 "completed_main_loop_evaluations",
@@ -518,11 +541,17 @@ def analyze(
 
 
 def _write_markdown(result: dict[str, Any], path: Path) -> None:
+    wall_time = result["analysis_policy"]["wall_time_budget_seconds"]
+    wall_time_text = (
+        f"{wall_time:,} seconds"
+        if isinstance(wall_time, int)
+        else f"the recorded diagnostic allocations {wall_time}"
+    )
     lines = [
         "# Search analysis",
         "",
         "Primary comparison: best raw-finding reduction (f1) after an equal "
-        "24-hour scheduler allocation. Evaluation-count and elapsed-search "
+        f"scheduler allocation of {wall_time_text}. Evaluation-count and elapsed-search "
         "curves are secondary diagnostics.",
         "",
         "Inferential comparisons use matched seeds and are reported separately "

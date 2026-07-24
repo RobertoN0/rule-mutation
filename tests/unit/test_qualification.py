@@ -8,10 +8,6 @@ from unittest.mock import patch
 import pytest
 
 from src.evaluation.generation_contract import (
-    CURRENT_LANGUAGE_COMPLETE,
-    DEFAULT_PROMPT_PROFILE,
-    ORIGINAL_NO_LANGUAGE,
-    ORIGINAL_WITH_LANGUAGE,
     build_code_generation_system_prompt,
     prompt_contract_sha256,
 )
@@ -91,10 +87,7 @@ def test_qualification_keeps_valid_scores_and_records_task_exclusion(
     assert manifest["valid_task_ids"] == ["1"]
     assert manifest["excluded"][0]["test_case_id"] == "2"
     assert manifest["excluded"][0]["status"] == "syntax_invalid"
-    assert manifest["prompt_profile"] == DEFAULT_PROMPT_PROFILE
-    assert manifest["prompt_contract_sha256"] == prompt_contract_sha256(
-        DEFAULT_PROMPT_PROFILE
-    )
+    assert manifest["prompt_contract_sha256"] == prompt_contract_sha256()
 
     rows = [
         json.loads(line)
@@ -104,7 +97,6 @@ def test_qualification_keeps_valid_scores_and_records_task_exclusion(
     ]
     assert rows[0]["fitness"]["raw_count"] == 1
     assert rows[0]["artifact_type"] == "qualification_task_evaluation"
-    assert rows[0]["prompt_profile"] == DEFAULT_PROMPT_PROFILE
     assert len(rows[0]["system_prompt_sha256"]) == 64
     assert rows[1]["fitness"] is None
     assert rows[1]["qualification_status"] == "syntax_invalid"
@@ -161,50 +153,21 @@ def test_qualification_requires_temperature_zero(tmp_path: Path) -> None:
         )
 
 
-@pytest.mark.parametrize(
-    ("profile", "has_language", "format_instruction"),
-    [
-        (
-            CURRENT_LANGUAGE_COMPLETE,
-            True,
-            "Return one complete implementation only",
-        ),
-        (
-            ORIGINAL_NO_LANGUAGE,
-            False,
-            "Generate only the code requested",
-        ),
-        (
-            ORIGINAL_WITH_LANGUAGE,
-            True,
-            "Generate only the code requested",
-        ),
-    ],
-)
-def test_named_prompt_profiles_are_exact_and_distinct(
-    profile: str,
-    has_language: bool,
-    format_instruction: str,
-) -> None:
-    prompt = build_code_generation_system_prompt(
-        "RULE",
-        "python",
-        profile=profile,
-    )
+def test_fixed_system_prompt_uses_original_wording_and_explicit_language() -> None:
+    prompt = build_code_generation_system_prompt("RULE", "python")
 
-    assert ("required implementation language is Python" in prompt) is has_language
-    assert format_instruction in prompt
+    assert "required implementation language is Python" in prompt
+    assert "Generate only the code requested" in prompt
     assert "=== CODING GUIDELINES ===" in prompt
 
 
-def test_qualification_records_selected_prompt_profile(tmp_path: Path) -> None:
+def test_qualification_records_fixed_prompt_contract(tmp_path: Path) -> None:
     backend = _Backend(["print(user)"])
     with patch("src.evaluation.qualification.run_semgrep_batch_dir", side_effect=_semgrep):
         summary = qualify_search_population(
             backend,
             [_prompt("1")],
             output_dir=tmp_path,
-            prompt_profile=ORIGINAL_NO_LANGUAGE,
         )
 
     row = json.loads(
@@ -212,6 +175,5 @@ def test_qualification_records_selected_prompt_profile(tmp_path: Path) -> None:
         .read_text()
         .strip()
     )
-    assert summary.prompt_profile == ORIGINAL_NO_LANGUAGE
-    assert row["prompt_profile"] == ORIGINAL_NO_LANGUAGE
+    assert summary.prompt_contract_sha256 == prompt_contract_sha256()
     assert len(row["system_prompt_sha256"]) == 64

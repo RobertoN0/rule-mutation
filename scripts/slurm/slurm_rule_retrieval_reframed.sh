@@ -8,8 +8,6 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --gpus-per-task=1
 #SBATCH --mem-per-cpu=8000M
-#SBATCH --output=/home/rnegro/thesis/rule-mutation/logs/rule_retrieval_reframed_%j.out
-#SBATCH --error=/home/rnegro/thesis/rule-mutation/logs/rule_retrieval_reframed_%j.err
 
 #############################################################################
 # Rule Retrieval Mapping on DelftBlue -- REFRAMED prompt (v2), any model.
@@ -22,36 +20,28 @@
 # One script for BOTH models: model, quantization and compute dtype are env
 # vars (defaults = Qwen fp16). Single A100 80GB, one GPU / one node.
 #
-# ── Commands used to compute the final reframed maps (temp=0.6, 20 seeds) ──
+# ── Full-carrier retrieval and replacement-seed examples ─────────────────
 #
-#   # Qwen py (185 prompts):
-#   FROM_MAP=rule_maps/old_maps/map_qwen32b_vulnerable_py.json \
+#   # Qwen, one language carrier, 20 draws:
+#   FROM_MAP=rule_maps/staging/eligible_python_carrier.json \
 #   TEMPERATURE=0.6 SEED_START=1 REPETITIONS=20 \
-#   OUTPUT_DIR=rule_maps/temp_sweep_reframed/python \
+#   OUTPUT_DIR=experiments/final_map_pipeline/retrieval/qwen_python \
 #     sbatch --time=8:00:00 --job-name=reframed_qwen_py \
 #            scripts/slurm/slurm_rule_retrieval_reframed.sh
 #
-#   # Qwen java (114 prompts):
-#   FROM_MAP=rule_maps/old_maps/map_qwen32b_vulnerable_java.json \
-#   TEMPERATURE=0.6 SEED_START=1 REPETITIONS=20 \
-#   OUTPUT_DIR=rule_maps/temp_sweep_reframed/java \
-#     sbatch --time=5:00:00 --job-name=reframed_qwen_java \
+#   # One replacement draw after rejecting an invalid seed:
+#   FROM_MAP=rule_maps/staging/eligible_java_carrier.json \
+#   TEMPERATURE=0.6 SEED_START=21 REPETITIONS=1 \
+#   OUTPUT_DIR=experiments/final_map_pipeline/retrieval/qwen_java \
+#     sbatch --time=2:00:00 --job-name=reframed_qwen_java_s21 \
 #            scripts/slurm/slurm_rule_retrieval_reframed.sh
 #
-#   # Llama py -- override model + 4bit/bf16 (70B fits one A100 only at 4bit):
+#   # Llama uses the same carrier with 4-bit/bfloat16 model settings:
 #   MODEL_ID=meta-llama/Llama-3.3-70B-Instruct QUANTIZATION=4bit BNB_COMPUTE_DTYPE=bfloat16 \
-#   FROM_MAP=rule_maps/old_maps/map_qwen32b_vulnerable_py.json \
+#   FROM_MAP=rule_maps/staging/eligible_python_carrier.json \
 #   TEMPERATURE=0.6 SEED_START=1 REPETITIONS=20 \
-#   OUTPUT_DIR=rule_maps/temp_sweep_reframed/python \
+#   OUTPUT_DIR=experiments/final_map_pipeline/retrieval/llama_python \
 #     sbatch --time=18:00:00 --job-name=reframed_llama_py \
-#            scripts/slurm/slurm_rule_retrieval_reframed.sh
-#
-#   # Llama java:
-#   MODEL_ID=meta-llama/Llama-3.3-70B-Instruct QUANTIZATION=4bit BNB_COMPUTE_DTYPE=bfloat16 \
-#   FROM_MAP=rule_maps/old_maps/map_qwen32b_vulnerable_java.json \
-#   TEMPERATURE=0.6 SEED_START=1 REPETITIONS=20 \
-#   OUTPUT_DIR=rule_maps/temp_sweep_reframed/java \
-#     sbatch --time=10:00:00 --job-name=reframed_llama_java \
 #            scripts/slurm/slurm_rule_retrieval_reframed.sh
 #
 #   # Smoke (1 seed far outside the real range + dedicated dir, cleaned up after):
@@ -79,6 +69,11 @@ REPETITIONS=${REPETITIONS:-1}
 OUTPUT_DIR=${OUTPUT_DIR:-}        # default in the Python script: rule_maps/temp_sweep_reframed
 OUTPUT=${OUTPUT:-}
 RESUME=${RESUME:-}
+REPO_ROOT="${REPO_ROOT:-/home/rnegro/thesis/rule-mutation}"
+
+mkdir -p "$REPO_ROOT/logs"
+exec >"$REPO_ROOT/logs/rule_retrieval_reframed_${SLURM_JOB_ID}.out" \
+     2>"$REPO_ROOT/logs/rule_retrieval_reframed_${SLURM_JOB_ID}.err"
 
 echo "=========================================================================="
 echo "Rule Retrieval Mapping on DelftBlue (REFRAMED v2)"
@@ -99,7 +94,6 @@ echo "  Output dir: ${OUTPUT_DIR:-default (rule_maps/temp_sweep_reframed)}"
 echo "  Resume: ${RESUME:-none}"
 echo ""
 
-REPO_ROOT="${REPO_ROOT:-/home/rnegro/thesis/rule-mutation}"
 cd "$REPO_ROOT"
 
 # Activate the venv and call python directly below. NEVER switch to `uv run python`:

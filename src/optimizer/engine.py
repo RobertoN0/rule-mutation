@@ -35,7 +35,6 @@ from ..evaluation import SemgrepSample, run_semgrep_batch_dir, calculate_fitness
 from ..evaluation.fitness import aggregate_fitness, AggregatedFitness
 from ..evaluation.generation_contract import (
     BASELINE_SYSTEM_TEMPLATE,
-    DEFAULT_PROMPT_PROFILE,
     RULES_SYSTEM_TEMPLATE,
     build_code_generation_system_prompt,
 )
@@ -199,9 +198,6 @@ class SearchConfig:
     if bit-identical GPU determinism is required — in which case the cache's
     correctness no longer holds.
     """
-
-    prompt_profile: str = DEFAULT_PROMPT_PROFILE
-    """Named, qualified code-generation system-prompt contract."""
 
     initialization_bundle: Path | None = None
     """Optional strictly keyed bundle containing the shared five evaluations."""
@@ -652,7 +648,6 @@ class ExperimentEngine:
         return build_code_generation_system_prompt(
             rule_text,
             language,
-            profile=self.config.prompt_profile,
         )
 
     def _generate_code(

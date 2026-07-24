@@ -7,15 +7,12 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --gpus-per-task=1
 #SBATCH --mem-per-cpu=8000M
-#SBATCH --output=/home/rnegro/thesis/rule-mutation/logs/%j_%x.out
-#SBATCH --error=/home/rnegro/thesis/rule-mutation/logs/%j_%x.err
 #SBATCH --signal=B:USR1@300
 
 set -euo pipefail
 
 MODEL=${MODEL:-qwen}
 LANGUAGES=${LANGUAGES:-python}
-PROMPT_PROFILE=${PROMPT_PROFILE:-original_with_language}
 REPO_ROOT=${REPO_ROOT:-/home/rnegro/thesis/rule-mutation}
 OUTPUT_BASE=${OUTPUT_BASE:-experiments/qualification}
 SEMGREP_RULESET=${SEMGREP_RULESET:-/scratch/$USER/semgrep-rules/security-audit}
@@ -25,13 +22,6 @@ SEMGREP_JOBS=${SEMGREP_JOBS:-4}
 if [ "$LANGUAGES" != "python" ] && [ "$LANGUAGES" != "java" ]; then
     echo "ERROR: LANGUAGES must be exactly python or java"; exit 1
 fi
-case "$PROMPT_PROFILE" in
-    current_language_complete) PROFILE_TAG="current" ;;
-    original_no_language) PROFILE_TAG="original_nolang" ;;
-    original_with_language) PROFILE_TAG="original_lang" ;;
-    *) echo "ERROR: unsupported PROMPT_PROFILE: $PROMPT_PROFILE"; exit 1 ;;
-esac
-
 if [ "$MODEL" = "qwen" ]; then
     MODEL_ID="Qwen/Qwen2.5-Coder-32B-Instruct"
     QUANTIZATION=${QUANTIZATION:-fp16}
@@ -45,9 +35,12 @@ else
 fi
 
 RULES_MAP=${RULES_MAP:-"$REPO_ROOT/rule_maps/final_consensus_map_${MODEL}_${LANGUAGES}.json"}
-OUTPUT_DIR=${OUTPUT_DIR:-"$OUTPUT_BASE/job${SLURM_JOB_ID}_${MODEL}_${LANGUAGES}_${PROFILE_TAG}"}
+OUTPUT_DIR=${OUTPUT_DIR:-"$OUTPUT_BASE/job${SLURM_JOB_ID}_${MODEL}_${LANGUAGES}"}
 
 cd "$REPO_ROOT"
+mkdir -p "$OUTPUT_BASE/slurm_logs"
+exec >"$OUTPUT_BASE/slurm_logs/${SLURM_JOB_ID}_${SLURM_JOB_NAME}.out" \
+     2>"$OUTPUT_BASE/slurm_logs/${SLURM_JOB_ID}_${SLURM_JOB_NAME}.err"
 source "$REPO_ROOT/.venv/bin/activate"
 if [ -z "${VIRTUAL_ENV:-}" ]; then echo "ERROR: venv activation failed"; exit 1; fi
 
@@ -62,13 +55,12 @@ if [ ! -s "$SEMGREP_RULESET/SOURCE_COMMIT" ]; then
     echo "ERROR: final qualification requires pinned Semgrep rules with SOURCE_COMMIT"; exit 1
 fi
 
-mkdir -p "$OUTPUT_DIR" logs
+mkdir -p "$OUTPUT_DIR"
 
 echo "=========================================================================="
 echo "Temperature-zero search-population qualification"
 echo "  Model: $MODEL_ID"
 echo "  Language: $LANGUAGES"
-echo "  Prompt profile: $PROMPT_PROFILE"
 echo "  Source map: $RULES_MAP"
 echo "  Semgrep source commit: $(head -n 1 "$SEMGREP_RULESET/SOURCE_COMMIT")"
 echo "  Output: $OUTPUT_DIR"
@@ -82,7 +74,6 @@ python scripts/experiments/run_qualification.py \
     --quantization "$QUANTIZATION" \
     --bnb-compute-dtype "$BNB_COMPUTE_DTYPE" \
     --languages "$LANGUAGES" \
-    --prompt-profile "$PROMPT_PROFILE" \
     --rules-map "$RULES_MAP" \
     --semgrep-config "$SEMGREP_RULESET" \
     --semgrep-timeout-seconds "$SEMGREP_TIMEOUT_SECONDS" \

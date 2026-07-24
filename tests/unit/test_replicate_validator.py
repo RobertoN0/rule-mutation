@@ -26,7 +26,7 @@ def _fixture(tmp_path: Path) -> Path:
                         "policy": "frozen_cross_model_temp0_intersection",
                         "qualified_population_total": 2,
                         "qualified_population_fingerprint": fingerprint,
-                        "prompt_profile": "current_language_complete",
+                        "prompt_contract_sha256": prompt_contract_sha256(),
                     }
                 },
                 "mappings": [],
@@ -50,10 +50,7 @@ def _fixture(tmp_path: Path) -> Path:
             "n_cases": 2,
             "seeds": [42],
             "max_output_tokens": 4096,
-            "prompt_profile": "current_language_complete",
-            "prompt_contract_sha256": prompt_contract_sha256(
-                "current_language_complete"
-            ),
+            "prompt_contract_sha256": prompt_contract_sha256(),
             "invalid_output_policy": "missing_not_zero_with_explicit_denominator",
             "rules_map": str(source_map),
             "rules_map_sha256": hashlib.sha256(source_map.read_bytes()).hexdigest(),

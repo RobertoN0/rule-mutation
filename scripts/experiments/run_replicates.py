@@ -57,9 +57,7 @@ from scripts.analyze import stats as S  # noqa: E402
 from scripts.analyze.validate_replicate_run import validate_replicate_run  # noqa: E402
 from src.llm_backends import LLMConfig  # noqa: E402
 from src.evaluation.generation_contract import (  # noqa: E402
-    DEFAULT_PROMPT_PROFILE,
     MAX_OUTPUT_TOKENS,
-    PROMPT_PROFILES,
     prompt_contract_sha256,
 )
 from src.llm_backends.delftblue_local_backend import DelftBlueLocalBackend  # noqa: E402
@@ -383,12 +381,6 @@ def main() -> None:
         action="store_true",
         help="Explicitly allow a non-final map for diagnostic replicate runs.",
     )
-    ap.add_argument(
-        "--prompt-profile",
-        choices=sorted(PROMPT_PROFILES),
-        default=DEFAULT_PROMPT_PROFILE,
-        help="Qualified code-generation system-prompt profile.",
-    )
     args = ap.parse_args()
 
     current_git_commit_sha = _git_commit_sha()
@@ -437,11 +429,12 @@ def main() -> None:
         )
     if (
         not args.allow_unqualified_map
-        and map_qualification.get("prompt_profile") != args.prompt_profile
+        and map_qualification.get("prompt_contract_sha256")
+        != prompt_contract_sha256()
     ):
         ap.error(
-            "replicate prompt profile differs from the profile recorded by the "
-            "qualified map"
+            "replicate prompt contract differs from the contract recorded by "
+            "the qualified map"
         )
 
     try:
@@ -536,8 +529,7 @@ def main() -> None:
             "bnb_compute_dtype": args.bnb_compute_dtype,
             "languages": [args.language],
             "temperature": args.temperature,
-            "prompt_profile": args.prompt_profile,
-            "prompt_contract_sha256": prompt_contract_sha256(args.prompt_profile),
+            "prompt_contract_sha256": prompt_contract_sha256(),
             "n_cases": len(prompts),
             "evaluated_population_fingerprint": actual_population_fingerprint,
             "semgrep_version": semgrep_config["semgrep_version"],
@@ -586,8 +578,7 @@ def main() -> None:
             "bnb_compute_dtype": args.bnb_compute_dtype,
             "languages": [args.language],
             "temperature": args.temperature,
-            "prompt_profile": args.prompt_profile,
-            "prompt_contract_sha256": prompt_contract_sha256(args.prompt_profile),
+            "prompt_contract_sha256": prompt_contract_sha256(),
             "condition": condtag,
             "quantization": args.quantization,
             "n_cases": len(prompts),
@@ -651,8 +642,7 @@ def main() -> None:
             "n_cases_requested": args.n_cases,
             "selection": args.selection,
             "temperature": args.temperature,
-            "prompt_profile": args.prompt_profile,
-            "prompt_contract_sha256": prompt_contract_sha256(args.prompt_profile),
+            "prompt_contract_sha256": prompt_contract_sha256(),
             "condition": condtag,
             "seeds": all_seeds,            # cumulative across chunks
             "seeds_this_chunk": seeds,     # what this invocation was asked to run
@@ -729,7 +719,6 @@ def main() -> None:
                     temperature=args.temperature,
                     require_temperature_zero=False,
                     verbose=False,
-                    prompt_profile=args.prompt_profile,
                 )
             except QualificationInfrastructureError as exc:
                 raise SystemExit(

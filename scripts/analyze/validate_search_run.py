@@ -17,10 +17,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.evaluation.output_validation import validate_generated_output  # noqa: E402
-from src.evaluation.generation_contract import (  # noqa: E402
-    PROMPT_PROFILES,
-    prompt_contract_sha256,
-)
+from src.evaluation.generation_contract import prompt_contract_sha256  # noqa: E402
 from src.optimizer.initialization import (  # noqa: E402
     build_initialization_identity,
     load_initialization_bundle,
@@ -245,11 +242,8 @@ def validate_run(run_dir: Path) -> dict[str, Any]:
                     != loaded_bundle.content_sha256
                 ):
                     issues.append("run_config initialization-bundle hash differs")
-        profile = args.get("prompt_profile")
-        if profile not in PROMPT_PROFILES:
-            issues.append("run_config has an unknown prompt profile")
-        elif args.get("prompt_contract_sha256") != prompt_contract_sha256(profile):
-            issues.append("run_config prompt-contract hash differs from its profile")
+        if args.get("prompt_contract_sha256") != prompt_contract_sha256():
+            issues.append("run_config prompt-contract hash differs from the active contract")
         if args.get("fitness_strategy") != "raw_count":
             issues.append("run_config does not declare raw_count fitness")
         if args.get("max_output_tokens") != 4096:
@@ -319,9 +313,9 @@ def validate_run(run_dir: Path) -> dict[str, Any]:
                     population_evidence_status,
                 ),
                 (
-                    "prompt profile",
-                    map_qualification.get("prompt_profile"),
-                    profile,
+                    "prompt contract",
+                    map_qualification.get("prompt_contract_sha256"),
+                    args.get("prompt_contract_sha256"),
                 ),
             )
             for label, recorded, current in map_checks:
@@ -808,7 +802,11 @@ def validate_run(run_dir: Path) -> dict[str, Any]:
             "time_budget_eligible": (
                 locals().get("termination_reason") == "wall_time_limit"
                 and locals().get("completion_state") == "partial"
-                and locals().get("wall_time_budget_seconds") == 86_400
+                and isinstance(
+                    locals().get("wall_time_budget_seconds"),
+                    int,
+                )
+                and locals().get("wall_time_budget_seconds") > 0
             ),
         },
         "final_search_eligible": (
@@ -817,7 +815,11 @@ def validate_run(run_dir: Path) -> dict[str, Any]:
             and locals().get("termination_reason") == "wall_time_limit"
             and locals().get("completion_state") == "partial"
             and len(locals().get("initialization_rows", [])) == 5
-            and locals().get("wall_time_budget_seconds") == 86_400
+            and isinstance(
+                locals().get("wall_time_budget_seconds"),
+                int,
+            )
+            and locals().get("wall_time_budget_seconds") > 0
             and locals().get("args", {}).get("n_cases")
             == locals().get("map_population_total")
         ),

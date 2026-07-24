@@ -13,7 +13,6 @@ from typing import Any, Callable
 
 from .fitness import calculate_fitness
 from .generation_contract import (
-    DEFAULT_PROMPT_PROFILE,
     build_code_generation_system_prompt,
     prompt_contract_sha256,
 )
@@ -36,7 +35,6 @@ class QualificationSummary:
     valid_prompts: int
     excluded_prompts: int
     population_fingerprint: str
-    prompt_profile: str
     prompt_contract_sha256: str
     manifest_path: Path | None
     rows: tuple[dict[str, Any], ...]
@@ -81,7 +79,6 @@ def qualify_search_population(
     temperature: float = 0.0,
     require_temperature_zero: bool = True,
     model_id: str | None = None,
-    prompt_profile: str = DEFAULT_PROMPT_PROFILE,
     should_stop_fn: Callable[[], bool] | None = None,
     verbose: bool = True,
 ) -> QualificationSummary:
@@ -98,7 +95,7 @@ def qualify_search_population(
         raise ValueError("Qualification requires deterministic temperature=0")
     if not require_temperature_zero and output_dir is not None:
         raise ValueError("stochastic origin evaluation must use caller-managed artifacts")
-    contract_sha256 = prompt_contract_sha256(prompt_profile)
+    contract_sha256 = prompt_contract_sha256()
 
     task_ids = [
         str(prompt.metadata.get("test_case_id", f"case_{idx}"))
@@ -150,7 +147,6 @@ def qualify_search_population(
         system = build_code_generation_system_prompt(
             prompt.combined_rules or None,
             language,
-            profile=prompt_profile,
         )
         try:
             response = llm_backend.generate(
@@ -195,7 +191,6 @@ def qualify_search_population(
             "prompt_hash": prompt.metadata.get("prompt_hash"),
             "cwe_id": prompt.cwe_id,
             "original_rule_ids": list(prompt.rule_ids),
-            "prompt_profile": prompt_profile,
             "system_prompt_sha256": _sha256(system),
             "finish_reason": finish_reason,
             "input_tokens": input_tokens,
@@ -373,7 +368,6 @@ def qualify_search_population(
             "model": model_id or getattr(llm_backend, "model_name", None),
             "provider": getattr(llm_backend, "provider_name", None),
             "temperature": temperature,
-            "prompt_profile": prompt_profile,
             "prompt_contract_sha256": contract_sha256,
             "analysis_languages": sorted({row["analysis_language"] for row in rows}),
             "total_prompts": len(rows),
@@ -406,7 +400,6 @@ def qualify_search_population(
         valid_prompts=len(valid_rows),
         excluded_prompts=len(rows) - len(valid_rows),
         population_fingerprint=fingerprint,
-        prompt_profile=prompt_profile,
         prompt_contract_sha256=contract_sha256,
         manifest_path=manifest_path,
         rows=tuple(rows),

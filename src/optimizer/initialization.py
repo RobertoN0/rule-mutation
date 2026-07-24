@@ -22,7 +22,6 @@ IDENTITY_ARGUMENT_FIELDS = (
     "model_revision",
     "torch_version",
     "transformers_version",
-    "prompt_profile",
     "prompt_contract_sha256",
     "rules_map_sha256",
     "population_fingerprint",

@@ -42,7 +42,6 @@ COMPARISON_CONTRACT_FIELDS = (
     "bnb_compute_dtype",
     "languages",
     "temperature",
-    "prompt_profile",
     "prompt_contract_sha256",
     "n_cases",
     "selection",

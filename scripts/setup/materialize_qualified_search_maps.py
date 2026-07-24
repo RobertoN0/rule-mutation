@@ -17,10 +17,9 @@ from typing import Any
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.evaluation.generation_contract import (  # noqa: E402
-    PROMPT_PROFILES,
-    prompt_contract_sha256,
-)
+from src.evaluation.generation_contract import prompt_contract_sha256  # noqa: E402
+from src.evaluation.population_screening import SCREENING_POLICY  # noqa: E402
+from src.retrieval.population import ELIGIBILITY_POLICY  # noqa: E402
 
 MODEL_IDS = {
     "qwen": "Qwen/Qwen2.5-Coder-32B-Instruct",
@@ -76,6 +75,122 @@ def _load_source_map(path: Path) -> dict[str, Any]:
     if len(ids) != len(set(ids)):
         raise ValueError(f"{path}: duplicate task IDs")
     return payload
+
+
+def _validate_manifest_reference(
+    source_map_path: Path,
+    evidence: dict[str, Any],
+    *,
+    label: str,
+) -> None:
+    reference = evidence.get("manifest")
+    if not isinstance(reference, dict):
+        raise ValueError(f"{source_map_path}: {label} lacks a manifest reference")
+    filename = reference.get("filename")
+    expected_sha256 = reference.get("sha256")
+    if (
+        not isinstance(filename, str)
+        or not filename
+        or re.fullmatch(r"[0-9a-f]{64}", str(expected_sha256 or "")) is None
+    ):
+        raise ValueError(f"{source_map_path}: {label} manifest reference is invalid")
+    manifest_path = source_map_path.parent / filename
+    if not manifest_path.is_file():
+        raise ValueError(f"{source_map_path}: {label} manifest is unavailable")
+    if _sha256_file(manifest_path) != expected_sha256:
+        raise ValueError(f"{source_map_path}: {label} manifest hash mismatch")
+
+
+def _validate_screened_source_map(
+    path: Path,
+    payload: dict[str, Any],
+    *,
+    model: str,
+    language: str | None,
+) -> None:
+    """Reject maps that did not pass the final pre-qualification gates."""
+    if payload.get("artifact_type") != "screened_population_map":
+        raise ValueError(f"{path}: source map is not a screened_population_map")
+    mappings = payload["mappings"]
+    metadata = payload.get("metadata")
+    if not isinstance(metadata, dict):
+        raise ValueError(f"{path}: screened source map lacks metadata")
+    if model in MODELS and metadata.get("model_key") != model:
+        raise ValueError(f"{path}: screened source map does not belong to {model}")
+    if model == "norules" and any(
+        row.get("rules_retrieved") for row in mappings
+    ):
+        raise ValueError(f"{path}: no-rules source map contains mapped rules")
+
+    screening = metadata.get("population_screening")
+    if (
+        not isinstance(screening, dict)
+        or screening.get("evidence_status") != "final"
+        or screening.get("policy") != SCREENING_POLICY
+    ):
+        raise ValueError(f"{path}: source map lacks final stochastic-screening evidence")
+    if screening.get("screened_population_total") != len(mappings):
+        raise ValueError(f"{path}: screened-population count mismatch")
+    if screening.get("screened_population_fingerprint") != _population_fingerprint(
+        mappings
+    ):
+        raise ValueError(f"{path}: screened-population fingerprint mismatch")
+
+    eligibility = metadata.get("population_eligibility")
+    if (
+        not isinstance(eligibility, dict)
+        or eligibility.get("evidence_status") != "final"
+        or eligibility.get("policy") != ELIGIBILITY_POLICY
+    ):
+        raise ValueError(f"{path}: source map lacks final eligibility evidence")
+    if language is not None:
+        _validate_manifest_reference(path, screening, label="screening evidence")
+        _validate_manifest_reference(path, eligibility, label="eligibility evidence")
+        if any(
+            str(row.get("language", "")).lower() != language
+            for row in mappings
+        ):
+            raise ValueError(f"{path}: source map contains the wrong language")
+    else:
+        language_evidence = screening.get("language_evidence")
+        eligibility_evidence = eligibility.get("language_evidence")
+        if not isinstance(language_evidence, dict) or set(language_evidence) != set(
+            LANGUAGES
+        ):
+            raise ValueError(f"{path}: combined map lacks screening evidence by language")
+        if not isinstance(eligibility_evidence, dict) or set(
+            eligibility_evidence
+        ) != set(LANGUAGES):
+            raise ValueError(f"{path}: combined map lacks eligibility evidence by language")
+        for evidence_language in LANGUAGES:
+            screening_block = language_evidence[evidence_language]
+            eligibility_block = eligibility_evidence[evidence_language]
+            if (
+                not isinstance(screening_block, dict)
+                or screening_block.get("evidence_status") != "final"
+                or screening_block.get("policy") != SCREENING_POLICY
+            ):
+                raise ValueError(
+                    f"{path}: invalid {evidence_language} screening evidence"
+                )
+            if (
+                not isinstance(eligibility_block, dict)
+                or eligibility_block.get("evidence_status") != "final"
+                or eligibility_block.get("policy") != ELIGIBILITY_POLICY
+            ):
+                raise ValueError(
+                    f"{path}: invalid {evidence_language} eligibility evidence"
+                )
+            _validate_manifest_reference(
+                path,
+                screening_block,
+                label=f"{evidence_language} screening evidence",
+            )
+            _validate_manifest_reference(
+                path,
+                eligibility_block,
+                label=f"{evidence_language} eligibility evidence",
+            )
 
 
 def _task_identities(payload: dict[str, Any]) -> dict[str, tuple[Any, ...]]:
@@ -160,14 +275,9 @@ def _load_qualification(
     for field in ("torch_version", "transformers_version"):
         if not isinstance(args.get(field), str) or not args[field]:
             raise ValueError(f"{run_config_path}: {field} is missing")
-    prompt_profile = args.get("prompt_profile")
-    if prompt_profile not in PROMPT_PROFILES:
-        raise ValueError(f"{run_config_path}: unknown prompt profile {prompt_profile!r}")
-    prompt_hash = prompt_contract_sha256(prompt_profile)
+    prompt_hash = prompt_contract_sha256()
     if args.get("prompt_contract_sha256") != prompt_hash:
         raise ValueError(f"{run_config_path}: prompt-contract hash mismatch")
-    if manifest.get("prompt_profile") != prompt_profile:
-        raise ValueError(f"{manifest_path}: prompt profile differs from run_config")
     if manifest.get("prompt_contract_sha256") != prompt_hash:
         raise ValueError(f"{manifest_path}: prompt-contract hash mismatch")
     if args.get("max_output_tokens") != 4096:
@@ -233,15 +343,11 @@ def _reconcile_semgrep_provenance(inputs: list[QualificationInput]) -> dict[str,
         raise ValueError("all four qualifications must use identical model-library versions")
     torch_version, transformers_version = software_versions.pop()
     prompt_contracts = {
-        (
-            item.run_config["args"]["prompt_profile"],
-            item.run_config["args"]["prompt_contract_sha256"],
-        )
-        for item in inputs
+        item.run_config["args"]["prompt_contract_sha256"] for item in inputs
     }
     if len(prompt_contracts) != 1:
-        raise ValueError("all four qualifications must use the same prompt profile")
-    prompt_profile, prompt_sha256 = prompt_contracts.pop()
+        raise ValueError("all four qualifications must use the same prompt contract")
+    prompt_sha256 = prompt_contracts.pop()
     return {
         "semgrep_rules_source_commit": source_commit,
         "semgrep_rules_sha256": rules_sha256,
@@ -249,7 +355,6 @@ def _reconcile_semgrep_provenance(inputs: list[QualificationInput]) -> dict[str,
         "code_git_commit_sha": git_commits.pop(),
         "torch_version": torch_version,
         "transformers_version": transformers_version,
-        "prompt_profile": prompt_profile,
         "prompt_contract_sha256": prompt_sha256,
     }
 
@@ -307,7 +412,14 @@ def materialize(args: argparse.Namespace) -> dict[str, Any]:
     for model in MODELS:
         for language in LANGUAGES:
             path = map_dir / f"final_consensus_map_{model}_{language}.json"
-            source_maps[(model, language)] = (path, _load_source_map(path))
+            payload = _load_source_map(path)
+            _validate_screened_source_map(
+                path,
+                payload,
+                model=model,
+                language=language,
+            )
+            source_maps[(model, language)] = (path, payload)
     for language in LANGUAGES:
         qwen_rows = _task_identities(source_maps[("qwen", language)][1])
         llama_rows = _task_identities(source_maps[("llama", language)][1])
@@ -323,11 +435,24 @@ def materialize(args: argparse.Namespace) -> dict[str, Any]:
     for model in MODELS:
         combined_path = map_dir / f"final_consensus_map_{model}.json"
         combined = _load_source_map(combined_path)
+        _validate_screened_source_map(
+            combined_path,
+            combined,
+            model=model,
+            language=None,
+        )
         if _task_identities(combined) != expected_combined_identities:
             raise ValueError(
                 f"{combined_path}: combined map task identities differ from language maps"
             )
-    norules_source = _load_source_map(map_dir / "final_norules_map.json")
+    norules_path = map_dir / "final_norules_map.json"
+    norules_source = _load_source_map(norules_path)
+    _validate_screened_source_map(
+        norules_path,
+        norules_source,
+        model="norules",
+        language=None,
+    )
     if _task_identities(norules_source) != expected_combined_identities:
         raise ValueError("final_norules_map.json task identities differ from consensus maps")
 

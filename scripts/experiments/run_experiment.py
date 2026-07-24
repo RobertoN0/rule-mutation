@@ -25,8 +25,7 @@ Usage:
     python scripts/experiments/run_experiment.py \
         --rules-map rule_maps/qualified/final_search_map_qwen_python.json \
         --model Qwen/Qwen2.5-Coder-32B-Instruct \
-        --optimizer ea --main-loop-budget 100000 --enable-validation \
-        --prompt-profile "$PROMPT_PROFILE"
+        --optimizer ea --main-loop-budget 100000 --enable-validation
 """
 
 from __future__ import annotations
@@ -90,9 +89,7 @@ from src.optimizer import ExperimentEngine, SearchConfig
 from src.optimizer.engine import EvaluationInfrastructureError
 from src.evaluation.output_validation import BaselineOutputError
 from src.evaluation.generation_contract import (
-    DEFAULT_PROMPT_PROFILE,
     MAX_OUTPUT_TOKENS,
-    PROMPT_PROFILES,
     prompt_contract_sha256,
 )
 from src.evaluation import (
@@ -249,7 +246,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
         help=(
             "Declared scheduler allocation used for the primary time-budget "
-            "comparison. Final runs use 86400 seconds."
+            "comparison. Matched final runs must use the same approved value."
         ),
     )
     parser.add_argument(
@@ -321,12 +318,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "temp>0 statistical arm. Does NOT affect LLM mutators: they pass "
             "their own fixed per-call temperature (e.g. paraphrase=0.6)."
         ),
-    )
-    parser.add_argument(
-        "--prompt-profile",
-        choices=sorted(PROMPT_PROFILES),
-        default=DEFAULT_PROMPT_PROFILE,
-        help="Qualified code-generation system-prompt profile.",
     )
     parser.add_argument(
         "--dry-run",
@@ -835,7 +826,6 @@ def build_search_config(args: argparse.Namespace) -> SearchConfig:
         ea_injection_every=args.ea_injection_every,
         order_move_weight=args.order_move_weight,
         objective_direction=args.objective_direction,
-        prompt_profile=args.prompt_profile,
         initialization_bundle=args.initialization_bundle,
     )
 
@@ -866,10 +856,7 @@ def print_config_summary(args: argparse.Namespace, config: SearchConfig, n_promp
     )
     print(f"   Direction: {args.objective_direction} "
           f"({'repair — positive f1 = fewer vulns' if args.objective_direction == 'minimize' else 'adversarial'})")
-    print(
-        f"   Prompt profile: {args.prompt_profile} "
-        f"({prompt_contract_sha256(args.prompt_profile)})"
-    )
+    print(f"   Prompt contract: {prompt_contract_sha256()}")
     if args.optimizer == "ea":
         print(f"   Optimizer: ea (single local move, "
               f"init=5, inject_every={args.ea_injection_every}, "
@@ -1020,8 +1007,7 @@ def save_run_config(
             "quantization":           args.quantization,
             "bnb_compute_dtype":      args.bnb_compute_dtype,
             "temperature":            args.temperature,
-            "prompt_profile":         args.prompt_profile,
-            "prompt_contract_sha256": prompt_contract_sha256(args.prompt_profile),
+            "prompt_contract_sha256": prompt_contract_sha256(),
             "run_mode":               "search",
             "allow_unqualified_map":  args.allow_unqualified_map,
             "rules_map":              str(args.rules_map),
@@ -1145,19 +1131,19 @@ def main():
             "explicit non-final smoke."
         )
         sys.exit(1)
-    qualified_profile = (
-        map_qualification.get("prompt_profile")
+    qualified_prompt_contract = (
+        map_qualification.get("prompt_contract_sha256")
         if isinstance(map_qualification, dict)
         else None
     )
     if (
         not args.dry_run
         and not args.allow_unqualified_map
-        and qualified_profile != args.prompt_profile
+        and qualified_prompt_contract != prompt_contract_sha256()
     ):
         print(
-            "❌ Error: the selected map was not qualified with prompt profile "
-            f"{args.prompt_profile!r}; map records {qualified_profile!r}."
+            "❌ Error: the selected map was not qualified with the active "
+            "code-generation prompt contract."
         )
         sys.exit(1)
 

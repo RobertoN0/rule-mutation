@@ -17,10 +17,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.evaluation.output_validation import validate_generated_output  # noqa: E402
-from src.evaluation.generation_contract import (  # noqa: E402
-    PROMPT_PROFILES,
-    prompt_contract_sha256,
-)
+from src.evaluation.generation_contract import prompt_contract_sha256  # noqa: E402
 
 
 PROMPT_ERROR_KINDS = {
@@ -111,11 +108,8 @@ def validate_replicate_run(run_dir: Path) -> dict[str, Any]:
         for package_key in ("torch_version", "transformers_version"):
             if not isinstance(args.get(package_key), str) or not args[package_key]:
                 issues.append(f"replicate run lacks {package_key}")
-        profile = args.get("prompt_profile")
-        if profile not in PROMPT_PROFILES:
-            issues.append("replicate run has an unknown prompt profile")
-        elif args.get("prompt_contract_sha256") != prompt_contract_sha256(profile):
-            issues.append("replicate prompt-contract hash does not match its profile")
+        if args.get("prompt_contract_sha256") != prompt_contract_sha256():
+            issues.append("replicate prompt-contract hash does not match the active contract")
         if args.get("max_output_tokens") != 4096:
             issues.append("replicate run did not use the fixed 4096-token cap")
         if args.get("invalid_output_policy") != "missing_not_zero_with_explicit_denominator":
@@ -157,8 +151,10 @@ def validate_replicate_run(run_dir: Path) -> dict[str, Any]:
                 "population_fingerprint"
             ):
                 issues.append("map population fingerprint differs from run_config")
-            if qualification.get("prompt_profile") != profile:
-                issues.append("map prompt profile differs from replicate run")
+            if qualification.get("prompt_contract_sha256") != args.get(
+                "prompt_contract_sha256"
+            ):
+                issues.append("map prompt contract differs from replicate run")
         override_path_value = args.get("rules_override_dir")
         if override_path_value is not None:
             override_dir = Path(str(override_path_value))

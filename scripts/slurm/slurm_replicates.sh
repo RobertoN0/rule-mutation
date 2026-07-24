@@ -56,7 +56,6 @@ ONLY_OVERRIDDEN=${ONLY_OVERRIDDEN:-1}           # override mode: 1 = only the it
 OUTPUT_DIR=${OUTPUT_DIR:-}                       # set to an existing run dir to resume/top-up missing seeds
 OUTPUT_BASE=${OUTPUT_BASE:-}
 ALLOW_UNQUALIFIED_MAP=${ALLOW_UNQUALIFIED_MAP:-0}
-PROMPT_PROFILE=${PROMPT_PROFILE:?Set PROMPT_PROFILE after reviewing qualification results}
 
 if [ "$MODEL" = "qwen" ]; then
     MODEL_ID="Qwen/Qwen2.5-Coder-32B-Instruct"
@@ -160,7 +159,6 @@ python scripts/experiments/run_replicates.py \
     "${MAP_POLICY_ARGS[@]}" \
     --selection "$SELECTION" \
     --temperature "$TEMPERATURE" \
-    --prompt-profile "$PROMPT_PROFILE" \
     "${SEED_ARGS[@]}" \
     "${COND_ARGS[@]}" \
     "${BASE_ARGS[@]}" \

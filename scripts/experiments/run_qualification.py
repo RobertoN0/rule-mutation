@@ -39,9 +39,7 @@ from scripts.experiments.run_experiment import (  # noqa: E402
 )
 from src.evaluation import create_rule_loader  # noqa: E402
 from src.evaluation.generation_contract import (  # noqa: E402
-    DEFAULT_PROMPT_PROFILE,
     MAX_OUTPUT_TOKENS,
-    PROMPT_PROFILES,
     prompt_contract_sha256,
 )
 from src.evaluation.output_validation import normalize_language  # noqa: E402
@@ -60,11 +58,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         choices=["python", "java"],
         required=True,
         metavar="LANG",
-    )
-    parser.add_argument(
-        "--prompt-profile",
-        choices=sorted(PROMPT_PROFILES),
-        default=DEFAULT_PROMPT_PROFILE,
     )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--model", "-m", default=None)
@@ -153,8 +146,7 @@ def _save_run_config(
             "bnb_compute_dtype": args.bnb_compute_dtype,
             "temperature": 0.0,
             "run_mode": "qualification",
-            "prompt_profile": args.prompt_profile,
-            "prompt_contract_sha256": prompt_contract_sha256(args.prompt_profile),
+            "prompt_contract_sha256": prompt_contract_sha256(),
             "rules_map": str(args.rules_map),
             "rules_map_sha256": hashlib.sha256(args.rules_map.read_bytes()).hexdigest(),
             "n_cases": n_prompts,
@@ -233,7 +225,7 @@ def main(argv: list[str] | None = None) -> int:
     print("=" * 70)
     print("🔬 Temperature-zero search-population qualification")
     print("=" * 70)
-    print(f"   Prompt profile: {args.prompt_profile}")
+    print(f"   Prompt contract: {prompt_contract_sha256()}")
     print(f"   Model: {args.model}")
     print(f"   Language: {args.languages[0]}")
 
@@ -267,7 +259,6 @@ def main(argv: list[str] | None = None) -> int:
             output_dir=args.output_dir,
             temperature=0.0,
             model_id=args.model,
-            prompt_profile=args.prompt_profile,
             should_stop_fn=should_stop,
         )
     except QualificationInfrastructureError as exc:
