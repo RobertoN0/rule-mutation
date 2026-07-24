@@ -72,10 +72,9 @@ retrieval = [
     "nest-asyncio>=1.6,<2",
 ]
 
-# Result analysis + report figure generation. Run locally on downloaded results;
-# kept optional so the DelftBlue / GPU experiment runtime stays lean (it never plots).
+# Statistical result analysis. Kept optional so the DelftBlue experiment
+# runtime stays lean.
 analysis = [
-    "matplotlib>=3.7,<4",
     "scipy>=1.10,<2",
 ]
 
