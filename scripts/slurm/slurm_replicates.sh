@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name="bh"
+#SBATCH --job-name="replicates"
 #SBATCH --account=education-eemcs-msc-cs
 #SBATCH --partition=gpu-a100
 #SBATCH --time=24:00:00
@@ -7,13 +7,11 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --gpus-per-task=1
 #SBATCH --mem-per-cpu=8000M
-#SBATCH --output=/home/rnegro/thesis/rule-mutation/logs/%j_%x.out
-#SBATCH --error=/home/rnegro/thesis/rule-mutation/logs/%j_%x.err
 
 #############################################################################
-# Replicate harness: load the model ONCE, run temp>0 replicates of a SINGLE
+# Replicate runner: load the model ONCE, run temp>0 replicates of a SINGLE
 # condition under chosen seeds, for one (MODEL, LANGUAGES). One condition per
-# job keeps wall-time short (<24h); split norules/withrules into two jobs.
+# job; choose the wall time at submission and split norules/withrules into jobs.
 #
 # Per-replicate results flush to replicates.jsonl (append), and per-prompt
 # records (incl. generated code) to intermediate/<condtag>_seed<NNNN>.jsonl, so a
@@ -22,32 +20,29 @@
 #
 # Usage:
 #   # No-rules / with-rules baselines (one condition each):
-#   MODEL=qwen LANGUAGES=python N_CASES=184 CONDITION=norules   sbatch --job-name=bh_qwen_py_nr scripts/slurm/slurm_baseline_harness.sh
-#   MODEL=qwen LANGUAGES=python N_CASES=184 CONDITION=withrules \
-#       BASELINE_REF=experiments/results/<norules_run_dir> sbatch --job-name=bh_qwen_py_wr scripts/slurm/slurm_baseline_harness.sh
+#   MODEL=qwen LANGUAGES=python CONDITION=norules sbatch scripts/slurm/slurm_replicates.sh
+#   MODEL=qwen LANGUAGES=python CONDITION=withrules \
+#       BASELINE_REF=experiments/results/<norules_run_dir> sbatch scripts/slurm/slurm_replicates.sh
 #
 #   # Resume only the missing seeds into an existing run dir:
-#   MODEL=qwen LANGUAGES=java N_CASES=113 CONDITION=withrules SEEDS=47,48,49,50,51 \
-#       OUTPUT_DIR=experiments/results/<existing_dir> sbatch --job-name=bh_qwen_ja_wr_topup scripts/slurm/slurm_baseline_harness.sh
+#   MODEL=qwen LANGUAGES=java CONDITION=withrules SEEDS=47,48,49,50,51 \
+#       OUTPUT_DIR=experiments/results/<existing_dir> sbatch scripts/slurm/slurm_replicates.sh
 #
 #   # Override mode (a specific EA iteration's mutated rules over its prompt subset):
-#   MODEL=qwen LANGUAGES=python N_CASES=184 CONDITION_LABEL=iter042 \
-#       RULES_OVERRIDE_DIR=$PWD/experiments/results/<ea_run>/mutated_rules/iter042 \
-#       sbatch --job-name=bh_qwen_py_iter042 scripts/slurm/slurm_baseline_harness.sh
+#   MODEL=qwen LANGUAGES=python CONDITION_LABEL=selected_evaluation \
+#       RULES_OVERRIDE_DIR=$PWD/experiments/results/<ea_run>/mutated_rules/evaluation_0042 \
+#       sbatch scripts/slurm/slurm_replicates.sh
 #############################################################################
 
 set -e
 
 MODEL=${MODEL:-qwen}                 # qwen | llama
 LANGUAGES=${LANGUAGES:-python}
-if [ "$LANGUAGES" = "python" ]; then
-    N_CASES=${N_CASES:-184}
-elif [ "$LANGUAGES" = "java" ]; then
-    N_CASES=${N_CASES:-113}
-else
+if [ "$LANGUAGES" != "python" ] && [ "$LANGUAGES" != "java" ]; then
     echo "ERROR: LANGUAGES must be python or java (got: $LANGUAGES)"; exit 1
 fi
-SELECTION=${SELECTION:-random}
+N_CASES=${N_CASES:-}
+SELECTION=${SELECTION:-first}
 TEMPERATURE=${TEMPERATURE:-0.6}
 REPLICATES=${REPLICATES:-10}
 SEED_BASE=${SEED_BASE:-42}
@@ -59,6 +54,9 @@ RULES_OVERRIDE_DIR=${RULES_OVERRIDE_DIR:-}      # set → override mode (single 
 CONDITION_LABEL=${CONDITION_LABEL:-override}
 ONLY_OVERRIDDEN=${ONLY_OVERRIDDEN:-1}           # override mode: 1 = only the iteration's affected prompts
 OUTPUT_DIR=${OUTPUT_DIR:-}                       # set to an existing run dir to resume/top-up missing seeds
+OUTPUT_BASE=${OUTPUT_BASE:-}
+ALLOW_UNQUALIFIED_MAP=${ALLOW_UNQUALIFIED_MAP:-0}
+PROMPT_PROFILE=${PROMPT_PROFILE:?Set PROMPT_PROFILE after reviewing qualification results}
 
 if [ "$MODEL" = "qwen" ]; then
     MODEL_ID="Qwen/Qwen2.5-Coder-32B-Instruct"
@@ -82,13 +80,17 @@ else
 fi
 
 REPO_ROOT="${REPO_ROOT:-/home/rnegro/thesis/rule-mutation}"
-NORULES_MAP=${NORULES_MAP:-"$REPO_ROOT/rule_maps/final_norules_map.json"}
-WITHRULES_MAP=${WITHRULES_MAP:-"$REPO_ROOT/rule_maps/final_consensus_map_${MODEL}.json"}
+OUTPUT_BASE=${OUTPUT_BASE:-"$REPO_ROOT/experiments/results"}
+NORULES_MAP=${NORULES_MAP:-"$REPO_ROOT/rule_maps/qualified/final_search_norules_map_${LANGUAGES}.json"}
+WITHRULES_MAP=${WITHRULES_MAP:-"$REPO_ROOT/rule_maps/qualified/final_search_map_${MODEL}_${LANGUAGES}.json"}
 SEMGREP_RULESET=${SEMGREP_RULESET:-/scratch/$USER/semgrep-rules/security-audit}
 SEMGREP_TIMEOUT_SECONDS=${SEMGREP_TIMEOUT_SECONDS:-180}
 SEMGREP_JOBS=${SEMGREP_JOBS:-4}
 
 cd "$REPO_ROOT"
+mkdir -p "$OUTPUT_BASE/slurm_logs"
+exec >"$OUTPUT_BASE/slurm_logs/${SLURM_JOB_ID}_${SLURM_JOB_NAME}.out" \
+     2>"$OUTPUT_BASE/slurm_logs/${SLURM_JOB_ID}_${SLURM_JOB_NAME}.err"
 source "$REPO_ROOT/.venv/bin/activate"
 if [ -z "$VIRTUAL_ENV" ]; then echo "ERROR: venv activation failed"; exit 1; fi
 
@@ -101,8 +103,8 @@ export PYTHONUNBUFFERED=1
 if [ -n "$SEEDS" ]; then SEED_DESC="seeds=$SEEDS"; else SEED_DESC="seeds ${SEED_BASE}..$((SEED_BASE+REPLICATES-1))"; fi
 
 echo "=========================================================================="
-echo "Replicate Harness: $MODEL_ID"
-echo "  Language=$LANGUAGES  N_CASES=$N_CASES  T=$TEMPERATURE  condition=$CONDTAG  $SEED_DESC"
+echo "Replicate runner: $MODEL_ID"
+echo "  Language=$LANGUAGES  N_CASES=${N_CASES:-all}  T=$TEMPERATURE  condition=$CONDTAG  $SEED_DESC"
 if [ -n "$RULES_OVERRIDE_DIR" ]; then echo "  Override dir=$RULES_OVERRIDE_DIR"; fi
 if [ -n "$BASELINE_REF" ]; then echo "  Baseline-ref=$BASELINE_REF (cond=$BASELINE_CONDITION)"; fi
 echo "  Started: $(date)  Job: $SLURM_JOB_ID  Node: $(hostname)"
@@ -111,7 +113,7 @@ nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv
 
 if [ ! -e "$SEMGREP_RULESET" ]; then echo "ERROR: Semgrep rules not found: $SEMGREP_RULESET"; exit 1; fi
 if [ ! -s "$SEMGREP_RULESET/SOURCE_COMMIT" ]; then
-    echo "WARNING: Semgrep rules lack upstream commit metadata; exact content SHA-256 will still be recorded."
+    echo "ERROR: final replicate runs require pinned Semgrep rules with SOURCE_COMMIT"; exit 1
 fi
 
 # OUTPUT_DIR may be passed in to resume an existing run; otherwise derive it.
@@ -119,9 +121,9 @@ DATE=$(date +%m%d)
 TTAG="t$(echo "$TEMPERATURE" | tr -d '.')"
 CTAG=$(echo "$CONDTAG" | tr -c 'a-zA-Z0-9' '_')
 if [ -z "$OUTPUT_DIR" ]; then
-    OUTPUT_DIR="experiments/results/job${SLURM_JOB_ID}_harness_${MODEL}_${LANGUAGES}_${N_CASES}_${TTAG}_r${REPLICATES}_${CTAG}_${DATE}"
+    OUTPUT_DIR="$OUTPUT_BASE/job${SLURM_JOB_ID}_replicates_${MODEL}_${LANGUAGES}_${N_CASES:-all}_${TTAG}_r${REPLICATES}_${CTAG}_${DATE}"
 fi
-mkdir -p "$OUTPUT_DIR" logs
+mkdir -p "$OUTPUT_DIR"
 
 # Build condition + seed + baseline args.
 COND_ARGS=()
@@ -143,14 +145,22 @@ if [ -n "$SEEDS" ]; then SEED_ARGS=(--seeds "$SEEDS"); else SEED_ARGS=(--replica
 BASE_ARGS=()
 if [ -n "$BASELINE_REF" ]; then BASE_ARGS=(--baseline-ref "$BASELINE_REF" --baseline-condition "$BASELINE_CONDITION"); fi
 
-python scripts/experiments/baseline_harness.py \
+CASE_ARGS=()
+if [ -n "$N_CASES" ]; then CASE_ARGS=(--n-cases "$N_CASES"); fi
+
+MAP_POLICY_ARGS=()
+if [ "$ALLOW_UNQUALIFIED_MAP" = "1" ]; then MAP_POLICY_ARGS=(--allow-unqualified-map); fi
+
+python scripts/experiments/run_replicates.py \
     --model "$MODEL_ID" \
     --quantization "$QUANTIZATION" \
     --bnb-compute-dtype "$BNB_COMPUTE_DTYPE" \
     --language "$LANGUAGES" \
-    --n-cases "$N_CASES" \
+    "${CASE_ARGS[@]}" \
+    "${MAP_POLICY_ARGS[@]}" \
     --selection "$SELECTION" \
     --temperature "$TEMPERATURE" \
+    --prompt-profile "$PROMPT_PROFILE" \
     "${SEED_ARGS[@]}" \
     "${COND_ARGS[@]}" \
     "${BASE_ARGS[@]}" \
@@ -159,6 +169,14 @@ python scripts/experiments/baseline_harness.py \
     --semgrep-jobs "$SEMGREP_JOBS" \
     --output-dir "$OUTPUT_DIR"
 
+if [ -f "$OUTPUT_DIR/semgrep_debug/semgrep_debug.jsonl" ]; then
+    timeout 250 python scripts/experiments/filter_semgrep_debug.py \
+        --force --in-place --audit-json "$OUTPUT_DIR" \
+        || echo "WARNING: Semgrep debug compaction incomplete; raw log retained"
+fi
+
+python scripts/analyze/validate_replicate_run.py --write "$OUTPUT_DIR"
+
 echo "=========================================================================="
-echo "Harness complete. Output: $OUTPUT_DIR   End: $(date)"
+echo "Replicates complete. Output: $OUTPUT_DIR   End: $(date)"
 echo "=========================================================================="
