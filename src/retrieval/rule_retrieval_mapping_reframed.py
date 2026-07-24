@@ -349,7 +349,7 @@ def main() -> None:
 
     if args.dry_run:
         print("\nDry run -- not running inference.")
-        print(f"\nExample reframed user turn (first prompt):")
+        print("\nExample reframed user turn (first prompt):")
         if prompts:
             print("-" * 70)
             print(build_reframed_user_content(prompts[0]["prompt"]))
@@ -510,7 +510,8 @@ def main() -> None:
                 }
 
             entry = {
-                "index": idx,
+                "_progress_position": idx,
+                "index": item.get("index", idx),
                 "cwe_id": cwe_id,
                 "language": language,
                 "prompt_hash": prompt_hash,

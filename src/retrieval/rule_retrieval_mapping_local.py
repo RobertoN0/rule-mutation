@@ -74,8 +74,8 @@ def _resolve_project_root() -> Path:
 PROJECT_ROOT = _resolve_project_root()
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.llm_backends.delftblue_local_backend import DelftBlueLocalBackend
-from src.llm_backends.base import LLMConfig, LLMError, LLMResponse
+from src.llm_backends.delftblue_local_backend import DelftBlueLocalBackend  # noqa: E402
+from src.llm_backends.base import LLMConfig, LLMError, LLMResponse  # noqa: E402
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -280,6 +280,7 @@ def load_prompts_from_maps(map_paths: list[Path]) -> list[dict]:
         mappings = data.get("mappings", [])
         for entry in mappings:
             selected.append({
+                "index": entry["index"],
                 "cwe_id": entry["cwe_id"],
                 "language": entry["language"],
                 "prompt": entry["prompt"],
@@ -397,7 +398,8 @@ def load_progress(progress_path: Path) -> dict[int, dict]:
                 line = line.strip()
                 if line:
                     entry = json.loads(line)
-                    completed[entry["index"]] = entry
+                    position = entry.get("_progress_position", entry["index"])
+                    completed[int(position)] = entry
     return completed
 
 
@@ -421,7 +423,11 @@ def compile_mapping(
     from_map: list[Path] | None = None,
 ) -> dict:
     """Build the final JSON mapping from completed progress entries."""
-    mappings = list(completed[idx] for idx in sorted(completed.keys()))
+    mappings = []
+    for idx in sorted(completed):
+        entry = dict(completed[idx])
+        entry.pop("_progress_position", None)
+        mappings.append(entry)
 
     all_rules = [r for m in mappings for r in m["rules_retrieved"]]
     rule_freq = Counter(all_rules)
@@ -778,7 +784,8 @@ def main() -> None:
                 }
 
             entry = {
-                "index": idx,
+                "_progress_position": idx,
+                "index": item.get("index", idx),
                 "cwe_id": cwe_id,
                 "language": language,
                 "prompt_hash": prompt_hash,
