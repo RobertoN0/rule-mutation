@@ -1964,6 +1964,6 @@ class ExperimentEngine:
         # Per-rule and per-prompt aggregate views are intentionally not written;
         # both are fully derivable from
         # evaluations.jsonl + archive_snapshots/ + intermediate/ by the analysis
-        # layer (output-schema spec Files 7/8).
+        # layer.
 
         self._log(f"📁 Results saved to {output_dir}")

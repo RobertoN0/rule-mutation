@@ -266,11 +266,8 @@ class ParaphraseMutator(_LiveLLMMutator):
 
     Source: LLMORPH MR-51 + AUGMENT synonym-constraint paraphrase type.
 
-    Uses temperature=0.6 so that each call produces a genuinely different
-    candidate with visible lexical variation.
-    Short rules benefit from higher temperature to ensure visible lexical
-    variation (previous 0.3 produced near-identical outputs for rules with
-    limited synonymisable vocabulary).
+    Uses temperature=0.6 so that each call produces visible lexical variation,
+    including for short rules with limited synonymisable vocabulary.
 
     Inline code masking
     -------------------

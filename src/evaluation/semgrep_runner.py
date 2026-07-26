@@ -655,8 +655,8 @@ def run_semgrep_batch_dir(
     """Analyze a batch and preserve task-level versus systemic failures.
 
     ``SemgrepSample`` inputs carry the raw model output, selected code, and any
-    pre-analysis validation failure. Legacy ``(code, language)`` tuples remain
-    supported for callers outside the optimizer.
+    pre-analysis validation failure. ``(code, language)`` tuples provide a
+    compact low-level interface when that metadata is not required.
     """
     if not code_samples:
         return []

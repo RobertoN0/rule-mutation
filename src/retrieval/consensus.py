@@ -646,7 +646,7 @@ def build_norules_map(
 
 
 def build_population_carrier(source_path: Path) -> dict[str, Any]:
-    """Strip historical retrieval fields from a canonical task population."""
+    """Strip non-canonical retrieval fields from a task population."""
     source = load_json_object(source_path)
     source_rows = _mappings(source, source_path)
     task_ids: set[str] = set()

@@ -15,7 +15,7 @@
 #############################################################################
 # SBST Experiment: archive EA (shared init + injection) OR i.i.d. random search.
 #
-# Historical small-subset timings do not predict the frozen full population.
+# Small diagnostic subsets do not predict the frozen full-population runtime.
 # Choose wall time at submission from the run objective: short smoke, an
 # extended behavior validation, or the supervisor-approved final allocation.
 # The pre-timeout signal preserves the last completed candidate. Final

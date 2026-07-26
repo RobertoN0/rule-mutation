@@ -74,9 +74,8 @@ MAX_TOKENS = 1024
 TEMPERATURE = 0.0
 
 # ── Paths ────────────────────────────────────────────────────────────────────
-# Resolve relative to the project root so the script works regardless of
-# launch directory (previously the relative paths only worked when called
-# from the repo root).
+# Resolve relative to the project root so the script works from any launch
+# directory.
 def _resolve_project_root() -> Path:
     this_file = Path(__file__).resolve()
     for parent in [this_file.parent, *this_file.parents]:
