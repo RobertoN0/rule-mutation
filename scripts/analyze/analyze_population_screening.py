@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate two-stage population screening and materialize screened maps."""
+"""Validate population screening and materialize screened maps."""
 
 from __future__ import annotations
 
@@ -17,8 +17,7 @@ from src.evaluation.population_screening import (  # noqa: E402
     analyze_screening_round,
     combine_screened_language_maps,
     filter_screened_map,
-    filter_second_round_candidates,
-    finalize_screening,
+    finalize_single_block_screening,
     load_screening_run,
 )
 from src.retrieval.consensus import (  # noqa: E402
@@ -75,11 +74,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Validate four runs and classify one screening seed block.",
     )
     round_parser.add_argument(
-        "--stage",
-        choices=("first", "second"),
-        required=True,
-    )
-    round_parser.add_argument(
         "--language",
         choices=("python", "java"),
         required=True,
@@ -93,21 +87,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     round_parser.add_argument("--output", type=Path, required=True)
     round_parser.add_argument("--overwrite", action="store_true")
 
-    candidates = subparsers.add_parser(
-        "candidates",
-        help="Create second-round maps from a first-round report.",
-    )
-    candidates.add_argument("--first-round-report", type=Path, required=True)
-    candidates.add_argument("--map", type=Path, action="append", required=True)
-    candidates.add_argument("--output-dir", type=Path, required=True)
-    candidates.add_argument("--overwrite", action="store_true")
-
     finalize = subparsers.add_parser(
         "finalize",
-        help="Finalize both rounds and create retained-population maps.",
+        help="Finalize one complete 20-seed block and create screened maps.",
     )
-    finalize.add_argument("--first-round-report", type=Path, required=True)
-    finalize.add_argument("--second-round-report", type=Path, required=True)
+    finalize.add_argument("--round-report", type=Path, required=True)
     finalize.add_argument("--manifest", type=Path, required=True)
     finalize.add_argument("--map", type=Path, action="append", required=True)
     finalize.add_argument("--output-dir", type=Path, required=True)
@@ -143,10 +127,10 @@ def _round(args: argparse.Namespace) -> int:
                 expected_seeds=args.seeds,
                 expected_prompt_contract=args.prompt_contract_sha256,
             )
-    report = analyze_screening_round(runs, stage=args.stage)
+    report = analyze_screening_round(runs, stage="second")
     write_json(args.output, report, overwrite=args.overwrite)
     print(
-        f"VALID {args.stage} screening round: {args.language}, "
+        f"VALID screening block: {args.language}, "
         f"tasks={report['tasks']}, seeds={list(args.seeds)}"
     )
     for name, count in report["classification_counts"].items():
@@ -155,29 +139,12 @@ def _round(args: argparse.Namespace) -> int:
     return 0
 
 
-def _candidates(args: argparse.Namespace) -> int:
-    report = load_json_object(args.first_round_report)
-    for path in args.map:
-        payload = load_json_object(path)
-        selected = filter_second_round_candidates(
-            payload,
-            first_round=report,
-            report_path=args.first_round_report,
-        )
-        output = args.output_dir / path.name
-        write_json(output, selected, overwrite=args.overwrite)
-        print(
-            f"{path.name}: {len(payload['mappings'])} -> "
-            f"{len(selected['mappings'])} second-round tasks"
-        )
-    print(f"Second-round maps: {args.output_dir}")
-    return 0
-
-
 def _finalize(args: argparse.Namespace) -> int:
-    first = load_json_object(args.first_round_report)
-    second = load_json_object(args.second_round_report)
-    manifest = finalize_screening(first, second)
+    report = load_json_object(args.round_report)
+    manifest = finalize_single_block_screening(
+        report,
+        report_path=args.round_report,
+    )
     write_json(args.manifest, manifest, overwrite=args.overwrite)
     for path in args.map:
         payload = load_json_object(path)
@@ -193,8 +160,12 @@ def _finalize(args: argparse.Namespace) -> int:
             f"{len(screened['mappings'])} retained tasks"
         )
     print(
-        f"Excluded never-vulnerable tasks: "
-        f"{manifest['excluded_never_vulnerable_total']}"
+        "Screening outcomes: "
+        f"observed finding="
+        f"{sum(reason == 'observed_finding' for reason in manifest['retention_reason_by_task'].values())}, "
+        f"incomplete evidence="
+        f"{sum(reason == 'incomplete_evidence' for reason in manifest['retention_reason_by_task'].values())}, "
+        f"all-valid zero={manifest['excluded_never_vulnerable_total']}"
     )
     print(f"Screening manifest: {args.manifest}")
     print(f"Screened maps: {args.output_dir}")
@@ -221,8 +192,6 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "round":
             return _round(args)
-        if args.command == "candidates":
-            return _candidates(args)
         if args.command == "finalize":
             return _finalize(args)
         if args.command == "combine":

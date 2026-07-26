@@ -12,8 +12,7 @@ from src.evaluation.population_screening import (
     analyze_screening_round,
     combine_screened_language_maps,
     filter_screened_map,
-    filter_second_round_candidates,
-    finalize_screening,
+    finalize_single_block_screening,
     load_screening_run,
 )
 from src.retrieval.consensus import MODEL_IDS, sha256_file, write_json
@@ -93,7 +92,7 @@ def _round_runs(
     }
 
 
-def test_two_stage_screening_retains_findings_and_incomplete_evidence(
+def test_single_block_screening_retains_findings_and_incomplete_evidence(
     tmp_path: Path,
 ) -> None:
     rows = [_row(task_id) for task_id in (1, 2, 3, 4)]
@@ -109,39 +108,26 @@ def test_two_stage_screening_retains_findings_and_incomplete_evidence(
         None,
     )
     cells[("qwen", "withrules", "4")] = TaskObservation("valid", 1)
-    first = analyze_screening_round(
+    report = analyze_screening_round(
         _round_runs(rows, cells, seed=tuple(range(1, 21))),
-        stage="first",
-    )
-
-    assert first["task_ids"]["retain_observed_finding"] == ["1", "4"]
-    assert first["task_ids"]["retain_incomplete_evidence"] == ["2"]
-    assert first["task_ids"]["second_round_candidate"] == ["3"]
-    assert first["condition_transition_counts"]["rule_fixed"] == 20
-    assert first["condition_transition_counts"]["rule_worsened"] == 20
-    assert (
-        first["condition_transition_counts"]["valid_to_invalid_with_rules"] == 20
-    )
-
-    report_path = tmp_path / "first.json"
-    write_json(report_path, first, overwrite=False)
-    candidate = filter_second_round_candidates(
-        {"mappings": rows},
-        first_round=first,
-        report_path=report_path,
-    )
-    assert [row["index"] for row in candidate["mappings"]] == [3]
-
-    second_cells = {
-        (model, condition, "3"): TaskObservation("valid", 0)
-        for model in ("qwen", "llama")
-        for condition in ("norules", "withrules")
-    }
-    second = analyze_screening_round(
-        _round_runs([rows[2]], second_cells, seed=tuple(range(21, 41))),
         stage="second",
     )
-    manifest = finalize_screening(first, second)
+
+    assert report["task_ids"]["retain_observed_finding"] == ["1", "4"]
+    assert report["task_ids"]["retain_incomplete_evidence"] == ["2"]
+    assert report["task_ids"]["exclude_never_vulnerable"] == ["3"]
+    assert report["condition_transition_counts"]["rule_fixed"] == 20
+    assert report["condition_transition_counts"]["rule_worsened"] == 20
+    assert (
+        report["condition_transition_counts"]["valid_to_invalid_with_rules"] == 20
+    )
+
+    report_path = tmp_path / "round_second_python.json"
+    write_json(report_path, report, overwrite=False)
+    manifest = finalize_single_block_screening(
+        report,
+        report_path=report_path,
+    )
     assert manifest["retained_task_ids"] == ["1", "2", "4"]
     assert manifest["excluded_never_vulnerable_task_ids"] == ["3"]
 
@@ -155,42 +141,59 @@ def test_two_stage_screening_retains_findings_and_incomplete_evidence(
     assert [row["index"] for row in screened["mappings"]] == [1, 2, 4]
 
 
-def test_finalize_rejects_overlapping_seed_blocks() -> None:
-    rows = [_row(1)]
+def test_finalize_single_block_preserves_incomplete_evidence_distinction(
+    tmp_path: Path,
+) -> None:
+    rows = [_row(task_id) for task_id in (1, 2, 3)]
     cells = {
-        (model, condition, "1"): TaskObservation("valid", 0)
+        (model, condition, str(task_id)): TaskObservation("valid", 0)
         for model in ("qwen", "llama")
         for condition in ("norules", "withrules")
+        for task_id in (1, 2, 3)
     }
-    first = analyze_screening_round(
-        _round_runs(rows, cells, seed=tuple(range(1, 21))),
-        stage="first",
+    cells[("qwen", "norules", "1")] = TaskObservation("valid", 1)
+    cells[("llama", "withrules", "2")] = TaskObservation(
+        "syntax_invalid",
+        None,
     )
-    second = analyze_screening_round(
+    report = analyze_screening_round(
         _round_runs(rows, cells, seed=tuple(range(1, 21))),
         stage="second",
     )
-    with pytest.raises(ValueError, match="overlap"):
-        finalize_screening(first, second)
+    report_path = tmp_path / "round_second_python.json"
+    write_json(report_path, report, overwrite=False)
+
+    manifest = finalize_single_block_screening(
+        report,
+        report_path=report_path,
+    )
+
+    assert manifest["screening_mode"] == "single_block_20_seeds"
+    assert manifest["retained_task_ids"] == ["1", "2"]
+    assert manifest["excluded_never_vulnerable_task_ids"] == ["3"]
+    assert manifest["retention_reason_by_task"] == {
+        "1": "observed_finding",
+        "2": "incomplete_evidence",
+    }
+    assert manifest["round_report"]["sha256"] == sha256_file(report_path)
 
 
-def test_finalize_requires_twenty_seeds_per_round() -> None:
+def test_finalize_requires_twenty_seeds() -> None:
     rows = [_row(1)]
     cells = {
         (model, condition, "1"): TaskObservation("valid", 0)
         for model in ("qwen", "llama")
         for condition in ("norules", "withrules")
     }
-    first = analyze_screening_round(
+    report = analyze_screening_round(
         _round_runs(rows, cells, seed=tuple(range(1, 20))),
-        stage="first",
-    )
-    second = analyze_screening_round(
-        _round_runs(rows, cells, seed=tuple(range(21, 41))),
         stage="second",
     )
     with pytest.raises(ValueError, match="exactly 20 distinct seeds"):
-        finalize_screening(first, second)
+        finalize_single_block_screening(
+            report,
+            report_path=Path("round_second_python.json"),
+        )
 
 
 def test_combine_screened_language_maps() -> None:
@@ -236,6 +239,8 @@ def _screening_fixture(
     tmp_path: Path,
     *,
     intermediate_task_id: str = "1",
+    raw_findings_scope: str = "valid_outputs_only",
+    qualification_status: str = "valid",
 ) -> tuple[Path, Path]:
     source_map_path = tmp_path / "source.json"
     write_json(source_map_path, {"mappings": [_row(1)]}, overwrite=False)
@@ -249,8 +254,12 @@ def _screening_fixture(
                 "test_case_id": intermediate_task_id,
                 "analysis_language": "python",
                 "prompt_hash": f"{1:016x}",
-                "qualification_status": "valid",
-                "fitness": {"raw_count": 0},
+                "qualification_status": qualification_status,
+                "fitness": (
+                    {"raw_count": 0}
+                    if qualification_status == "valid"
+                    else None
+                ),
             }
         ],
     )
@@ -262,8 +271,12 @@ def _screening_fixture(
         "seed": 10,
         "temperature": 0.6,
         "n_cases": 1,
-        "raw_findings_scope": "valid_outputs_only",
-        "per_case_raw": {intermediate_task_id: 0},
+        "raw_findings_scope": raw_findings_scope,
+        "per_case_raw": (
+            {intermediate_task_id: 0}
+            if qualification_status == "valid"
+            else {}
+        ),
         "intermediate_file": str(intermediate),
     }
     _write_jsonl(run_dir / "replicates.jsonl", [replicate])
@@ -326,6 +339,48 @@ def test_load_screening_run_checks_intermediate_task_identity(
         intermediate_task_id="999",
     )
     with pytest.raises(ValueError, match="identities/order"):
+        load_screening_run(
+            run_dir,
+            source_map_path=source_map,
+            model="qwen",
+            language="python",
+            condition="withrules",
+            expected_seeds=(10,),
+            expected_prompt_contract="e" * 64,
+        )
+
+
+def test_load_screening_run_accepts_full_population_findings_scope(
+    tmp_path: Path,
+) -> None:
+    run_dir, source_map = _screening_fixture(
+        tmp_path,
+        raw_findings_scope="full_population",
+    )
+
+    run = load_screening_run(
+        run_dir,
+        source_map_path=source_map,
+        model="qwen",
+        language="python",
+        condition="withrules",
+        expected_seeds=(10,),
+        expected_prompt_contract="e" * 64,
+    )
+
+    assert run.observations[(10, "1")] == TaskObservation("valid", 0)
+
+
+def test_load_screening_run_rejects_full_population_scope_with_invalid_output(
+    tmp_path: Path,
+) -> None:
+    run_dir, source_map = _screening_fixture(
+        tmp_path,
+        raw_findings_scope="full_population",
+        qualification_status="syntax_invalid",
+    )
+
+    with pytest.raises(ValueError, match="contains invalid task outputs"):
         load_screening_run(
             run_dir,
             source_map_path=source_map,

@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from scripts.setup.materialize_qualified_search_maps import (
+    FINAL_SEARCH_POPULATION_POLICY,
     MODEL_IDS,
     _population_fingerprint,
     materialize,
@@ -77,13 +78,21 @@ def _write_map(path: Path, payload: dict) -> None:
 
 def _create_map_dir(root: Path) -> Path:
     root.mkdir()
-    (root / "eligibility.json").write_text("eligibility\n", encoding="utf-8")
-    (root / "screening_python.json").write_text(
-        "screening python\n",
+    source_population = root / "source_population.json"
+    source_population.write_text(
+        json.dumps({"artifact_type": "source_population", "mappings": []}),
         encoding="utf-8",
     )
-    (root / "screening_java.json").write_text(
-        "screening java\n",
+    (root / "eligibility.json").write_text(
+        json.dumps(
+            {
+                "artifact_type": "population_eligibility_manifest",
+                "source_population": {
+                    "filename": source_population.name,
+                    "sha256": _sha(source_population),
+                },
+            }
+        ),
         encoding="utf-8",
     )
     python_rows = [
@@ -92,8 +101,39 @@ def _create_map_dir(root: Path) -> Path:
     ]
     java_rows = [
         {**_row(task_id, "java"), "_map_root": str(root)}
-        for task_id in (640, 959, 1061, 1357, 2000)
+        for task_id in (640, 959, 1061, 1357, 2000, 2001)
     ]
+    for language, rows in (
+        ("python", python_rows),
+        ("java", java_rows),
+    ):
+        task_ids = [str(row["index"]) for row in rows]
+        reasons = {
+            task_id: (
+                "incomplete_evidence"
+                if language == "java" and task_id == "2000"
+                else "observed_finding"
+            )
+            for task_id in task_ids
+        }
+        (root / f"screening_{language}.json").write_text(
+            json.dumps(
+                {
+                    "artifact_type": "population_screening_manifest",
+                    "evidence_status": "final",
+                    "policy": SCREENING_POLICY,
+                    "language": language,
+                    "temperature": 0.6,
+                    "screening_mode": "single_block_20_seeds",
+                    "source_population_total": len(rows),
+                    "retained_population_total": len(rows),
+                    "excluded_never_vulnerable_total": 0,
+                    "retained_task_ids": task_ids,
+                    "retention_reason_by_task": reasons,
+                }
+            ),
+            encoding="utf-8",
+        )
     for model in ("qwen", "llama"):
         python_map = _screened_map(python_rows, model=model)
         java_map = _screened_map(java_rows, model=model)
@@ -126,7 +166,7 @@ def _create_map_dir(root: Path) -> Path:
                 **_row(task_id, "java", with_rules=False),
                 "_map_root": str(root),
             }
-            for task_id in (640, 959, 1061, 1357, 2000)
+            for task_id in (640, 959, 1061, 1357, 2000, 2001)
         ],
         model=None,
     )
@@ -270,8 +310,19 @@ def test_materializer_intersects_models_and_writes_frozen_maps(tmp_path: Path) -
 
     assert result["artifact_type"] == "qualified_population_manifest"
     assert result["evidence_status"] == "final"
+    assert result["policy"] == FINAL_SEARCH_POPULATION_POLICY
     assert result["language_counts"] == {"python": 1, "java": 1}
-    assert set(result["exclusions"]) == {"518", "640", "959", "1061", "1357"}
+    assert set(result["exclusions"]) == {
+        "518",
+        "640",
+        "959",
+        "1061",
+        "1357",
+        "2000",
+    }
+    assert result["exclusions"]["2000"]["reason"] == (
+        "no_observed_finding_with_incomplete_screening_evidence"
+    )
     for model in ("qwen", "llama"):
         python_map = json.loads(
             (output_dir / f"final_search_map_{model}_python.json").read_text()
@@ -286,13 +337,14 @@ def test_materializer_intersects_models_and_writes_frozen_maps(tmp_path: Path) -
         assert len(java_map["mappings"]) == 1
         assert len(combined["mappings"]) == 2
         assert combined["artifact_type"] == "qualified_rule_map"
+        assert combined["metadata"]["evidence_status"] == "final"
         assert (
             combined["metadata"]["search_qualification"]["evidence_status"]
             == "final"
         )
         assert (
             combined["metadata"]["search_qualification"]["policy"]
-            == "frozen_cross_model_temp0_intersection"
+            == FINAL_SEARCH_POPULATION_POLICY
         )
     norules = json.loads((output_dir / "final_search_norules_map.json").read_text())
     assert len(norules["mappings"]) == 2

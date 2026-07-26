@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from collections import Counter
@@ -27,6 +28,19 @@ SCREENING_CONDITIONS = ("norules", "withrules")
 SCREENING_MODELS = ("qwen", "llama")
 SCREENING_POLICY = (
     "retain_any_finding_or_incomplete_evidence_exclude_only_all_valid_zero"
+)
+FINAL_SEARCH_POPULATION_POLICY = (
+    "observed_finding_cross_model_temp0_intersection"
+)
+SCREENING_CONTRACT_FIELDS = (
+    "git_commit_sha",
+    "torch_version",
+    "transformers_version",
+    "prompt_contract_sha256",
+    "semgrep_rules_source_commit",
+    "semgrep_rules_sha256",
+    "semgrep_version",
+    "model_revisions",
 )
 
 
@@ -92,6 +106,28 @@ def _verify_validator_hashes(
         actual = sha256_file(path) if path.is_file() else None
         if recorded.get(name) != actual:
             raise ValueError(f"{run_dir}: stale replicate validation for {name}")
+    if "semgrep_debug" in recorded:
+        debug_path = run_dir / "semgrep_debug" / "semgrep_debug.jsonl"
+        actual_debug = sha256_file(debug_path) if debug_path.is_file() else None
+        if recorded["semgrep_debug"] != actual_debug:
+            raise ValueError(
+                f"{run_dir}: stale replicate validation for semgrep_debug"
+            )
+    if "intermediate_jsonl_tree" in recorded:
+        digest = hashlib.sha256()
+        intermediate_paths = sorted((run_dir / "intermediate").glob("*.jsonl"))
+        actual_tree: str | None = None
+        if intermediate_paths:
+            for path in intermediate_paths:
+                digest.update(path.name.encode("utf-8"))
+                digest.update(b"\0")
+                digest.update(path.read_bytes())
+                digest.update(b"\0")
+            actual_tree = digest.hexdigest()
+        if recorded["intermediate_jsonl_tree"] != actual_tree:
+            raise ValueError(
+                f"{run_dir}: stale replicate validation for intermediate files"
+            )
 
 
 def load_screening_run(
@@ -193,12 +229,19 @@ def load_screening_run(
             "language": language,
             "temperature": SCREENING_TEMPERATURE,
             "n_cases": len(source_rows),
-            "raw_findings_scope": "valid_outputs_only",
         }.items():
             if replicate.get(field) != expected:
                 raise ValueError(
                     f"{replicate_path}: seed {seed} has invalid {field}"
                 )
+        raw_findings_scope = replicate.get("raw_findings_scope")
+        if raw_findings_scope not in {
+            "valid_outputs_only",
+            "full_population",
+        }:
+            raise ValueError(
+                f"{replicate_path}: seed {seed} has invalid raw_findings_scope"
+            )
         intermediate_value = replicate.get("intermediate_file")
         if not isinstance(intermediate_value, str):
             raise ValueError(f"{replicate_path}: seed {seed} lacks intermediate_file")
@@ -238,6 +281,14 @@ def load_screening_run(
                     f"{intermediate_path}: invalid task {task_id} must not have fitness"
                 )
             observations[(seed, task_id)] = TaskObservation(status, raw_count)
+        if (
+            raw_findings_scope == "full_population"
+            and len(per_case_raw) != len(source_rows)
+        ):
+            raise ValueError(
+                f"{replicate_path}: seed {seed} declares full_population "
+                "findings but contains invalid task outputs"
+            )
         recorded_per_case = {
             str(task_id): int(raw_count)
             for task_id, raw_count in (replicate.get("per_case_raw") or {}).items()
@@ -330,8 +381,10 @@ def analyze_screening_round(
     stage: str,
 ) -> dict[str, Any]:
     """Classify tasks after one complete screening seed block."""
-    if stage not in {"first", "second"}:
-        raise ValueError("screening stage must be 'first' or 'second'")
+    if stage != "second":
+        raise ValueError(
+            "the final screening contract uses one exclusion-capable seed block"
+        )
     expected_keys = {
         (model, condition)
         for model in SCREENING_MODELS
@@ -363,11 +416,7 @@ def analyze_screening_round(
     classifications: dict[str, list[str]] = {
         "retain_observed_finding": [],
         "retain_incomplete_evidence": [],
-        (
-            "second_round_candidate"
-            if stage == "first"
-            else "exclude_never_vulnerable"
-        ): [],
+        "exclude_never_vulnerable": [],
     }
     task_reports: dict[str, dict[str, Any]] = {}
     transition_counts: Counter[str] = Counter()
@@ -395,11 +444,7 @@ def analyze_screening_round(
         elif invalid:
             classification = "retain_incomplete_evidence"
         else:
-            classification = (
-                "second_round_candidate"
-                if stage == "first"
-                else "exclude_never_vulnerable"
-            )
+            classification = "exclude_never_vulnerable"
         classifications[classification].append(task_id)
 
         per_task_transitions: Counter[str] = Counter()
@@ -484,130 +529,89 @@ def analyze_screening_round(
     return report
 
 
-def finalize_screening(
-    first_round: dict[str, Any],
-    second_round: dict[str, Any],
+def finalize_single_block_screening(
+    report: dict[str, Any],
+    *,
+    report_path: Path,
 ) -> dict[str, Any]:
-    """Freeze the final population after two disjoint twenty-seed rounds."""
-    for report, stage in ((first_round, "first"), (second_round, "second")):
-        if report.get("artifact_type") != "population_screening_round":
-            raise ValueError(f"{stage} report has the wrong artifact_type")
-        if report.get("stage") != stage:
-            raise ValueError(f"{stage} report has the wrong stage")
-        if report.get("policy") != SCREENING_POLICY:
-            raise ValueError(f"{stage} report has the wrong policy")
-    if first_round.get("language") != second_round.get("language"):
-        raise ValueError("screening rounds use different languages")
-    contract_fields = (
-        "git_commit_sha",
-        "torch_version",
-        "transformers_version",
-        "prompt_contract_sha256",
-        "semgrep_rules_source_commit",
-        "semgrep_rules_sha256",
-        "semgrep_version",
-        "model_revisions",
-    )
-    for field in contract_fields:
-        if first_round.get(field) != second_round.get(field):
-            raise ValueError(f"screening rounds disagree on {field}")
-    first_seeds = set(first_round.get("seeds", []))
-    second_seeds = set(second_round.get("seeds", []))
+    """Freeze a population from one complete twenty-seed screening block."""
+    if report.get("artifact_type") != "population_screening_round":
+        raise ValueError("screening report has the wrong artifact_type")
+    if report.get("stage") != "second":
+        raise ValueError(
+            "single-block finalization requires an exclusion-capable "
+            "screening report"
+        )
+    if report.get("policy") != SCREENING_POLICY:
+        raise ValueError("screening report has the wrong policy")
+    seeds = tuple(int(seed) for seed in report.get("seeds", []))
     if (
-        len(first_seeds) != SCREENING_REPETITIONS_PER_ROUND
-        or len(second_seeds) != SCREENING_REPETITIONS_PER_ROUND
+        len(seeds) != SCREENING_REPETITIONS_PER_ROUND
+        or len(set(seeds)) != SCREENING_REPETITIONS_PER_ROUND
     ):
         raise ValueError(
-            "final screening requires exactly 20 distinct seeds in each round"
+            "single-block finalization requires exactly 20 distinct seeds"
         )
-    if first_seeds & second_seeds:
-        raise ValueError("first- and second-round screening seeds overlap")
 
-    candidates = set(first_round["task_ids"]["second_round_candidate"])
-    second_population = set(second_round.get("per_task", {}))
-    if candidates != second_population:
-        raise ValueError("second-round population differs from first-round candidates")
-    if second_round.get("source_population_fingerprint") != first_round.get(
-        "classification_population_fingerprints",
-        {},
-    ).get("second_round_candidate"):
+    task_ids = report.get("task_ids")
+    per_task = report.get("per_task")
+    if not isinstance(task_ids, dict) or not isinstance(per_task, dict):
+        raise ValueError("screening report lacks task classifications")
+    observed = set(task_ids.get("retain_observed_finding", []))
+    incomplete = set(task_ids.get("retain_incomplete_evidence", []))
+    excluded = set(task_ids.get("exclude_never_vulnerable", []))
+    source_ids = set(per_task)
+    groups = (observed, incomplete, excluded)
+    if any(left & right for index, left in enumerate(groups) for right in groups[index + 1 :]):
+        raise ValueError("screening classifications overlap")
+    if set().union(*groups) != source_ids:
         raise ValueError(
-            "second-round population fingerprint differs from first-round candidates"
+            "screening classifications do not cover the source population"
         )
-    excluded = set(second_round["task_ids"]["exclude_never_vulnerable"])
-    retained_first_finding = set(
-        first_round["task_ids"]["retain_observed_finding"]
-    )
-    retained_first_incomplete = set(
-        first_round["task_ids"]["retain_incomplete_evidence"]
-    )
-    retained_second_finding = set(
-        second_round["task_ids"]["retain_observed_finding"]
-    )
-    retained_second_incomplete = set(
-        second_round["task_ids"]["retain_incomplete_evidence"]
-    )
-    retained = (
-        retained_first_finding
-        | retained_first_incomplete
-        | retained_second_finding
-        | retained_second_incomplete
-    )
-    source_ids = set(first_round.get("per_task", {}))
-    if retained | excluded != source_ids or retained & excluded:
-        raise ValueError("final screening partition does not cover the source population")
-
+    if report.get("tasks") != len(source_ids):
+        raise ValueError("screening task count does not match per-task evidence")
+    retained = observed | incomplete
     reason_by_task = {
-        task_id: "observed_finding_round_1"
-        for task_id in retained_first_finding
+        task_id: "observed_finding" for task_id in observed
     }
     reason_by_task.update(
-        {
-            task_id: "incomplete_evidence_round_1"
-            for task_id in retained_first_incomplete
-        }
+        {task_id: "incomplete_evidence" for task_id in incomplete}
     )
-    reason_by_task.update(
-        {
-            task_id: "observed_finding_round_2"
-            for task_id in retained_second_finding
-        }
-    )
-    reason_by_task.update(
-        {
-            task_id: "incomplete_evidence_round_2"
-            for task_id in retained_second_incomplete
-        }
-    )
+    missing_contract = [
+        field for field in SCREENING_CONTRACT_FIELDS if report.get(field) is None
+    ]
+    if missing_contract:
+        raise ValueError(
+            "screening report lacks contract fields: "
+            + ", ".join(missing_contract)
+        )
+
     return {
         "artifact_type": "population_screening_manifest",
         "evidence_status": "final",
         "policy": SCREENING_POLICY,
-        "language": first_round["language"],
+        "language": report["language"],
         "temperature": SCREENING_TEMPERATURE,
-        "seed_blocks": {
-            "first": sorted(first_seeds),
-            "second": sorted(second_seeds),
-        },
+        "screening_mode": "single_block_20_seeds",
+        "seed_blocks": {"single": list(seeds)},
         "source_population_total": len(source_ids),
-        "source_population_fingerprint": first_round[
+        "source_population_fingerprint": report[
             "source_population_fingerprint"
         ],
         "retained_population_total": len(retained),
         "excluded_never_vulnerable_total": len(excluded),
         "retained_task_ids": sorted(retained, key=int),
         "excluded_never_vulnerable_task_ids": sorted(excluded, key=int),
-        "retention_reason_by_task": dict(
-            sorted(reason_by_task.items(), key=lambda item: int(item[0]))
-        ),
-        "rounds": {
-            "first_sha256": canonical_json_sha256(first_round),
-            "second_sha256": canonical_json_sha256(second_round),
-            "first_evidence_sha256": first_round["screening_evidence_sha256"],
-            "second_evidence_sha256": second_round["screening_evidence_sha256"],
+        "retention_reason_by_task": {
+            task_id: reason_by_task[task_id]
+            for task_id in sorted(retained, key=int)
+        },
+        "round_report": {
+            "filename": report_path.name,
+            "sha256": sha256_file(report_path),
         },
         "contract": {
-            field: first_round[field] for field in contract_fields
+            field: report[field] for field in SCREENING_CONTRACT_FIELDS
         },
     }
 
@@ -628,48 +632,6 @@ def _refresh_derived_fields(payload: dict[str, Any]) -> None:
     metadata["avg_rules_per_prompt"] = (
         round(total_rules / len(rows), 3) if rows else 0.0
     )
-
-
-def filter_second_round_candidates(
-    payload: dict[str, Any],
-    *,
-    first_round: dict[str, Any],
-    report_path: Path,
-) -> dict[str, Any]:
-    """Materialize only the all-valid-zero tasks requiring the second seed block."""
-    if first_round.get("artifact_type") != "population_screening_round":
-        raise ValueError("first-round report has the wrong artifact_type")
-    if first_round.get("stage") != "first":
-        raise ValueError("candidate filtering requires a first-round report")
-    rows = _map_rows(payload, Path("screening source map"))
-    candidates = set(first_round["task_ids"]["second_round_candidate"])
-    source_ids = {str(row["index"]) for row in rows}
-    if not candidates <= source_ids:
-        raise ValueError("first-round candidates contain tasks absent from the map")
-    selected = [row for row in rows if str(row["index"]) in candidates]
-    if len(selected) != len(candidates):
-        raise ValueError("candidate map did not materialize every first-round task")
-
-    result = json.loads(json.dumps(payload))
-    result["artifact_type"] = "screening_second_round_map"
-    result["mappings"] = selected
-    metadata = result.setdefault("metadata", {})
-    metadata["population_screening_candidate_selection"] = {
-        "evidence_status": "screening",
-        "policy": SCREENING_POLICY,
-        "source_population_total": len(rows),
-        "second_round_population_total": len(selected),
-        "second_round_population_fingerprint": population_fingerprint(selected),
-        "first_round_report": {
-            "filename": report_path.name,
-            "sha256": sha256_file(report_path),
-            "screening_evidence_sha256": first_round[
-                "screening_evidence_sha256"
-            ],
-        },
-    }
-    _refresh_derived_fields(result)
-    return result
 
 
 def filter_screened_map(

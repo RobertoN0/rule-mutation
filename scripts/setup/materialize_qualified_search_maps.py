@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import re
+import shutil
 import sys
 from collections import Counter
 from dataclasses import dataclass
@@ -18,7 +19,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.evaluation.generation_contract import prompt_contract_sha256  # noqa: E402
-from src.evaluation.population_screening import SCREENING_POLICY  # noqa: E402
+from src.evaluation.population_screening import (  # noqa: E402
+    FINAL_SEARCH_POPULATION_POLICY,
+    SCREENING_POLICY,
+)
 from src.retrieval.population import ELIGIBILITY_POLICY  # noqa: E402
 
 MODEL_IDS = {
@@ -82,7 +86,7 @@ def _validate_manifest_reference(
     evidence: dict[str, Any],
     *,
     label: str,
-) -> None:
+) -> Path:
     reference = evidence.get("manifest")
     if not isinstance(reference, dict):
         raise ValueError(f"{source_map_path}: {label} lacks a manifest reference")
@@ -99,6 +103,139 @@ def _validate_manifest_reference(
         raise ValueError(f"{source_map_path}: {label} manifest is unavailable")
     if _sha256_file(manifest_path) != expected_sha256:
         raise ValueError(f"{source_map_path}: {label} manifest hash mismatch")
+    return manifest_path
+
+
+def _load_screening_selection(
+    source_map_path: Path,
+    source_map: dict[str, Any],
+    *,
+    language: str,
+) -> tuple[set[str], set[str], dict[str, Any], Path]:
+    metadata = source_map["metadata"]
+    screening = metadata["population_screening"]
+    manifest_path = _validate_manifest_reference(
+        source_map_path,
+        screening,
+        label="screening evidence",
+    )
+    manifest = _load_json(manifest_path)
+    if (
+        manifest.get("artifact_type") != "population_screening_manifest"
+        or manifest.get("evidence_status") != "final"
+        or manifest.get("policy") != SCREENING_POLICY
+        or manifest.get("language") != language
+        or manifest.get("screening_mode") != "single_block_20_seeds"
+    ):
+        raise ValueError(
+            f"{manifest_path}: invalid final {language} screening manifest"
+        )
+    source_ids = {
+        str(row["index"]) for row in source_map["mappings"]
+    }
+    reasons = manifest.get("retention_reason_by_task")
+    if not isinstance(reasons, dict) or set(reasons) != source_ids:
+        raise ValueError(
+            f"{manifest_path}: retention reasons do not cover the screened map"
+        )
+    observed = {
+        str(task_id)
+        for task_id, reason in reasons.items()
+        if reason == "observed_finding"
+    }
+    incomplete = {
+        str(task_id)
+        for task_id, reason in reasons.items()
+        if reason == "incomplete_evidence"
+    }
+    if observed & incomplete or observed | incomplete != source_ids:
+        raise ValueError(
+            f"{manifest_path}: unsupported or overlapping retention reasons"
+        )
+    retained_ids = {str(task_id) for task_id in manifest.get("retained_task_ids", [])}
+    if retained_ids != source_ids:
+        raise ValueError(
+            f"{manifest_path}: retained task IDs differ from the screened map"
+        )
+    evidence = {
+        "manifest": {
+            "filename": manifest_path.name,
+            "sha256": _sha256_file(manifest_path),
+        },
+        "policy": manifest["policy"],
+        "screening_mode": manifest["screening_mode"],
+        "temperature": manifest["temperature"],
+        "source_population_total": manifest["source_population_total"],
+        "qualification_candidate_total": len(source_ids),
+        "observed_finding_total": len(observed),
+        "incomplete_evidence_total": len(incomplete),
+        "excluded_all_valid_zero_total": manifest[
+            "excluded_never_vulnerable_total"
+        ],
+    }
+    return observed, incomplete, evidence, manifest_path
+
+
+def _exclusion_counts(
+    exclusions: dict[str, dict[str, Any]],
+    *,
+    language: str | None = None,
+) -> dict[str, int]:
+    counts = Counter(
+        detail["reason"]
+        for detail in exclusions.values()
+        if language is None or detail["language"] == language
+    )
+    return dict(sorted(counts.items()))
+
+
+def _copy_supporting_artifact(
+    source: Path,
+    destination: Path,
+    *,
+    overwrite: bool,
+) -> dict[str, Any]:
+    if not source.is_file():
+        raise ValueError(f"supporting artifact is unavailable: {source}")
+    if destination.exists() and not overwrite:
+        raise FileExistsError(
+            f"refusing to overwrite {destination}; pass --overwrite"
+        )
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(source, destination)
+    return {
+        "filename": str(destination.name),
+        "sha256": _sha256_file(destination),
+    }
+
+
+def _resolve_source_population(eligibility_manifest_path: Path) -> Path:
+    manifest = _load_json(eligibility_manifest_path)
+    reference = manifest.get("source_population")
+    if not isinstance(reference, dict):
+        raise ValueError(
+            f"{eligibility_manifest_path}: source_population reference is missing"
+        )
+    filename = reference.get("filename")
+    expected_sha256 = reference.get("sha256")
+    if not isinstance(filename, str) or re.fullmatch(
+        r"[0-9a-f]{64}",
+        str(expected_sha256 or ""),
+    ) is None:
+        raise ValueError(
+            f"{eligibility_manifest_path}: invalid source_population reference"
+        )
+    candidates = (
+        eligibility_manifest_path.parent / filename,
+        PROJECT_ROOT / "rule_maps" / filename,
+    )
+    for candidate in candidates:
+        if candidate.is_file() and _sha256_file(candidate) == expected_sha256:
+            return candidate
+    raise ValueError(
+        f"{eligibility_manifest_path}: source population is unavailable "
+        "or has the wrong hash"
+    )
 
 
 def _validate_screened_source_map(
@@ -381,6 +518,18 @@ def _derived_fields(payload: dict[str, Any]) -> None:
     payload["rule_frequency"] = dict(sorted(rule_frequency.items()))
 
 
+def _normalize_screening_labels(block: object) -> None:
+    if not isinstance(block, dict):
+        return
+    source_key = "excluded_never_vulnerable_task_ids"
+    if source_key in block:
+        block["excluded_all_valid_zero_task_ids"] = block.pop(source_key)
+    language_evidence = block.get("language_evidence")
+    if isinstance(language_evidence, dict):
+        for evidence in language_evidence.values():
+            _normalize_screening_labels(evidence)
+
+
 def _write_map(
     source: dict[str, Any],
     output_path: Path,
@@ -393,10 +542,14 @@ def _write_map(
         raise FileExistsError(f"refusing to overwrite {output_path}; pass --overwrite")
     payload = json.loads(json.dumps(source))
     payload["artifact_type"] = "qualified_rule_map"
+    _normalize_screening_labels(
+        payload.get("metadata", {}).get("population_screening")
+    )
     prior = payload.setdefault("metadata", {}).get("search_qualification")
     payload["mappings"] = [
         row for row in payload["mappings"] if str(row["index"]) in allowed_ids
     ]
+    payload["metadata"]["evidence_status"] = "final"
     payload["metadata"]["retrieval_map_qualification"] = prior
     payload["metadata"]["search_qualification"] = qualification
     _derived_fields(payload)
@@ -427,6 +580,28 @@ def materialize(args: argparse.Namespace) -> dict[str, Any]:
             raise ValueError(
                 f"Qwen/Llama {language} source maps do not define the same task identities"
             )
+
+    observed_finding_ids: dict[str, set[str]] = {}
+    incomplete_evidence_ids: dict[str, set[str]] = {}
+    screening_inputs: dict[str, dict[str, Any]] = {}
+    screening_manifest_paths: dict[str, Path] = {}
+    for language in LANGUAGES:
+        selections = [
+            _load_screening_selection(
+                source_maps[(model, language)][0],
+                source_maps[(model, language)][1],
+                language=language,
+            )
+            for model in MODELS
+        ]
+        if selections[0][:3] != selections[1][:3]:
+            raise ValueError(
+                f"Qwen/Llama {language} maps use different screening evidence"
+            )
+        observed_finding_ids[language] = selections[0][0]
+        incomplete_evidence_ids[language] = selections[0][1]
+        screening_inputs[language] = selections[0][2]
+        screening_manifest_paths[language] = selections[0][3]
 
     expected_combined_identities = {
         **_task_identities(source_maps[("qwen", "python")][1]),
@@ -481,15 +656,26 @@ def materialize(args: argparse.Namespace) -> dict[str, Any]:
             model: set(inputs[(model, language)].manifest["valid_task_ids"])
             for model in MODELS
         }
-        shared_ids[language] = set.intersection(*per_model_valid.values())
+        cross_model_temp0_valid = set.intersection(*per_model_valid.values())
+        shared_ids[language] = (
+            cross_model_temp0_valid & observed_finding_ids[language]
+        )
         if not shared_ids[language]:
             raise ValueError(
-                f"temperature-zero qualification left an empty shared {language} population"
+                f"final selection left an empty shared {language} population"
             )
         source_ids = {
             str(row["index"])
             for row in source_maps[("qwen", language)][1]["mappings"]
         }
+        if (
+            observed_finding_ids[language]
+            | incomplete_evidence_ids[language]
+            != source_ids
+        ):
+            raise ValueError(
+                f"{language} screening evidence does not partition qualification inputs"
+            )
         for task_id in sorted(source_ids - shared_ids[language], key=int):
             model_status = {}
             for model in MODELS:
@@ -498,10 +684,19 @@ def materialize(args: argparse.Namespace) -> dict[str, Any]:
                     for row in inputs[(model, language)].manifest["excluded"]
                 }
                 model_status[model] = excluded.get(task_id, {"status": "valid"})
+            if task_id in incomplete_evidence_ids[language]:
+                reason = (
+                    "no_observed_finding_with_incomplete_screening_evidence"
+                )
+                screening_classification = "incomplete_evidence"
+            else:
+                reason = "not_valid_for_every_model_at_temperature_zero"
+                screening_classification = "observed_finding"
             exclusions[task_id] = {
                 "language": language,
-                "reason": "not_valid_for_every_model_at_temperature_zero",
-                "models": model_status,
+                "reason": reason,
+                "screening_classification": screening_classification,
+                "temperature_zero_models": model_status,
             }
 
     qualification_inputs = {
@@ -515,6 +710,34 @@ def materialize(args: argparse.Namespace) -> dict[str, Any]:
                 inputs[(model, language)].manifest_path.parent
                 / "qualification_validation.json"
             ),
+            "artifacts": {
+                "manifest": {
+                    "filename": (
+                        f"qualification_{model}_{language}_manifest.json"
+                    ),
+                    "sha256": _sha256_file(
+                        inputs[(model, language)].manifest_path
+                    ),
+                },
+                "run_config": {
+                    "filename": (
+                        f"qualification_{model}_{language}_run_config.json"
+                    ),
+                    "sha256": _sha256_file(
+                        inputs[(model, language)].manifest_path.parent
+                        / "run_config.json"
+                    ),
+                },
+                "validation": {
+                    "filename": (
+                        f"qualification_{model}_{language}_validation.json"
+                    ),
+                    "sha256": _sha256_file(
+                        inputs[(model, language)].manifest_path.parent
+                        / "qualification_validation.json"
+                    ),
+                },
+            },
             "slurm_job_id": inputs[(model, language)].run_config.get("slurm_job_id"),
             "model_revision": inputs[(model, language)].run_config["args"][
                 "model_revision"
@@ -536,9 +759,12 @@ def materialize(args: argparse.Namespace) -> dict[str, Any]:
             fingerprint = _population_fingerprint(selected)
             qualification = {
                 "evidence_status": "final",
-                "policy": "frozen_cross_model_temp0_intersection",
+                "policy": FINAL_SEARCH_POPULATION_POLICY,
                 "temperature": 0.0,
                 "source_population_total": len(source["mappings"]),
+                "observed_finding_population_total": len(
+                    observed_finding_ids[language]
+                ),
                 "qualified_population_total": len(selected),
                 "qualified_population_fingerprint": fingerprint,
                 "excluded_task_ids": sorted(
@@ -552,6 +778,11 @@ def materialize(args: argparse.Namespace) -> dict[str, Any]:
                     for task_id, detail in exclusions.items()
                     if detail["language"] == language
                 },
+                "exclusion_counts": _exclusion_counts(
+                    exclusions,
+                    language=language,
+                ),
+                "screening_input": screening_inputs[language],
                 "qualification_inputs": qualification_inputs,
                 **provenance,
             }
@@ -572,9 +803,13 @@ def materialize(args: argparse.Namespace) -> dict[str, Any]:
         ]
         qualification = {
             "evidence_status": "final",
-            "policy": "frozen_cross_model_temp0_intersection",
+            "policy": FINAL_SEARCH_POPULATION_POLICY,
             "temperature": 0.0,
             "source_population_total": len(combined_source["mappings"]),
+            "observed_finding_population_total": sum(
+                len(observed_finding_ids[language])
+                for language in LANGUAGES
+            ),
             "qualified_population_total": len(selected),
             "qualified_population_fingerprint": _population_fingerprint(selected),
             "language_counts": {
@@ -582,6 +817,8 @@ def materialize(args: argparse.Namespace) -> dict[str, Any]:
             },
             "excluded_task_ids": sorted(exclusions, key=int),
             "exclusions": exclusions,
+            "exclusion_counts": _exclusion_counts(exclusions),
+            "screening_inputs": screening_inputs,
             "qualification_inputs": qualification_inputs,
             **provenance,
         }
@@ -603,11 +840,14 @@ def materialize(args: argparse.Namespace) -> dict[str, Any]:
         ]
         language_qualification = {
             "evidence_status": "final",
-            "policy": "frozen_cross_model_temp0_intersection",
+            "policy": FINAL_SEARCH_POPULATION_POLICY,
             "temperature": 0.0,
             "source_population_total": sum(
                 str(row.get("language", "")).lower() == language
                 for row in norules_source["mappings"]
+            ),
+            "observed_finding_population_total": len(
+                observed_finding_ids[language]
             ),
             "qualified_population_total": len(language_selected),
             "qualified_population_fingerprint": _population_fingerprint(
@@ -626,6 +866,11 @@ def materialize(args: argparse.Namespace) -> dict[str, Any]:
                 for task_id, detail in exclusions.items()
                 if detail["language"] == language
             },
+            "exclusion_counts": _exclusion_counts(
+                exclusions,
+                language=language,
+            ),
+            "screening_input": screening_inputs[language],
             "qualification_inputs": qualification_inputs,
             **provenance,
         }
@@ -644,14 +889,19 @@ def materialize(args: argparse.Namespace) -> dict[str, Any]:
     ]
     norules_qualification = {
         "evidence_status": "final",
-        "policy": "frozen_cross_model_temp0_intersection",
+        "policy": FINAL_SEARCH_POPULATION_POLICY,
         "temperature": 0.0,
         "source_population_total": len(norules_source["mappings"]),
+        "observed_finding_population_total": sum(
+            len(observed_finding_ids[language]) for language in LANGUAGES
+        ),
         "qualified_population_total": len(norules_selected),
         "qualified_population_fingerprint": _population_fingerprint(norules_selected),
         "language_counts": {language: len(shared_ids[language]) for language in LANGUAGES},
         "excluded_task_ids": sorted(exclusions, key=int),
         "exclusions": exclusions,
+        "exclusion_counts": _exclusion_counts(exclusions),
+        "screening_inputs": screening_inputs,
         "qualification_inputs": qualification_inputs,
         **provenance,
     }
@@ -663,17 +913,109 @@ def materialize(args: argparse.Namespace) -> dict[str, Any]:
         overwrite=args.overwrite,
     )
 
+    supporting_artifacts: dict[str, dict[str, Any]] = {}
+    eligibility_block = source_maps[("qwen", "python")][1]["metadata"][
+        "population_eligibility"
+    ]
+    eligibility_manifest_path = _validate_manifest_reference(
+        source_maps[("qwen", "python")][0],
+        eligibility_block,
+        label="eligibility evidence",
+    )
+    source_population_path = _resolve_source_population(
+        eligibility_manifest_path
+    )
+    for label, source in (
+        ("source_population", source_population_path),
+        ("population_eligibility_manifest", eligibility_manifest_path),
+    ):
+        supporting_artifacts[label] = _copy_supporting_artifact(
+            source,
+            output_dir / source.name,
+            overwrite=args.overwrite,
+        )
+
+    for language, source in screening_manifest_paths.items():
+        supporting_artifacts[f"screening_manifest_{language}"] = (
+            _copy_supporting_artifact(
+                source,
+                output_dir / source.name,
+                overwrite=args.overwrite,
+            )
+        )
+        manifest = _load_json(source)
+        round_reference = manifest.get("round_report")
+        if isinstance(round_reference, dict):
+            filename = round_reference.get("filename")
+            expected_sha256 = round_reference.get("sha256")
+            if not isinstance(filename, str) or re.fullmatch(
+                r"[0-9a-f]{64}",
+                str(expected_sha256 or ""),
+            ) is None:
+                raise ValueError(
+                    f"{source}: invalid screening round-report reference"
+                )
+            candidates = (
+                source.parent / filename,
+                source.parent.parent / "rounds" / filename,
+            )
+            round_path = next(
+                (
+                    path
+                    for path in candidates
+                    if path.is_file() and _sha256_file(path) == expected_sha256
+                ),
+                None,
+            )
+            if round_path is None:
+                raise ValueError(
+                    f"{source}: referenced screening round report is unavailable"
+                )
+            supporting_artifacts[f"screening_round_{language}"] = (
+                _copy_supporting_artifact(
+                    round_path,
+                    output_dir / filename,
+                    overwrite=args.overwrite,
+                )
+            )
+
+    for model in MODELS:
+        for language in LANGUAGES:
+            run_dir = inputs[(model, language)].manifest_path.parent
+            for artifact, source_name in (
+                ("manifest", "qualification_manifest.json"),
+                ("run_config", "run_config.json"),
+                ("validation", "qualification_validation.json"),
+            ):
+                destination_name = qualification_inputs[
+                    f"{model}_{language}"
+                ]["artifacts"][artifact]["filename"]
+                supporting_artifacts[
+                    f"qualification_{model}_{language}_{artifact}"
+                ] = _copy_supporting_artifact(
+                    run_dir / source_name,
+                    output_dir / destination_name,
+                    overwrite=args.overwrite,
+                )
+
     population_manifest = {
         "artifact_type": "qualified_population_manifest",
         "evidence_status": "final",
-        "policy": "frozen_cross_model_temp0_intersection",
+        "policy": FINAL_SEARCH_POPULATION_POLICY,
         "temperature": 0.0,
         "language_counts": {language: len(shared_ids[language]) for language in LANGUAGES},
+        "observed_finding_counts": {
+            language: len(observed_finding_ids[language])
+            for language in LANGUAGES
+        },
         "task_ids": {
             language: sorted(shared_ids[language], key=int) for language in LANGUAGES
         },
         "exclusions": exclusions,
+        "exclusion_counts": _exclusion_counts(exclusions),
+        "screening_inputs": screening_inputs,
         "qualification_inputs": qualification_inputs,
+        "supporting_artifacts": supporting_artifacts,
         "outputs": {
             name: {
                 "sha256": _sha256_file(output_dir / name),
@@ -699,7 +1041,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--llama-python-manifest", type=Path, required=True)
     parser.add_argument("--qwen-java-manifest", type=Path, required=True)
     parser.add_argument("--llama-java-manifest", type=Path, required=True)
-    parser.add_argument("--map-dir", type=Path, default=PROJECT_ROOT / "rule_maps")
+    parser.add_argument(
+        "--map-dir",
+        type=Path,
+        required=True,
+        help="Directory containing the screened model/language source maps.",
+    )
     parser.add_argument(
         "--output-dir",
         type=Path,
