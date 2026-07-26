@@ -1,0 +1,26 @@
+{
+  "artifact_type": "qualification_validation",
+  "run_dir": "/home/rnegro/thesis/rule-mutation/experiments/final_map_pipeline_20260724/phase4_qualification/qwen_python",
+  "status": "VALID",
+  "issues": [],
+  "warnings": [],
+  "manifest_sha256": "5e6fb1348efc8d0f16ccc3015c2076404250b889dcdcebd21d7cc946c494843b",
+  "artifact_sha256": {
+    "run_config": "fadcbc13f06912ea669cc219e18e9f20c957f2fd6213968e33bfb219d9ada113",
+    "qualification_manifest": "5e6fb1348efc8d0f16ccc3015c2076404250b889dcdcebd21d7cc946c494843b",
+    "qualification_generations": "97c55445ac7ecfa9f91e58bac0dc415d2bdbdcb716cef5dd1f75f4f95919040c",
+    "qualification_tasks": "a41ff7979a1cfb6be7516b8c2adbf71d2fef42d2d3920b72406296b00bb847ba",
+    "semgrep_debug": "581e04d01aee543cb419315459f390ad7caa3a924ce053e2f6b8996b4f1864d8",
+    "evaluation_failures": "9094d62ced31cbe271ab79d80b5a6e5faa1bc45bb1f422743ec9cbec5b020469"
+  },
+  "counts": {
+    "prompts": 215,
+    "valid": 213,
+    "excluded": 2,
+    "statuses": {
+      "valid": 213,
+      "multiple_target_blocks": 1,
+      "syntax_invalid": 1
+    }
+  }
+}

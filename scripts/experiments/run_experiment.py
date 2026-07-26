@@ -12,12 +12,11 @@ f1 means fewer findings than the origin baseline.
 Usage:
     # Smoke: 5 cases, mock backend, no API calls
     python scripts/experiments/run_experiment.py \
-        --n-cases 5 --dry-run --allow-unqualified-map
+        --n-cases 5 --dry-run
 
     # Local API smoke (Claude backend; needs ANTHROPIC_API_KEY in .env)
     python scripts/experiments/run_experiment.py \
         --backend claude --n-cases 10 --main-loop-budget 15 \
-        --allow-unqualified-map \
         --languages python --mutators verb_weakening synonym_replacement \
         --enable-validation
 
@@ -92,6 +91,7 @@ from src.evaluation.generation_contract import (
     MAX_OUTPUT_TOKENS,
     prompt_contract_sha256,
 )
+from src.evaluation.population_screening import FINAL_SEARCH_POPULATION_POLICY
 from src.evaluation import (
     load_rule_mapping,
     create_rule_loader,
@@ -111,8 +111,17 @@ from src.evaluation.semgrep_runner import (
 
 # Default paths (relative to project root)
 DEFAULT_RULES_MAP = (
-    PROJECT_ROOT / "rule_maps" / "final_consensus_map_qwen.json"
+    PROJECT_ROOT / "rule_maps" / "qualified" / "final_search_map_qwen.json"
 )
+
+
+def _provenance_path(path: str | Path) -> str:
+    """Record repository files portably while preserving external locations."""
+    resolved = Path(path).resolve()
+    try:
+        return resolved.relative_to(PROJECT_ROOT.resolve()).as_posix()
+    except ValueError:
+        return str(resolved)
 
 
 def _git_commit_sha() -> str | None:
@@ -210,8 +219,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--allow-unqualified-map",
         action="store_true",
         help=(
-            "Allow a non-frozen retrieval map for a non-final smoke/diagnostic "
-            "search. Real final searches reject such maps by default."
+            "Bypass the final-population metadata check for a deliberate "
+            "plumbing diagnostic. Such a run is ineligible for final analysis."
         ),
     )
     # ----- search budget + direction ------------------------------------------
@@ -770,8 +779,8 @@ def create_pool(args: argparse.Namespace, backend):
     )
     # Fail before the first search iteration if an optional mutator dependency
     # is unavailable.  This is especially important on offline cluster nodes:
-    # nlpaug otherwise tries an implicit NLTK download and its historical
-    # caller swallowed the resulting error as an identity mutation.
+    # nlpaug otherwise tries an implicit NLTK download, and a missing resource
+    # can become an identity mutation instead of an explicit setup failure.
     for mutator in pool.mutators:
         preflight = getattr(mutator, "validate_runtime_dependencies", None)
         if preflight is not None:
@@ -1010,7 +1019,7 @@ def save_run_config(
             "prompt_contract_sha256": prompt_contract_sha256(),
             "run_mode":               "search",
             "allow_unqualified_map":  args.allow_unqualified_map,
-            "rules_map":              str(args.rules_map),
+            "rules_map":              _provenance_path(args.rules_map),
             "rules_map_sha256":       hashlib.sha256(args.rules_map.read_bytes()).hexdigest(),
             "population_fingerprint": (
                 map_qualification.get("qualified_population_fingerprint")
@@ -1119,16 +1128,16 @@ def main():
         not args.dry_run
         and not args.allow_unqualified_map
         and (
-            frozen_policy != "frozen_cross_model_temp0_intersection"
+            frozen_policy != FINAL_SEARCH_POPULATION_POLICY
             or evidence_status != "final"
         )
     ):
         print(
-            "❌ Error: final search requires a final frozen cross-model qualified map, " \
-            "safe under temperature-zero code generation (no invalid code generated" \
-            "at baseline). Run run_qualification.py for both models, materialize "
-            "the shared population, or pass --allow-unqualified-map only for an "
-            "explicit non-final smoke."
+            "❌ Error: final search requires a map whose metadata records the "
+            "observed-finding and cross-model temperature-zero-valid population. "
+            "Use a map under rule_maps/qualified/, or pass "
+            "--allow-unqualified-map only for a diagnostic that will not be "
+            "used as final evidence."
         )
         sys.exit(1)
     qualified_prompt_contract = (

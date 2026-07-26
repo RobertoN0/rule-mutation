@@ -51,7 +51,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from scripts.experiments.run_experiment import (  # noqa: E402
-    RULES_DIR, create_rule_loader, load_prompts_with_rules,
+    RULES_DIR,
+    _provenance_path,
+    create_rule_loader,
+    load_prompts_with_rules,
 )
 from scripts.analyze import stats as S  # noqa: E402
 from scripts.analyze.validate_replicate_run import validate_replicate_run  # noqa: E402
@@ -59,6 +62,9 @@ from src.llm_backends import LLMConfig  # noqa: E402
 from src.evaluation.generation_contract import (  # noqa: E402
     MAX_OUTPUT_TOKENS,
     prompt_contract_sha256,
+)
+from src.evaluation.population_screening import (  # noqa: E402
+    FINAL_SEARCH_POPULATION_POLICY,
 )
 from src.llm_backends.delftblue_local_backend import DelftBlueLocalBackend  # noqa: E402
 from src.evaluation.qualification import (  # noqa: E402
@@ -419,7 +425,7 @@ def main() -> None:
         not args.allow_unqualified_map
         and (
             map_qualification.get("policy")
-            != "frozen_cross_model_temp0_intersection"
+            != FINAL_SEARCH_POPULATION_POLICY
             or map_qualification.get("evidence_status") != "final"
         )
     ):
@@ -647,7 +653,7 @@ def main() -> None:
             "seeds": all_seeds,            # cumulative across chunks
             "seeds_this_chunk": seeds,     # what this invocation was asked to run
             "seed": args.seed_base,
-            "rules_map": str(rules_map),
+            "rules_map": _provenance_path(rules_map),
             "rules_map_sha256": hashlib.sha256(Path(rules_map).read_bytes()).hexdigest(),
             "max_output_tokens": MAX_OUTPUT_TOKENS,
             "invalid_output_policy": "missing_not_zero_with_explicit_denominator",

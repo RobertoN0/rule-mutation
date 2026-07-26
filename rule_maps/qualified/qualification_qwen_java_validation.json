@@ -1,0 +1,24 @@
+{
+  "artifact_type": "qualification_validation",
+  "run_dir": "/home/rnegro/thesis/rule-mutation/experiments/final_map_pipeline_20260724/phase4_qualification/qwen_java",
+  "status": "VALID",
+  "issues": [],
+  "warnings": [],
+  "manifest_sha256": "97fa560f70a91c3282a15a8ea594c90531d26500626ecbe171cf368e14ce7188",
+  "artifact_sha256": {
+    "run_config": "91bcb9d3b34b80e0b0fcf3263cf45a2958a9fa87c456fbcdc747526199ca6706",
+    "qualification_manifest": "97fa560f70a91c3282a15a8ea594c90531d26500626ecbe171cf368e14ce7188",
+    "qualification_generations": "6f58ca7fcf041c167ef51eec09599afe5b68fd3c181de6a00fc155ae2f768eb2",
+    "qualification_tasks": "bba1d6fb4e678aa441f353f7b189464b401e20483f9b04d3ca3d35e6b6a5404b",
+    "semgrep_debug": "395f1822cf7f97355cea2dc58a5e8335f376da95a849956e586143d2edd32c3a",
+    "evaluation_failures": null
+  },
+  "counts": {
+    "prompts": 154,
+    "valid": 154,
+    "excluded": 0,
+    "statuses": {
+      "valid": 154
+    }
+  }
+}

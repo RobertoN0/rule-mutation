@@ -20,9 +20,9 @@
 #     -v "$(pwd)/results:/app/results" \
 #     codeguard-sbst:replication \
 #     python scripts/experiments/run_experiment.py \
-#       --backend claude --optimizer random_search \
-#       --rules-map rule_maps/final_consensus_map_qwen.json \
-#       --n-cases 2 --iterations 3 --languages python --seed 42 \
+#       --backend claude --optimizer random_search --enable-validation \
+#       --rules-map rule_maps/qualified/final_search_map_qwen_python.json \
+#       --n-cases 2 --main-loop-budget 3 --languages python --seed 42 \
 #       --mutators synonym_replacement add_random_word verb_weakening \
 #       --output-dir /app/results/docker_smoke
 # =============================================================================

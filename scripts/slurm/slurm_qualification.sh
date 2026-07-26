@@ -34,7 +34,7 @@ else
     echo "ERROR: MODEL must be qwen or llama"; exit 1
 fi
 
-RULES_MAP=${RULES_MAP:-"$REPO_ROOT/rule_maps/final_consensus_map_${MODEL}_${LANGUAGES}.json"}
+RULES_MAP=${RULES_MAP:-}
 OUTPUT_DIR=${OUTPUT_DIR:-"$OUTPUT_BASE/job${SLURM_JOB_ID}_${MODEL}_${LANGUAGES}"}
 
 cd "$REPO_ROOT"
@@ -49,6 +49,10 @@ export TRANSFORMERS_CACHE=$HF_HOME/hub
 export HF_HUB_OFFLINE=1
 export PYTHONUNBUFFERED=1
 
+if [ -z "$RULES_MAP" ]; then
+    echo "ERROR: set RULES_MAP to the screened ${MODEL}/${LANGUAGES} map being qualified"
+    exit 1
+fi
 if [ ! -e "$RULES_MAP" ]; then echo "ERROR: rules map not found: $RULES_MAP"; exit 1; fi
 if [ ! -e "$SEMGREP_RULESET" ]; then echo "ERROR: Semgrep rules not found: $SEMGREP_RULESET"; exit 1; fi
 if [ ! -s "$SEMGREP_RULESET/SOURCE_COMMIT" ]; then

@@ -193,7 +193,8 @@ def test_qualification_wrapper_is_full_population_and_self_validating() -> None:
     assert "run_qualification.py" in text
     assert "--n-cases" not in text
     assert "validate_qualification_run.py" in text
-    assert "final_consensus_map_${MODEL}_${LANGUAGES}.json" in text
+    assert "RULES_MAP=${RULES_MAP:-}" in text
+    assert "set RULES_MAP to the screened" in text
 
 
 def test_replicate_runner_defaults_to_frozen_maps_without_fixed_counts() -> None:
@@ -214,6 +215,26 @@ def test_search_numeric_knobs_are_validated() -> None:
         parse_args(["--dry-run", "--random-max-changes", "0"])
     with pytest.raises(SystemExit):
         parse_args(["--dry-run", "--order-move-weight", "1.1"])
+
+
+def test_search_default_map_is_the_final_qualified_population() -> None:
+    from scripts.experiments.run_experiment import parse_args
+
+    args = parse_args(["--dry-run"])
+
+    assert args.rules_map.name == "final_search_map_qwen.json"
+    assert args.rules_map.parent.name == "qualified"
+    assert args.rules_map.is_file()
+
+
+def test_repository_map_paths_are_recorded_portably(tmp_path: Path) -> None:
+    from scripts.experiments.run_experiment import _provenance_path
+
+    repository_map = Path("rule_maps/qualified/final_search_map_qwen_python.json")
+    external_map = tmp_path / "diagnostic_map.json"
+
+    assert _provenance_path(repository_map) == repository_map.as_posix()
+    assert _provenance_path(external_map) == str(external_map.resolve())
 
 
 def test_qualification_has_a_dedicated_full_population_cli() -> None:

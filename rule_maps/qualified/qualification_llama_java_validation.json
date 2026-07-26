@@ -1,0 +1,25 @@
+{
+  "artifact_type": "qualification_validation",
+  "run_dir": "/home/rnegro/thesis/rule-mutation/experiments/final_map_pipeline_20260724/phase4_qualification/llama_java",
+  "status": "VALID",
+  "issues": [],
+  "warnings": [],
+  "manifest_sha256": "c3b6278675fee3c161b81e0cbc59a2d5afeb6eaf167dccf7857f5ffa9eeeff88",
+  "artifact_sha256": {
+    "run_config": "349b006b99c4301b12919d2c8bb47956332eaadbc41cfdbc7573f7e0ca72f5da",
+    "qualification_manifest": "c3b6278675fee3c161b81e0cbc59a2d5afeb6eaf167dccf7857f5ffa9eeeff88",
+    "qualification_generations": "97f7a0d5e4c3b0ed1563198d513b148b43719baf3b226ab77cda554071ffa2cb",
+    "qualification_tasks": "86510bb1624a7250df5b46e6dfec4bceb4eb13ae7cbec58bf802fb5bf4e02393",
+    "semgrep_debug": "2dcf02f68885c698233bd2fb52fe4fe4800daea1777fbb6ca8a1e14d110a7a66",
+    "evaluation_failures": "d5a0315611166e892d556c56f45eebc08807eb1700516075a91110ec10149350"
+  },
+  "counts": {
+    "prompts": 154,
+    "valid": 145,
+    "excluded": 9,
+    "statuses": {
+      "valid": 145,
+      "syntax_invalid": 9
+    }
+  }
+}
