@@ -7,6 +7,7 @@ from pathlib import Path
 from scripts.analyze.validate_replicate_run import validate_replicate_run
 from src.evaluation.generation_contract import prompt_contract_sha256
 from src.evaluation.output_validation import validate_generated_output
+from src.evaluation.population_screening import FINAL_SEARCH_POPULATION_POLICY
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:
@@ -23,7 +24,7 @@ def _fixture(tmp_path: Path) -> Path:
                 "metadata": {
                     "search_qualification": {
                         "evidence_status": "final",
-                        "policy": "frozen_cross_model_temp0_intersection",
+                        "policy": FINAL_SEARCH_POPULATION_POLICY,
                         "qualified_population_total": 2,
                         "qualified_population_fingerprint": fingerprint,
                         "prompt_contract_sha256": prompt_contract_sha256(),
@@ -54,7 +55,7 @@ def _fixture(tmp_path: Path) -> Path:
             "invalid_output_policy": "missing_not_zero_with_explicit_denominator",
             "rules_map": str(source_map),
             "rules_map_sha256": hashlib.sha256(source_map.read_bytes()).hexdigest(),
-            "population_policy": "frozen_cross_model_temp0_intersection",
+            "population_policy": FINAL_SEARCH_POPULATION_POLICY,
             "population_evidence_status": "final",
             "population_fingerprint": fingerprint,
             "evaluated_population_fingerprint": fingerprint,
@@ -165,6 +166,24 @@ def test_replicate_validator_accepts_explicit_missing_output(tmp_path: Path) -> 
     assert result["status"] == "VALID", result["issues"]
     assert result["final_baseline_eligible"]
     assert result["counts"]["invalid_statuses"] == {"syntax_invalid": 1}
+    assert result["artifact_sha256"]["semgrep_debug"]
+    assert result["artifact_sha256"]["intermediate_jsonl_tree"]
+
+
+def test_replicate_validator_resolves_synced_map_by_hash(
+    tmp_path: Path,
+) -> None:
+    run_dir = _fixture(tmp_path)
+    config_path = run_dir / "run_config.json"
+    config = json.loads(config_path.read_text())
+    config["args"]["rules_map"] = (
+        "/remote/delftblue/repository/rule_maps/qualified_map.json"
+    )
+    config_path.write_text(json.dumps(config))
+
+    result = validate_replicate_run(run_dir, map_root=tmp_path)
+
+    assert result["status"] == "VALID", result["issues"]
 
 
 def test_replicate_validator_rejects_invalid_output_scored_as_zero(tmp_path: Path) -> None:

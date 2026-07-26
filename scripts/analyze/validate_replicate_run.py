@@ -18,6 +18,9 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.evaluation.output_validation import validate_generated_output  # noqa: E402
 from src.evaluation.generation_contract import prompt_contract_sha256  # noqa: E402
+from src.evaluation.population_screening import (  # noqa: E402
+    FINAL_SEARCH_POPULATION_POLICY,
+)
 
 
 PROMPT_ERROR_KINDS = {
@@ -61,6 +64,43 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _jsonl_tree_sha256(directory: Path) -> str | None:
+    paths = sorted(directory.glob("*.jsonl"))
+    if not paths:
+        return None
+    digest = hashlib.sha256()
+    for path in paths:
+        digest.update(path.name.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def _resolve_source_map(
+    recorded: object,
+    expected_sha256: object,
+    *,
+    map_root: Path | None = None,
+) -> Path:
+    recorded_path = Path(str(recorded))
+    candidates = [recorded_path]
+    if not recorded_path.is_absolute():
+        candidates.append(PROJECT_ROOT / recorded_path)
+    candidates.append(PROJECT_ROOT / "rule_maps" / recorded_path.name)
+    candidates.append(PROJECT_ROOT / "rule_maps" / "qualified" / recorded_path.name)
+    if map_root is not None:
+        candidates.append(map_root / recorded_path.name)
+    unique_candidates = list(dict.fromkeys(path.resolve() for path in candidates))
+    for candidate in unique_candidates:
+        if candidate.is_file() and _sha256(candidate) == expected_sha256:
+            return candidate
+    for candidate in unique_candidates:
+        if candidate.is_file():
+            return candidate
+    return unique_candidates[0]
+
+
 def _close(first: Any, second: Any) -> bool:
     return isinstance(first, (int, float)) and isinstance(second, (int, float)) and math.isclose(
         float(first), float(second), rel_tol=1e-9, abs_tol=1e-9
@@ -83,7 +123,11 @@ def _debug_counts(path: Path) -> tuple[int, int]:
     return records, system_errors
 
 
-def validate_replicate_run(run_dir: Path) -> dict[str, Any]:
+def validate_replicate_run(
+    run_dir: Path,
+    *,
+    map_root: Path | None = None,
+) -> dict[str, Any]:
     run_dir = run_dir.resolve()
     issues: list[str] = []
     warnings: list[str] = []
@@ -125,9 +169,11 @@ def validate_replicate_run(run_dir: Path) -> dict[str, Any]:
         if re.fullmatch(r"[0-9a-f]{64}", str(args.get("semgrep_rules_sha256", ""))) is None:
             issues.append("replicate run lacks a Semgrep rule-content hash")
 
-        map_path = Path(str(args.get("rules_map", "")))
-        if not map_path.is_absolute():
-            map_path = (PROJECT_ROOT / map_path).resolve()
+        map_path = _resolve_source_map(
+            args.get("rules_map", ""),
+            args.get("rules_map_sha256"),
+            map_root=map_root,
+        )
         if not map_path.is_file():
             issues.append(f"rules map is unavailable: {map_path}")
             map_payload: dict[str, Any] = {}
@@ -137,7 +183,7 @@ def validate_replicate_run(run_dir: Path) -> dict[str, Any]:
                 issues.append("rules-map hash differs from run_config")
         qualification = map_payload.get("metadata", {}).get("search_qualification", {})
         if not args.get("allow_unqualified_map"):
-            if args.get("population_policy") != "frozen_cross_model_temp0_intersection":
+            if args.get("population_policy") != FINAL_SEARCH_POPULATION_POLICY:
                 issues.append("replicate run did not use a frozen qualified map")
             if args.get("population_evidence_status") != "final":
                 issues.append("replicate map is not backed by final qualification evidence")
@@ -396,6 +442,20 @@ def validate_replicate_run(run_dir: Path) -> dict[str, Any]:
     seed_complete = set(locals().get("seeds", [])) == set(
         locals().get("requested_seeds", set())
     )
+    artifact_sha256 = {
+        name: (_sha256(path) if path.is_file() else None)
+        for name, path in {
+            "run_config": run_dir / "run_config.json",
+            "replicates": run_dir / "replicates.jsonl",
+            "replicate_summary": run_dir / "replicate_summary.json",
+            "semgrep_debug": (
+                run_dir / "semgrep_debug" / "semgrep_debug.jsonl"
+            ),
+        }.items()
+    }
+    artifact_sha256["intermediate_jsonl_tree"] = _jsonl_tree_sha256(
+        run_dir / "intermediate"
+    )
     return {
         "artifact_type": "replicate_run_validation",
         "run_dir": str(run_dir),
@@ -422,25 +482,23 @@ def validate_replicate_run(run_dir: Path) -> dict[str, Any]:
             "semgrep_debug_records": locals().get("debug_records", 0),
             "invalid_statuses": dict(invalid_statuses),
         },
-        "artifact_sha256": {
-            name: (_sha256(path) if path.is_file() else None)
-            for name, path in {
-                "run_config": run_dir / "run_config.json",
-                "replicates": run_dir / "replicates.jsonl",
-                "replicate_summary": run_dir / "replicate_summary.json",
-            }.items()
-        },
+        "artifact_sha256": artifact_sha256,
     }
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("run_dirs", nargs="+", type=Path)
+    parser.add_argument(
+        "--map-root",
+        type=Path,
+        help="Directory containing copied rule maps, resolved by filename and hash.",
+    )
     parser.add_argument("--write", action="store_true")
     args = parser.parse_args()
     failed = 0
     for run_dir in args.run_dirs:
-        result = validate_replicate_run(run_dir)
+        result = validate_replicate_run(run_dir, map_root=args.map_root)
         print(json.dumps(result, indent=2))
         if args.write:
             (run_dir / "replicate_validation.json").write_text(

@@ -18,6 +18,9 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.evaluation.output_validation import validate_generated_output  # noqa: E402
 from src.evaluation.generation_contract import prompt_contract_sha256  # noqa: E402
+from src.evaluation.population_screening import (  # noqa: E402
+    FINAL_SEARCH_POPULATION_POLICY,
+)
 from src.optimizer.initialization import (  # noqa: E402
     build_initialization_identity,
     load_initialization_bundle,
@@ -79,6 +82,43 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _file_tree_sha256(directory: Path, pattern: str) -> str | None:
+    paths = sorted(directory.glob(pattern))
+    if not paths:
+        return None
+    digest = hashlib.sha256()
+    for path in paths:
+        digest.update(path.relative_to(directory).as_posix().encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def _resolve_source_map(
+    recorded: object,
+    expected_sha256: object,
+    *,
+    map_root: Path | None = None,
+) -> Path:
+    recorded_path = Path(str(recorded))
+    candidates = [recorded_path]
+    if not recorded_path.is_absolute():
+        candidates.append(PROJECT_ROOT / recorded_path)
+    candidates.append(PROJECT_ROOT / "rule_maps" / recorded_path.name)
+    candidates.append(PROJECT_ROOT / "rule_maps" / "qualified" / recorded_path.name)
+    if map_root is not None:
+        candidates.append(map_root / recorded_path.name)
+    unique_candidates = list(dict.fromkeys(path.resolve() for path in candidates))
+    for candidate in unique_candidates:
+        if candidate.is_file() and _sha256(candidate) == expected_sha256:
+            return candidate
+    for candidate in unique_candidates:
+        if candidate.is_file():
+            return candidate
+    return unique_candidates[0]
 
 
 def _population_fingerprint(rows: list[dict[str, Any]]) -> str:
@@ -187,7 +227,11 @@ def _check_code_provenance(
         issues.append(f"{label}: analysis-line map does not reconcile")
 
 
-def validate_run(run_dir: Path) -> dict[str, Any]:
+def validate_run(
+    run_dir: Path,
+    *,
+    map_root: Path | None = None,
+) -> dict[str, Any]:
     issues: list[str] = []
     warnings: list[str] = []
     status_counts: Counter[str] = Counter()
@@ -269,10 +313,12 @@ def validate_run(run_dir: Path) -> dict[str, Any]:
             and pretimeout_lead_seconds >= wall_time_budget_seconds
         ):
             issues.append("pretimeout lead is not below the wall-time budget")
-        map_path = Path(str(args.get("rules_map", "")))
-        if not map_path.is_absolute():
-            map_path = (PROJECT_ROOT / map_path).resolve()
         map_hash = args.get("rules_map_sha256")
+        map_path = _resolve_source_map(
+            args.get("rules_map", ""),
+            map_hash,
+            map_root=map_root,
+        )
         if not isinstance(map_hash, str) or len(map_hash) != 64:
             issues.append("run_config is missing an exact rules-map SHA-256")
         elif not map_path.is_file():
@@ -291,7 +337,7 @@ def validate_run(run_dir: Path) -> dict[str, Any]:
         )
         if diagnostic_map_override:
             warnings.append("explicit non-final diagnostic used an unqualified map")
-        elif population_policy != "frozen_cross_model_temp0_intersection":
+        elif population_policy != FINAL_SEARCH_POPULATION_POLICY:
             issues.append("search map is not the frozen cross-model temperature-zero population")
         elif population_evidence_status != "final":
             issues.append("search map is not backed by final qualification evidence")
@@ -775,24 +821,37 @@ def validate_run(run_dir: Path) -> dict[str, Any]:
     except (OSError, ValueError, json.JSONDecodeError, TypeError, KeyError) as exc:
         issues.append(str(exc))
 
+    artifact_sha256 = {
+        name: (_sha256(path) if path.is_file() else None)
+        for name, path in {
+            "run_config": run_dir / "run_config.json",
+            "search_summary": run_dir / "search_summary.json",
+            "evaluations": run_dir / "evaluations.jsonl",
+            "evaluation_manifest": run_dir / "evaluation_manifest.json",
+            "initialization_random_state": (
+                run_dir / "initialization_random_state.json"
+            ),
+            "baseline": run_dir / "intermediate" / "baseline.jsonl",
+            "semgrep_debug": (
+                run_dir / "semgrep_debug" / "semgrep_debug.jsonl"
+            ),
+        }.items()
+    }
+    artifact_sha256["archive_snapshots_tree"] = _file_tree_sha256(
+        run_dir / "archive_snapshots",
+        "evaluation_*.json",
+    )
+    artifact_sha256["mutated_rules_tree"] = _file_tree_sha256(
+        run_dir / "mutated_rules",
+        "**/*.md",
+    )
     return {
         "artifact_type": "search_run_validation",
         "run_dir": str(run_dir),
         "status": "VALID" if not issues else "INVALID",
         "issues": issues,
         "warnings": warnings,
-        "artifact_sha256": {
-            name: (_sha256(path) if path.is_file() else None)
-            for name, path in {
-                "run_config": run_dir / "run_config.json",
-                "search_summary": run_dir / "search_summary.json",
-                "evaluations": run_dir / "evaluations.jsonl",
-                "evaluation_manifest": run_dir / "evaluation_manifest.json",
-                "initialization_random_state": (
-                    run_dir / "initialization_random_state.json"
-                ),
-            }.items()
-        },
+        "artifact_sha256": artifact_sha256,
         "completion": {
             "status": locals().get("completion_state", "unknown"),
             "termination_reason": locals().get("termination_reason"),
@@ -837,6 +896,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("run_dirs", nargs="+", type=Path)
     parser.add_argument(
+        "--map-root",
+        type=Path,
+        help="Directory containing copied rule maps, resolved by filename and hash.",
+    )
+    parser.add_argument(
         "--write",
         action="store_true",
         help="write search_validation.json inside each run directory",
@@ -845,7 +909,7 @@ def main() -> int:
 
     failed = 0
     for run_dir in args.run_dirs:
-        result = validate_run(run_dir)
+        result = validate_run(run_dir, map_root=args.map_root)
         print(json.dumps(result, indent=2))
         if args.write:
             (run_dir / "search_validation.json").write_text(

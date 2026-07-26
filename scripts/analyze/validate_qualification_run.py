@@ -48,12 +48,20 @@ def _text_sha256(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def _resolve_source_map(recorded: object, expected_sha256: object) -> Path:
+def _resolve_source_map(
+    recorded: object,
+    expected_sha256: object,
+    *,
+    map_root: Path | None = None,
+) -> Path:
     recorded_path = Path(str(recorded))
     candidates = [recorded_path]
     if not recorded_path.is_absolute():
         candidates.append(PROJECT_ROOT / recorded_path)
     candidates.append(PROJECT_ROOT / "rule_maps" / recorded_path.name)
+    candidates.append(PROJECT_ROOT / "rule_maps" / "qualified" / recorded_path.name)
+    if map_root is not None:
+        candidates.append(map_root / recorded_path.name)
     unique_candidates = list(dict.fromkeys(path.resolve() for path in candidates))
     for candidate in unique_candidates:
         if candidate.is_file() and _sha256(candidate) == expected_sha256:
@@ -64,7 +72,11 @@ def _resolve_source_map(recorded: object, expected_sha256: object) -> Path:
     return unique_candidates[0]
 
 
-def validate_qualification(run_dir: Path) -> dict[str, Any]:
+def validate_qualification(
+    run_dir: Path,
+    *,
+    map_root: Path | None = None,
+) -> dict[str, Any]:
     run_dir = run_dir.resolve()
     issues: list[str] = []
     warnings: list[str] = []
@@ -120,6 +132,7 @@ def validate_qualification(run_dir: Path) -> dict[str, Any]:
         map_path = _resolve_source_map(
             args.get("rules_map", ""),
             args.get("rules_map_sha256"),
+            map_root=map_root,
         )
         if not map_path.is_file():
             issues.append(f"source map is unavailable: {map_path}")
@@ -330,11 +343,16 @@ def validate_qualification(run_dir: Path) -> dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("run_dirs", nargs="+", type=Path)
+    parser.add_argument(
+        "--map-root",
+        type=Path,
+        help="Directory containing copied source maps, resolved by filename and hash.",
+    )
     parser.add_argument("--write", action="store_true")
     args = parser.parse_args()
     failed = 0
     for run_dir in args.run_dirs:
-        result = validate_qualification(run_dir)
+        result = validate_qualification(run_dir, map_root=args.map_root)
         print(json.dumps(result, indent=2))
         if args.write:
             (run_dir / "qualification_validation.json").write_text(
