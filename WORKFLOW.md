@@ -4,17 +4,114 @@ How to run experiments, reproduce them, and read the results. For a one-page
 reproduction guide see [REPLICATION.md](REPLICATION.md); for internals see
 [ARCHITECTURE.md](ARCHITECTURE.md) and [IMPLEMENTATION.md](IMPLEMENTATION.md).
 
-The pipeline runs the same way locally on an API backend (Claude / OpenAI, no
-GPU) and on a GPU host with a local model. Both write the same
-`schema_version: 4` output.
+The main experiment has a prerequisite phase and a search phase. **Phase 1**
+retrieves the CodeGuard rules relevant to each benchmark task and freezes the
+final task-to-rule maps. **Phase 2** is the main search experiment over
+mutations of those mapped rules. **Phase 3** is a follow-up replicate stage for
+selected fixed configurations; it is not part of the search budget. The Phase
+2 workflow runs the same way locally on an API backend (Claude / OpenAI, no
+GPU) and on a GPU host with a local model. Both write the same unnumbered search
+artifact contract.
 
 ---
 
-## 1. Running experiments
+## Phase 1 — Build and freeze the task-to-rule maps
+
+The current maps are built with the reframed retrieval prompt implemented in
+`src/retrieval/rule_retrieval_mapping_reframed.py`. The DelftBlue launcher is
+`scripts/slurm/slurm_rule_retrieval_reframed.sh`. Repeated retrievals are
+validated against their exact task carrier and retrieval contract, then
+aggregated into one 11-of-20 consensus map per model and language. Before
+qualification:
+
+1. apply the reviewed, outcome-independent eligibility manifest;
+2. screen the remaining tasks at temperature 0.6 under both no-rules and
+   original-rules conditions for Qwen and Llama over seeds 1–20;
+3. distinguish tasks with at least one observed finding, tasks whose 80
+   observations are all valid and zero, and zero-finding tasks with incomplete
+   observations;
+4. carry the observed-finding and incomplete-evidence superset into
+   temperature-zero qualification so incomplete outputs remain explicit;
+5. admit only observed-finding tasks that are valid at temperature zero for
+   both models into the final search population.
+
+The active utilities for these gates are:
+
+- `scripts/setup/materialize_retrieval_consensus.py`;
+- `scripts/setup/materialize_eligible_population.py`;
+- `scripts/analyze/analyze_population_screening.py`.
+
+Each utility validates its source hashes, task identity and order, model,
+generation contract, seed block, and per-task evidence before writing a
+derived map. The completed funnel is 351 Python/229 Java source tasks, 322/227
+eligible tasks, 206/128 tasks with an observed finding, and 203/126 final
+cross-model-valid search tasks.
+
+Before Phase 2, run exactly four complete temperature-zero search-population
+qualification jobs. These jobs test whether the original mapped rules produce a
+valid implementation for every task; they do not perform search. Qualification
+must use the complete maps without case subsampling and the fixed
+code-generation prompt, which explicitly states the required language. Before
+submission, manually verify that the intended
+commit and inputs are present:
+
+```bash
+MODEL=qwen  LANGUAGES=python RULES_MAP=<screened-qwen-python-map> \
+  sbatch --time=02:00:00 scripts/slurm/slurm_qualification.sh
+MODEL=qwen  LANGUAGES=java RULES_MAP=<screened-qwen-java-map> \
+  sbatch --time=02:00:00 scripts/slurm/slurm_qualification.sh
+MODEL=llama LANGUAGES=python RULES_MAP=<screened-llama-python-map> \
+  sbatch --time=02:00:00 scripts/slurm/slurm_qualification.sh
+MODEL=llama LANGUAGES=java RULES_MAP=<screened-llama-java-map> \
+  sbatch --time=02:00:00 scripts/slurm/slurm_qualification.sh
+```
+
+Each wrapper writes `qualification_validation.json`; all four results must be
+`VALID`. Then materialize the shared model intersection:
+
+```bash
+python scripts/setup/materialize_qualified_search_maps.py \
+  --qwen-python-manifest experiments/qualification/<qwen-py>/qualification_manifest.json \
+  --qwen-java-manifest experiments/qualification/<qwen-java>/qualification_manifest.json \
+  --llama-python-manifest experiments/qualification/<llama-py>/qualification_manifest.json \
+  --llama-java-manifest experiments/qualification/<llama-ja>/qualification_manifest.json \
+  --map-dir <screened-map-directory>
+
+python scripts/analyze/validate_qualified_maps.py rule_maps/qualified
+```
+
+Inspect the generated `rule_maps/qualified/` maps and population manifest before
+Phase 2, and commit them before final runs. Final searches use `N_CASES=all` and
+`SELECTION=first`, preserving the frozen task order and population fingerprint.
+The no-rules maps are also language-specific; use those maps rather than
+filtering a combined map at runtime.
+
+---
+
+## Phase 2 — Run the search experiment
 
 The entrypoint is `scripts/experiments/run_experiment.py`. Choose a backend
 (`--backend`), a model (`--model`), a search strategy (`--optimizer`), and a
 rule map.
+
+### Prepare the shared initialization
+
+For each final `(model, language, seed)` combination, evaluate the five initial
+candidates once by running either optimizer with `MAIN_LOOP_BUDGET=0`. Validate
+that source run, then create a self-contained bundle:
+
+```bash
+python scripts/setup/materialize_initialization_bundle.py \
+  experiments/results/<five-candidate-source-run> \
+  experiments/initialization/<model>_<language>_s<seed>
+```
+
+The bundle is keyed by the exact Git commit, model revision, prompt contract,
+qualified map and population, rule corpus, mutators, seed, validator settings,
+and Semgrep provenance. It also checkpoints the search, mutator, and Torch RNG
+streams and the evaluation cache. A mismatch rejects reuse. Pass the resulting
+directory through `--initialization-bundle` locally or
+`INITIALIZATION_BUNDLE` in the SLURM wrapper.
 
 ### Local (API backend)
 
@@ -23,10 +120,10 @@ source .venv/bin/activate        # or prefix commands with `uv run`
 
 python scripts/experiments/run_experiment.py \
   --backend claude --model claude-haiku-4-5 --optimizer ea \
-  --rules-map rule_maps/final_consensus_map_qwen.json \
-  --n-cases 8 --iterations 25 \
-  --archive-cap 6 --restart-h 8 --max-depth 4 \
-  --ea-init-samples 10 --ea-injection-every 10 --random-max-changes 10 \
+  --rules-map rule_maps/qualified/final_search_map_qwen_python.json \
+  --n-cases 8 --main-loop-budget 25 \
+  --archive-cap 6 --max-depth 4 \
+  --ea-injection-every 10 --random-max-changes 10 \
   --mutators synonym_replacement add_random_word verb_weakening \
              section_reorder_shuffle section_reorder_degrade \
              negation_injection voice_change paraphrase \
@@ -50,7 +147,8 @@ rule-fidelity objective); only `--dry-run` may omit it.
 --backend openai --model gpt-4o                  # a different OpenAI model
 ```
 
-The chosen model is recorded in `run_config.json` and `hillclimb_summary_*.json`.
+The chosen model and resolved model revision are recorded in `run_config.json`;
+run-level outcomes are in `search_summary.json`.
 
 ### Key flags
 
@@ -62,39 +160,44 @@ The chosen model is recorded in `run_config.json` and `hillclimb_summary_*.json`
 | `--objective-direction {minimize,maximize}` | `minimize` (default) = repair; `maximize` = secondary adversarial direction |
 | `--rules-map PATH` | prompt → rule-IDs map (pre-computed maps in `rule_maps/`) |
 | `--n-cases N`, `--languages …` | size + language filter of the prompt set |
-| `--iterations T` | evaluation budget (identities retry without consuming it; wall-time bounds real runs) |
+| `--main-loop-budget B` | safety ceiling after the shared five-candidate initialization; identities do not consume an evaluation |
+| `--initialization-bundle PATH` | reuse the strictly keyed five-candidate prefix |
+| `--wall-time-budget-seconds S` | declared scheduler allocation; the final common value is frozen after supervisor approval |
 | `--selection {first,random}` | take the first N cases, or a seeded random N |
-| `--archive-cap`, `--restart-h`, `--max-depth` | archive + depth-cap knobs |
+| `--archive-cap`, `--max-depth` | archive and per-rule depth cap |
 | `--random-max-changes K` | shared sampler's changes-per-sample cap (default 10) |
-| `--ea-init-samples`, `--ea-injection-every`, `--ea-move`, `--ea-n-mutations` | EA init/injection/move knobs |
-| `--ea-origin-parent` / `--no-ea-origin-parent` | keep the origin as a sampleable local-move parent (default on) |
+| `--ea-injection-every N` | inject an origin-based random candidate every N main-loop evaluations |
+| `--order-move-weight P` | reorder probability; mutate probability is `1-P` |
 | `--enable-validation` | quality recording; **required** on real runs (feeds f2 fidelity) |
 | `--seed N` | reproducibility |
 | `--dry-run` | wire a mock backend (no API calls) to check the plumbing |
 
 ### DelftBlue (GPU)
 
-The thesis runs used DelftBlue A100 nodes with a local Qwen model. The SLURM
-wrapper `scripts/slurm/slurm_ea_qwen32b.sh` takes env-var overrides and calls
-the same entrypoint with `--backend delftblue`:
+The thesis runs use DelftBlue A100 nodes with local Qwen and Llama models. The
+model-specific wrappers take the same search overrides and call the common
+entrypoint with `--backend delftblue`:
 
 ```bash
 # Smoke before any big batch
-N_CASES=2 N_ITERATIONS=10 LANGUAGES=python OPTIMIZER=ea \
+N_CASES=2 MAIN_LOOP_BUDGET=2 LANGUAGES=python OPTIMIZER=ea \
   sbatch --time=0:45:00 --job-name="ea_smoke" scripts/slurm/slurm_ea_qwen32b.sh
 
-# Final repair batch — paired EA vs random over the FULL case sets
-# (184 python / 113 java), seeds 42 + 43 (8 jobs). Runs are wall-time-bounded
-# (SIGUSR1); N_ITERATIONS is a high soft cap. EA_INIT_SAMPLES / EA_ORIGIN_PARENT
-# are EA-only (the random arm ignores them).
-declare -A NCASES=( [python]=184 [java]=113 )
-for SEED in 42 43; do
+# Final repair pattern. N_CASES=all is the frozen qualified population.
+: "${APPROVED_SEEDS:?space-separated seeds required}"
+: "${EVALUATION_CEILING:?high safety ceiling required}"
+: "${APPROVED_WALL_TIME_SECONDS:?approved seconds required}"
+: "${APPROVED_SLURM_TIME:?approved SLURM time required}"
+for SEED in $APPROVED_SEEDS; do
   for OPT in ea random_search; do
     for LANG in python java; do
-      SEED=$SEED OPTIMIZER=$OPT LANGUAGES=$LANG N_CASES=${NCASES[$LANG]} \
-        N_ITERATIONS=200 EA_INIT_SAMPLES=6 EA_ORIGIN_PARENT=false \
-        ORDER_MOVE_WEIGHT=0.1 EA_INJECTION_EVERY=10 \
-        sbatch --time=6:00:00 --job-name="${OPT}_${LANG}_s${SEED}" \
+      SEED=$SEED OPTIMIZER=$OPT LANGUAGES=$LANG N_CASES=all \
+        MAIN_LOOP_BUDGET=$EVALUATION_CEILING \
+        INITIALIZATION_BUNDLE="experiments/initialization/qwen_${LANG}_s${SEED}" \
+        TIME_BUDGET_SECONDS=$APPROVED_WALL_TIME_SECONDS \
+        PRETIMEOUT_LEAD_SECONDS=300 \
+        sbatch --time="$APPROVED_SLURM_TIME" \
+               --job-name="${OPT}_${LANG}_s${SEED}" \
                scripts/slurm/slurm_ea_qwen32b.sh
     done
   done
@@ -107,20 +210,23 @@ documents the env vars it reads.
 
 ---
 
-## 2. Monitoring a run
+### Monitoring a run
 
-The script logs a per-iteration line and a generation heartbeat. For a SLURM job:
+The script logs each proposal/evaluation and a generation heartbeat. For a SLURM job:
 
 ```bash
 squeue --me                          # queued / running
-tail -f logs/<JOBID>_*.out           # live progress
+tail -f experiments/results/slurm_logs/<JOBID>_*.out
 ```
 
 ### Did Semgrep actually run? (clean scan vs. failed scan)
 
-A finding count of 0 can mean two very different things: the generated code is
-clean, **or** Semgrep failed to run (e.g. not on PATH). They are
-distinguishable because every scan writes a record to
+A finding count of 0 is accepted only when Semgrep completed successfully.
+Runs abort when Semgrep has a configuration, process, or other
+system-wide failure. If only one task has invalid generated code or a
+target-analysis error, that task is explicitly excluded during Phase 1 or given
+its own baseline score during candidate evaluation; neither case is recorded as
+a clean zero. Every scan still writes a record to
 `semgrep_debug/semgrep_debug.jsonl` with an `error` field — `null` on success,
 a message on failure. This one-liner counts each:
 
@@ -134,14 +240,41 @@ print(f"{clean} clean scans, {errored} errored")
 PY
 ```
 
-`errored == 0` means Semgrep ran on every sample (so a 0 finding count is a
-genuine "clean code" result). Any errored records mean Semgrep itself failed —
-the usual cause is `semgrep` not being on PATH (activate the venv / use
-`uv run` / prefix `PATH="$PWD/.venv/bin:$PATH"`).
+`errored == 0` means Semgrep ran on every sample (so a recorded zero is a
+genuine clean-code result). Any errored records must reconcile with explicit
+task-level failure records or a fatal run error; the usual systemic cause is
+`semgrep` not being on PATH (activate the venv / use `uv run` / prefix
+`PATH="$PWD/.venv/bin:$PATH"`).
 
 ---
 
-## 3. Reproducing a run
+## Phase 3 — Replicate selected fixed configurations
+
+After selecting conditions from Phase 2, use
+`scripts/experiments/run_replicates.py` through
+`scripts/slurm/slurm_replicates.sh` to rerun no-rules, original-rules, or one
+selected chromosome at temperature greater than zero. One job evaluates one
+model, language, and condition over the declared seeds:
+
+```bash
+MODEL=qwen LANGUAGES=python CONDITION=norules \
+  sbatch scripts/slurm/slurm_replicates.sh
+
+MODEL=qwen LANGUAGES=python CONDITION=withrules \
+  BASELINE_REF=experiments/results/<norules-run> \
+  sbatch scripts/slurm/slurm_replicates.sh
+```
+
+For a selected chromosome, set `RULES_OVERRIDE_DIR` to its
+`mutated_rules/evaluation_NNNN/` directory and give it a stable
+`CONDITION_LABEL`. Validate every run with `validate_replicate_run.py`; then
+analyze the complete matrix with `analyze_replicates.py`. Invalid stochastic
+outputs are missing observations rather than clean zero-finding outputs, and
+paired task effects are reduced to one effect per seed before inference.
+
+---
+
+## Reproducing a run
 
 Reproduce any run with `scripts/experiments/rerun_from_config.py`, which reads the
 run's `run_config.json` and dispatches by backend. Pass the run directory (its
@@ -158,7 +291,7 @@ back to the SLURM wrapper's env vars (`--as delftblue` to force that form).
 
 ---
 
-## 4. Understanding results
+## Understanding results
 
 ### The three objectives (conservative set, all maximised over the whole chromosome)
 
@@ -174,42 +307,53 @@ severity-weighted reduction is reported separately and does not drive search.
 
 ### Analysis and validation
 
-`scripts/analyze/validate_schema5_run.py` is the current schema-5 health gate.
-Run it after each completed SLURM search and after syncing outputs locally. The
-multi-run schema-5 report generator is still pending; until then, read the raw
-evidence directly:
+Run the per-run validator after each completed search and again after syncing:
 
-- `iterations.jsonl` — the per-iteration trajectory (objectives, phase, move, acceptance).
+```bash
+python scripts/analyze/validate_search_run.py --write <run_dir>
+```
+
+Analyze a validated matrix with:
+
+```bash
+python scripts/analyze/analyze_search_runs.py \
+  --output-dir analysis_output/search <run_dir>...
+```
+
+The main artifacts are:
+
+- `evaluations.jsonl` — candidate attempts and completed evaluations.
 - `intermediate/*.jsonl` — the per-prompt evaluations (findings, generated code).
 - `archive_snapshots/` — the EA Pareto archive over time.
-- `hillclimb_summary_*.json` — run-level totals, mutator stats, eval-cache hygiene.
+- `search_summary.json` — termination, runtime, LLM usage, mutator statistics,
+  and evaluation-cache accounting.
 
 ### Quick manual peek at the trajectory
 
 ```bash
 python3 - <<'PY'
 import json
-for l in open("experiments/results/<run>/iterations.jsonl"):
+for l in open("experiments/results/<run>/evaluations.jsonl"):
     r = json.loads(l)
-    print(r["iter"], r["strategy"], "n="+str(r["chain_length"]),
+    print(r["evaluation_index"], r["strategy"], "n="+str(r["chain_length"]),
           "f1="+str(r["f1"]), "acc="+str(r["accepted"]), "+".join(r["mutation_chain"]))
 PY
 ```
 
 ---
 
-## 5. Rate limits and partial runs
+## Rate limits and partial runs
 
 API backends can hit 429/529; a SLURM job can hit its wall-time. In both cases
-the per-iteration writer appends atomically, so `iterations.jsonl` and the
+the per-evaluation writer appends atomically, so `evaluations.jsonl` and the
 already-written `intermediate/*.jsonl` are intact up to the cut-off. The run
 summary is written at the end; `run_config.json` is written before model/scanner
 preflight, so a failed run still has provenance. To finish a shorter run, lower `--n-cases`
-/ `--iterations`, or wait and re-run.
+/ `--main-loop-budget`, or wait and re-run.
 
 ---
 
-## 6. Troubleshooting
+## Troubleshooting
 
 | Symptom | Cause | Fix |
 |---|---|---|
@@ -220,9 +364,11 @@ preflight, so a failed run still has provenance. To finish a shorter run, lower 
 
 ---
 
-## 7. Best practices
+## Best practices
 
 - **Always `--seed`.** It fixes the mutator draws and the search trajectory.
-- **Smoke first.** `--dry-run` (mock backend) checks the plumbing for free; a 2-case/5-iter real smoke checks the backend + Semgrep before a big batch.
+- **Smoke first.** `--dry-run` (mock backend) checks the plumbing for free; a
+  two-case run with five initialization and two main-loop evaluations checks
+  the backend and Semgrep before a large batch.
 - **One run tree per (strategy, language, seed).** The analysis scripts key on `run_config.json`; keep runs in separate `--output-dir`s.
 - **Check `semgrep_debug` once per new environment** (§2) to confirm Semgrep actually ran, not just that findings were 0.

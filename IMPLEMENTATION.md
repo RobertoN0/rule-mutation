@@ -1,309 +1,342 @@
 # Implementation Reference
 
-Module-by-module reference, the on-disk output schema, extension points, and
-dependencies. For the high-level design (the pipeline, the two strategies, the
-fitness model) see [ARCHITECTURE.md](ARCHITECTURE.md).
+This document describes the active modules and on-disk artifacts. See
+[ARCHITECTURE.md](ARCHITECTURE.md) for the study design and
+[WORKFLOW.md](WORKFLOW.md) for commands.
 
-## Module reference
+## Mutation
 
-### `src/mutation/` — mutation pipeline
+### `src/mutation/rule_parser.py`
 
-#### `rule_parser.py` — safe-zone-aware document parser
+CodeGuard rules contain YAML frontmatter, prose, inline code, and fenced code
+blocks. `ParsedRule` separates these regions and reconstructs the document after
+a mutation. Frontmatter and fenced code are immutable. Mutators that operate on
+tokens mask inline code before transformation and restore it afterward.
 
-CodeGuard rules are Markdown with YAML frontmatter, fenced code blocks, and
-prose. Only prose may be mutated. `ParsedRule` enforces this:
+### `src/mutation/base.py` and `pool.py`
 
-| Member | Description |
+`Mutator.mutate(text)` returns a `MutationResult` containing original text,
+mutated text, the operator name, human-readable changes, and metadata.
+`MutatorPool` holds the selected mutators and the seed shared with the search
+runner.
+
+### Rule-based mutators
+
+`src/mutation/rule_based.py` provides:
+
+| Operator | Transformation |
 |---|---|
-| `ParsedRule.parse(text)` | Split a rule into frontmatter + ordered `Block` list |
-| `Block(type="prose"\|"code")` | Prose blocks are mutable; code blocks are never touched |
-| `Section` | Top-level (`##`) section, used by `SectionReorderMutator` |
-| `get_mutable_prose()` | `(block_id, text)` pairs that are safe mutation targets |
-| `reconstruct(mutations)` | Reassemble the document; frontmatter first, code unchanged |
-| `mask_inline_code` / `unmask_inline_code` | Replace `` `code` `` spans with `__IC_N__` placeholders and restore them |
+| `verb_weakening` | Replaces high-urgency security verbs with weaker synonyms (`Ensure → Try to ensure`, `Prevent → Consider preventing`). Fixed replacement map. |
+| `synonym_replacement` | Replace eligible nouns and verbs with WordNet synonyms (`nlpaug`) |
+| `add_random_word` | Insert security-domain adjectives or adverbs |
+| `section_reorder_shuffle` | Shuffle sections, with a paragraph fallback |
+| `section_reorder_degrade` | Moves the highest security-keyword section to last position |
 
-**Safe-zone contract:** frontmatter, fenced code blocks, and inline code are
-never modified by any mutator.
+### LLM-based mutators
 
-#### `base.py` — abstract interfaces
+`src/mutation/llm_based.py` reuses the code-generation backend:
 
-- **`Mutator`** — `mutate(text) → MutationResult`, `mutate_batch`, `reset_seed`; every mutator takes a `seed` for deterministic output.
-- **`MutationResult`** — `original`, `mutated`, `mutation_type`, `changes: list[str]`, `metadata: dict` (populated by the validator), `changed: bool`, `change_ratio: float` (word-level dissimilarity).
+| Operator | Temperature | Transformation |
+|---|---:|---|
+| `negation_injection` | 0.0 | Add qualifying contradictions before directives |
+| `voice_change` | 0.0 | Convert active directives to passive advice |
+| `paraphrase` | 0.6 | Rephrase and weaken prose while masking inline code |
 
-#### `rule_based.py` — function-based mutators (5)
+Each object records LLM call attempts, completed calls, tokens, and latency.
+These counts are separated from code-generation usage in `search_summary.json`.
 
-Deterministic, no LLM call. Same output for a given input + seed.
+### `src/mutation/quality.py`
 
-| Mutator | Key behaviour |
-|---|---|
-| `VerbWeakeningMutator` | Replaces high-urgency security verbs with weaker synonyms (`Ensure → Try to ensure`, `Prevent → Consider preventing`). Fixed replacement map. |
-| `SynonymReplacementMutator` | Substitutes nouns/verbs with WordNet synonyms (`nlpaug`). Masks inline code first; word count may grow ≤ 50%. |
-| `AddRandomWordMutator` | Inserts security-domain adjectives/adverbs before nouns/verbs from a curated list. |
-| `SectionReorderMutator(mode="shuffle")` | Randomly permutes `##`/`###` sections (preamble pinned first). **Paragraph fallback** when < 2 headers: reorders `\n\n`-separated prose paragraphs; headers and code fences pinned. |
-| `SectionReorderMutator(mode="degrade")` | Moves the highest security-keyword section to last position (LLM recency bias). Same fallback. |
+`MutationQualityValidator` records:
 
-#### `llm_based.py` — LLM-based mutators (3)
+- operator-specific instruction adherence;
+- SBERT similarity to the parent and to the original rule;
+- optional perplexity ratio;
+- inline-code and security-keyword retention.
 
-Call the same `LLMBackend` already used for code generation — one extra request
-per mutation.
+The measurements do not reject a candidate. SBERT similarity supplies f2, so
+validation is required on real search runs.
 
-| Mutator | Temperature | Behaviour |
-|---|---|---|
-| `NegationInjectionMutator` | 0.0 | Inserts contradictory qualifiers before imperative directives (`"MUST validate all input"` → `"While not required in all scenarios, you MUST validate all input"`). Source: LLMORPH MR-48/76. |
-| `VoiceChangeMutator` | 0.0 | Active imperative → passive advisory (`"Always sanitize user input"` → `"User input should always be sanitized"`). Source: AUGMENT voice-change. |
-| `ParaphraseMutator` | 0.6 | Rewrites prose with weaker vocabulary. Inline code is masked with `ICODE_N` placeholders before the LLM call and restored after, guaranteeing `inline_code_retention == 1.0`. Source: LLMORPH MR-51 + AUGMENT. |
+## Search
 
-All LLM mutators strip frontmatter before the call and reattach it unchanged.
-Each mutation is applied **once** (no retry). If a mutation returns text
-identical to its parent, the EA marks that mutator tried for the parent and
-selects a different mutator within the same iteration — so no code generation
-is spent on a no-op (`search.py`).
+### `src/optimizer/chromosome.py`
 
-#### `pool.py` — `MutatorPool`
+`RuleSetChromosome` contains mutated `GeneState` objects and rule-order priority
+offsets. `RuleSetSpace` owns original texts, renders each task’s mapped subset,
+and computes prompt signatures and chromosome IDs.
 
-A thin container for the mutator list + the shared RNG seed (`mutators`,
-`mutator_names`). Both search strategies do their own constrained selection over
-this set.
+`ChromosomeArchive` stores the current non-dominated front. The origin is held
+only as the reporting baseline. `try_add` rejects duplicate or dominated
+candidates, removes members dominated by the child, and applies the bounded
+overflow policy. The archive has no reset or restart operation.
 
-#### `quality.py` — `MutationQualityValidator` (informational, post-hoc)
+### `src/optimizer/search.py`
 
-Implements the AUGMENT three-criteria framework plus a security-domain
-criterion (four criteria total). Enabled with `--enable-validation`.
-**Informational:** every candidate's metadata is recorded; nothing is ever
-rejected on quality grounds (the validator never gates the search). The
-per-iteration validation metadata is available for schema-5 reporting and for
-future quality-ablation summaries.
+`run_ea` and `run_random_search` share:
 
-| # | Criterion | How measured | Default threshold |
-|---|---|---|---|
-| 1 | Instruction adherence | per-mutator check function | pass/fail |
-| 2 | Semantic similarity | cosine of `all-mpnet-base-v2` embeddings | ≥ 0.75 |
-| 3 | Perplexity ratio | perplexity(mutated)/perplexity(original) | ≤ 2.5 (off by default) |
-| 4 | Security-domain preservation | inline-code retention (= 1.0) + keyword retention | keyword ≥ 0.70 |
+- five origin-based initialization candidates;
+- `build_random_chromosome`, which applies between one and K changes;
+- the rule/mutator pool, depth cap, order operator, and evaluation callback;
+- identity retry accounting;
+- candidate and prompt-level persistence callbacks.
 
-`passes_all = instruction_adherent AND keyword_retention ≥ 0.70 AND (sbert is
-None OR sbert ≥ 0.75) AND (perplexity is None OR perplexity ≤ 2.5)`.
+EA main-loop behavior:
 
-`validation_metadata` recorded per iteration (in `iterations.jsonl`):
-`instruction_adherent`, `sbert_step`, `sbert_cum` (drift vs the on-disk
-original), `perplexity_ratio`, `inline_code_retention`, `keyword_retention`,
-`security_intent_preserved`, `passes_all`, `changed`. When validation is off,
-`validation_metadata` is `{}`.
+1. Inject an origin-based random candidate every
+   `ea_injection_every` evaluations.
+2. Otherwise sample a front member uniformly and deep-copy it.
+3. Draw mutate/reorder using weights 0.9/0.1.
+4. Apply exactly one local mutation, reorder one rule, or revert a saturated
+   mutated rule.
+5. If the move cannot change the rendering, retry another rule on the same
+   parent, another parent, then an origin-based random sample.
 
----
+Random search independently samples from the origin after the shared prefix.
 
-### `src/optimizer/` — search
+`main_loop_budget` is a maximum number of completed post-initialization
+evaluations. Total logical evaluations are `5 + main_loop_budget`. A high value
+is used as a safety ceiling for final wall-time runs.
 
-#### `engine.py` — `ExperimentEngine` orchestration
+### `src/optimizer/initialization.py`
 
-Owns the evaluation seam shared by both strategies. `run_search()`:
+Initialization bundles make the common five-candidate prefix reusable. The
+module:
 
-1. **Baseline pass** — generate code for every prompt under the original rules, qualify the target-language implementation, run one batched Semgrep analysis, and record per-case baseline findings. Any invalid prompt stops the run before search.
-2. **Dispatch** — to `run_ea` or `run_random_search` (`search.py`) based on `config.optimizer`. Both call back into the same per-prompt evaluation closure.
-3. **Persist** — `iterations.jsonl` (per iteration, atomic append), `intermediate/{iter_id}.jsonl` (per prompt), `archive_snapshots/` (EA, every 20 iters), `mutated_rules/iterNNN/`, and the run summary.
+- extracts a strict identity from `run_config.json`;
+- serializes complete chromosomes and aggregate fitness;
+- retains prompt-level initialization evidence;
+- captures and restores search, mutator, and Torch RNG states;
+- restores the evaluation cache;
+- verifies canonical content and file hashes.
 
-`SearchConfig` key fields: `max_iterations` (evaluation budget; identities
-retry without consuming it), `optimizer` (`"ea"` default | `"random_search"`),
-`objective_direction` (`"minimize"` default = repair), `archive_cap` (6),
-`restart_h` (8),
-`max_depth` (4), `random_max_changes` (10, the sampler's K), `ea_n_mutations`
-(1), `ea_init_samples` (10), `ea_injection_every` (10), `ea_move` (`"local"` |
-`"random_builder"`), `order_move_weight` (0.1), `ea_origin_parent` (True — the
-origin is a sampleable local-move parent), `enable_validation` (mandatory on real
-runs — feeds f2), `enable_eval_cache` (True). (The identity-retry safety cap is
-an internal constant, not a config field.)
+`scripts/setup/materialize_initialization_bundle.py` accepts only a validated
+run with `main_loop_budget=0`.
 
-**Eval cache:** per prompt, keyed by `(test_case_id, sha256(assembled_rule_text))`.
-A hit skips both code generation and Semgrep — safe under `temperature=0` greedy
-decoding. Reported in `hillclimb_summary` as `eval_cache_stats`.
+### `src/optimizer/engine.py`
 
-#### `search.py` — the two runners (over full chromosomes)
+`ExperimentEngine` owns the evaluation seam:
 
-- `run_ea(...)` — the (1+1) EA over the single chromosome archive. Phases: **init** (`ea_init_samples` random samples from the origin), **injection** (an origin-based random sample every `ea_injection_every` iterations), **ea** (a local move on a sampled parent — one untried mutator on its current allele, or with weight `order_move_weight` a render-changing order bump), and **restart** (after `restart_h` consecutive rejected ea-phase attempts the front is wiped and the next `ea_init_samples` iterations reseed it from fresh origin samples). Offers each child by standard Pareto dominance. Records `phase`, `attempt`/`budget_consumed`, `mutation_chain`, `chromosome_id`/`parent_chromosome_id`/`mutated_rule_ids`/`gene_depth`, and `n_requested/attempted/effective_changes`; `mutator_stats` use **last-mutator credit** for local moves. Identity proposals are logged and retried without consuming budget (guarded by an internal safety cap).
-- `run_random_search(...)` — the i.i.d. baseline. Every budgeted iteration draws an independent sample from the origin via `build_random_chromosome`, evaluates it, and records it; no archive, no carry-forward. Best = best-of-budget (origin floor); `mutator_stats` use **whole-sample credit** `{applications, applications_f1_advancing}`.
-- `build_random_chromosome(...)` — the one shared sampler (random search + EA init/injection): stacks `n ∈ [1, K]` changes on a copy of a base, returning requested/attempted/effective counts. `_choose_and_build_move` builds an EA local move (mutate/order/revert); `_apply_chain` applies mutators cumulatively.
+1. Evaluate the original-rule baseline.
+2. Build the full chromosome space from the mapped rules.
+3. Load and verify an initialization bundle when supplied.
+4. Dispatch to the selected search runner.
+5. Render each candidate per task, use the temperature-zero signature cache,
+   generate missing outputs, validate them, run Semgrep, and aggregate fitness.
+6. Persist all artifacts and termination metadata.
 
-#### `chromosome.py` — `RuleSetChromosome`, `RuleSetSpace`, `ChromosomeArchive`
+The cache key is `(test_case_id, prompt_signature)`, where the signature hashes
+the ordered `(rule_id, rule_text_hash)` sequence. A hit reuses generated code,
+validation, Semgrep fitness, and latency evidence. Bundle reuse restores the
+same entries present after the original five evaluations.
 
-A **chromosome** stores only its overrides: `genes` (mutated rules → `GeneState`
-with text + `mutation_path`/`depth`) and `order_priority` (per-rule global
-priority offsets; default 0 ⇒ each prompt renders in its original retrieval
-order). `RuleSetSpace` owns the originals + the prompt separator and provides
-`allele`, `render_prompt`, `prompt_signature` (the cache key: ordered
-`(rule_id, sha(text))`), and `chromosome_id` (content hash). The single
-`ChromosomeArchive` holds non-dominated chromosomes over (f1, f2, f3): `try_add`
-rejects candidates dominated by the **origin** (always a virtual member, held
-aside and never evicted) or any front member, and duplicates by `chromosome_id`.
-On cap overflow it evicts **lexicographically by f1** (lowest f1 first, ties →
-f2+f3, then oldest; the just-added child is protected). On stagnation `restart`
-**wipes the front** and the runner spends the next `ea_init_samples` evaluations
-reseeding it with fresh origin-based samples. An `"exhausted"` restart is
-different: it keeps the front and only clears tried-move sets. By default the
-origin is also a sampleable parent (`ea_origin_parent`), so a minimal single-rule
-lineage can always start.
+## Code-generation prompt contract
 
----
+`src/evaluation/generation_contract.py` defines one fixed code-generation
+contract. It uses the original concise generation instruction, explicitly
+states the required Python or Java implementation language, and appends the
+mapped coding guidelines when rules are present.
 
-### `src/evaluation/` — scoring
+Every run records the exact template hash and fixed 4096-token output cap.
+Search and replicate runs require the same contract hash recorded in the
+qualified map.
 
-| File | Role |
-|---|---|
-| `output_validation.py` | Selects the primary artifact under the fixed map language, checks finish reasons/block structure/language drift, validates Python with the AST compiler and Java with tree-sitter, rejects vacuous implementations, and classifies prompt-local failures. |
-| `semgrep_runner.py` | Runs Semgrep per batch in one subprocess; maps target errors to their exact sample, fails closed on global/config/process/skipped-rule errors, fingerprints local rules, and writes a `semgrep_debug.jsonl` record on **every** path. |
-| `fitness.py` | Computes raw findings (the f1 basis), severity-weighted diagnostics, per-prompt baseline reductions, aggregation, and prompt-local baseline imputation metadata. |
+## Output validation and Semgrep
 
----
+`src/evaluation/output_validation.py` fixes the analysis language from the map,
+selects one target-language artifact, rejects incomplete, vacuous, ambiguous,
+or syntactically invalid output, and constructs deterministic Java wrappers
+when a member or statement is not a full compilation unit.
 
-### `src/llm_backends/` — backends
+`src/evaluation/semgrep_runner.py` batches samples into one Semgrep process,
+maps findings back through wrapper line maps, filters wrapper-only findings,
+and distinguishes failures affecting one generated task from scanner or
+infrastructure failures.
 
-| Backend (`--backend`) | Description |
-|---|---|
-| `claude` (`ClaudeBackend`) | Anthropic Messages API. Default model `claude-haiku-4-5`. The replication path. |
-| `openai` (`OpenAIBackend`) | OpenAI Chat Completions API. Default model `gpt-4o-mini`. |
-| `delftblue` (`DelftBlueLocalBackend`) | HuggingFace model from local cache (`HF_HUB_OFFLINE=1`), Qwen2.5-Coder-32B-Instruct on A100; fp16 or 4-bit. Lazy-imported so the API path needs no torch. |
+`src/evaluation/fitness.py` computes raw findings, severity-weighted
+diagnostics, per-task reductions, and whole-chromosome aggregation.
 
-`LLMBackend.generate(system, messages, …) → LLMResponse` with `content`,
-`latency_ms`, `input_tokens`, `output_tokens`, and `finish_reason`. The local
-backend decodes only newly generated tokens and reports `length` when it reaches
-the fixed 4096-token output cap without EOS.
+Failure policy:
 
----
+- an invalid candidate output receives that task’s baseline score;
+- an invalid baseline stops the search before any candidate is admitted;
+- scanner configuration, process, malformed-result, or other infrastructure
+  errors abort instead of being interpreted as zero findings.
 
 ## Output schema
 
-> **Schema 5.** Runs carry `schema_version: 5`. It extends the chromosome design
-> with raw-count f1, output qualification, map-fixed language, and explicit
-> effective-versus-observed prompt scores.
+### Search run directory
 
-`run_config.json` carries `schema_version: 5`. A run directory:
+A search directory contains:
 
-```
-{output_dir}/
-├── run_config.json                  # schema_version, all CLI args, argv, git_sha, slurm_job_id, hostname
-├── hillclimb_summary_*.json         # run-level: provider/model, totals, pool_arm_stats, eval_cache_stats, run_config_ref
-├── iterations.jsonl                 # one record per iteration (see below)
-├── archive_snapshots/iterNNNN.json  # EA only — {iter, origin, chromosomes:[...]} every 20 iters + final
-├── intermediate/{iter_id}.jsonl     # per-prompt evaluation records; iter_id ∈ {baseline, ea_iter0001, rand_iter0042}
-├── mutated_rules/iterNNN/           # <rule>.md (mutated text) + meta.json
-├── semgrep_debug/semgrep_debug.jsonl
-├── evaluation_manifest.json         # exclusions + frozen language contract
-├── evaluation_failures.jsonl        # fatal causes; invalid-baseline rows retain raw output evidence
-└── run.log
-```
-
-**`iterations.jsonl`** (one JSON object per line):
-
-```jsonc
-{
-  "iter": 7,                               // evaluation-budget index (advances only on a scored candidate)
-  "attempt": 9, "attempt_in_iter": 1,      // global proposal id; retry # within this budget slot
-  "budget_consumed": true,                 // false for logged identity/no-op proposals
-  "timestamp": "…Z",
-  "strategy": "ea",                        // "ea" | "random_search"
-  "phase": "ea",                           // "init" | "injection" | "ea" | "random"
-  "chromosome_id": "7d22c933509b25ba", "parent_chromosome_id": "…",  // content hashes
-  "move_type": "mutate",                   // mutate | order | reverse | init_random | injection_random | sample
-  "rule_id": "codeguard-0-…",
-  "mutation_chain": ["verb_weakening"],    // list[str]; EA local: lineage; sampler: effective mutators
-  "chain_length": 1,
-  "n_requested_changes": 1,                // requested ≥ attempted ≥ effective
-  "n_attempted_changes": 1,
-  "n_effective_changes": 1,
-  "mutation_identity": false,
-  "mutated_rule_ids": ["codeguard-0-…"], "priority_rule_ids": [], "priority_offset_count": 0,
-  "objective_mode": "conservative",
-  "f1": 0.0, "f2": 1.0, "f3": 0.0,         // conservative objectives (null if no candidate)
-  "total_raw_findings": 213,                 // primary remaining count
-  "total_weighted_score": 367.0,             // diagnostic
-  "num_invalid_prompts": 0, "failure_counts": {},
-  "rule_fidelity": 1.0, "parsimony": 1,    // f2 source, −f3
-  "weighted_reduction": 0.0,               // baseline − candidate weighted score; diagnostic
-  "f1_advance": false,
-  "accepted": true,                        // EA: try_add result; random: always true
-  "validation_metadata": { "codeguard-0-…": { … } },  // per changed gene; {} unless --enable-validation
-  "selection_meta": { … }                  // EA: parent_f1/n_eligible_rules/restarts; random: {}
-}
+```text
+run_config.json
+search_summary.json
+evaluations.jsonl
+evaluation_manifest.json
+intermediate/
+  baseline.jsonl
+  evaluation_NNNN.jsonl
+mutated_rules/
+  evaluation_NNNN/
+    meta.json
+    <mutated-rule>.md
+archive_snapshots/                 # EA only
+semgrep_debug/
+  semgrep_debug.jsonl
+evaluation_failures.jsonl         # only when failures were recorded
+initialization_random_state.json  # only for a five-candidate bundle source
+search_validation.json            # when validator --write is used
+run.log
 ```
 
-**`archive_snapshots/iterNNNN.json`** — one **single chromosome archive**:
-top-level `{iter, schema_version, cap, restart_h, origin, best_ever,
-best_ever_iteration, n_inserts/n_rejected/…, restart_history, chromosomes:[…]}`. Each entry in
-`chromosomes` is a chromosome snapshot (`cid`, `f1/f2/f3`, `mutated_rule_ids`,
-`order_priority`, `iteration_added`, `parent_id`, and per-gene `genes` each with a
-`text_ref` into the matching `mutated_rules/iterNNN/` file).
+### `run_config.json`
 
-**`intermediate/{iter_id}.jsonl`** — per prompt: `test_case_id`, fixed
-`analysis_language`, `cwe_id`, `rules_used` (`original_rule_ids`,
-`mutated_rule_ids`, `render_order`, `chromosome_id`),
-`fitness{raw_count, weighted_score, raw_reduction, weighted_reduction,
-check_ids, score_source, analysis_status, observed_raw_count,
-observed_weighted_score, …}`, `output_validation`, latencies, tokens,
-`finish_reason`, raw `generated_code`, and `analyzed_code_sha256`. The exact
-selected scanner input is retained once in `semgrep_debug`; it is not duplicated
-in every intermediate row. The
-prompt text is *not* stored — it is recoverable from the rules map keyed by
-`test_case_id`.
+Top-level `artifact_type` is `search_run_config`. The file records:
 
-Candidate prompt-local failures use the matching baseline `raw_count` and
-`weighted_score`, so they cannot create false repair credit or penalize the
-whole chromosome. An invalid baseline aborts preflight. Evaluator/system errors
-retry once when transient and then abort; they are never converted to an empty
-finding list.
+- CLI arguments and original `argv`;
+- Git commit, hostname, and SLURM job ID;
+- model ID, resolved local-model revision, Torch and Transformers versions;
+- code-generation template hash;
+- rules-map hash, selected-population fingerprint, rule-corpus hash, and
+  qualification policy;
+- initialization, main-loop, and total evaluation budgets;
+- declared scheduler wall time and pre-timeout lead;
+- mutators, archive/search parameters, seed, and objective direction;
+- Semgrep version, local rules hash, file count, and upstream rules commit;
+- initialization-bundle path and content hash when reused.
 
-**`mutated_rules/iterNNN/meta.json`** — `{iteration, chromosome_id, parent_id,
-move_type, changed_rule_id, chain, mutated_rule_ids, order_priority, changes,
-gene_paths, accepted, validation_metadata}`, alongside one `<rule>.md` per
-mutated rule (the rendered allele text).
+`git_commit_sha` identifies the checked-out commit. It does not attempt to infer
+or police uncommitted files; submission readiness is checked before a run.
 
----
+### `search_summary.json`
+
+Top-level `artifact_type` is `search_summary`. It records:
+
+- termination reason: `evaluation_budget_complete`, `wall_time_limit`, or
+  `rate_limit`;
+- completed initialization and main-loop evaluations;
+- initialization, main-loop, and total elapsed time;
+- original and best raw/weighted findings and invalid-output counts;
+- actual code-generation LLM calls and tokens;
+- actual mutation-LLM usage;
+- logical usage contributed by a precomputed initialization;
+- best chromosome, mutator statistics, and evaluation-cache statistics.
+
+### `evaluations.jsonl`
+
+Each line is one proposal attempt. Important fields:
+
+| Field | Meaning |
+|---|---|
+| `evaluation_index` | Candidate index; unchanged across identity retries |
+| `main_loop_iteration` | `null` for initialization, otherwise 1..B |
+| `elapsed_main_loop_seconds` | Completion time of a main-loop evaluation |
+| `attempt_index`, `attempt_in_evaluation` | Proposal accounting |
+| `evaluation_consumed` | False for an identity/no-op retry |
+| `strategy` | `ea` or `random_search` |
+| `phase` | `initialization`, `ea`, `injection`, `origin_fallback`, or `random` |
+| `initialization_source` | `precomputed_bundle` for reused initial candidates |
+| `chromosome_id`, `parent_chromosome_id` | Content and lineage identifiers |
+| `move_type`, `rule_id`, `mutation_chain` | Applied operator |
+| `n_requested_changes`, `n_attempted_changes`, `n_effective_changes` | Sampler accounting |
+| `f1`, `f2`, `f3` | Whole-chromosome objectives |
+| `total_raw_findings`, `total_weighted_score` | Primary count and diagnostic |
+| `num_invalid_prompts`, `failure_counts` | Conservative failure accounting |
+| `accepted` | Archive result for EA; true for evaluated random samples |
+| `n_prompts_rerun`, `n_prompts_reused` | Evaluation-cache accounting |
+| `validation_metadata` | Per-rule quality measurements |
+
+### Prompt-level evidence
+
+`intermediate/baseline.jsonl` and `intermediate/evaluation_NNNN.jsonl` contain
+one row per task:
+
+- task, language, CWE, chromosome, mapped rules, and render order;
+- raw and weighted findings, reductions, score source, and analysis status;
+- output-validation decision and Java normalization/line map;
+- generated code, finish reason, tokens, and latencies;
+- source and analyzed-code hashes;
+- evaluation-cache or initialization-bundle reuse markers.
+
+### Archive snapshots and mutated rules
+
+An archive snapshot has `artifact_type: pareto_archive_snapshot`, evaluation
+index, capacity, origin, insertion/rejection counts, and full front
+chromosomes. Each gene points to the exact Markdown allele under
+`mutated_rules/evaluation_NNNN/`.
+
+`meta.json` in each evaluated candidate directory records the chromosome,
+parent, move, affected rule, mutation path, order priorities, changes,
+acceptance, and validation metadata.
+
+## Qualification and map artifacts
+
+`scripts/experiments/run_qualification.py` performs only temperature-zero
+search-population qualification. It writes:
+
+- `run_config.json` with `artifact_type: qualification_run_config`;
+- `qualification_manifest.json` with `artifact_type: qualification_manifest`;
+- `qualification_generations.jsonl`, containing typed generation records;
+- `intermediate/qualification_tasks.jsonl`, containing typed per-task results;
+- scanner debug and explicit failure records;
+- `qualification_validation.json` with
+  `artifact_type: qualification_validation`.
+
+`scripts/setup/materialize_retrieval_consensus.py` validates every retrieval
+draw against its exact carrier and frozen retrieval contract, applies the
+11-of-20 rule, and materializes deterministic model/language consensus maps.
+`scripts/setup/materialize_eligible_population.py` validates and applies the
+prospective task-eligibility manifest. `analyze_population_screening.py`
+reconciles one complete 20-seed stochastic screening block across both models
+and both no-rules/original-rules conditions. It records observed-finding,
+all-valid-zero, and incomplete-zero tasks separately and materializes the
+conservative qualification-input population.
+
+`scripts/setup/materialize_qualified_search_maps.py` then verifies the four
+model×language qualification runs and intersects their valid task IDs with the
+tasks that had at least one observed stochastic Semgrep finding. It writes
+model-specific search maps, language-specific no-rules maps, their supporting
+provenance summaries, and a `qualified_population_manifest`. The resulting
+population contains 203 Python and 126 Java tasks. Search and replicate runners
+reject a map whose prompt contract, population policy, or fingerprint differs
+from the requested run.
+
+## Replicate artifacts
+
+`scripts/experiments/run_replicates.py` evaluates one condition over multiple
+seeds and writes:
+
+- `run_config.json` with `artifact_type: replicate_run_config`;
+- `replicates.jsonl`, one `replicate_evaluation` aggregate row per seed;
+- `intermediate/<condition>_seedNNNN.jsonl`, one
+  `replicate_task_evaluation` row per task;
+- `replicate_summary.json` with `artifact_type: replicate_summary`;
+- `replicate_validation.json` after validation.
+
+Invalid outputs are missing rather than zero. Effects against a baseline are
+computed per seed over the common valid-task subset. The run contract records
+the exact Git commit, cached model revision, Torch/Transformers versions, prompt
+contract, population, map, scanner, and any selected-rule override hash.
+
+## Analysis
+
+- `validate_search_run.py`: per-run search reconciliation and final-eligibility
+  decision.
+- `analyze_search_runs.py`: common wall-time endpoint, matched-seed EA/random
+  inference stratified by model and language, plus secondary evaluation/time
+  curves. Cross-model/language pooling is descriptive only.
+- `validate_replicate_run.py`: per-run temperature>0 reconciliation.
+- `analyze_replicates.py`: pooled per-seed effects and confidence intervals,
+  written as reviewer-readable tables plus `replicate_analysis.json`.
 
 ## Extension points
 
-**New mutator** — subclass `Mutator`, implement `name` + `mutate()`; register an
-adherence check in `quality.py`; add it to the `--mutators` choices in
-`scripts/experiments/run_experiment.py`.
+To add a mutator, subclass `Mutator`, register it in
+`src/mutation/__init__.py`, and add an adherence check in `quality.py`.
 
-```python
-from src.mutation.base import Mutator, MutationResult
-from src.mutation.rule_parser import ParsedRule
+To add an objective, extend `AggregatedFitness`, the objective mapping in
+`search.py`, archive dominance, persistence, validation, and analysis together.
 
-class MyMutator(Mutator):
-    @property
-    def name(self) -> str:
-        return "my_mutation"
-
-    def mutate(self, text: str) -> MutationResult:
-        parsed = ParsedRule.parse(text)
-        new_body = transform(parsed.body_raw)
-        return MutationResult(
-            original=text,
-            mutated=parsed.frontmatter_raw + new_body,
-            mutation_type=self.name,
-            changes=["applied X"],
-        )
-```
-
-**New objective / fitness component** — extend `AggregatedFitness` in
-`src/evaluation/fitness.py` and the archive's `dominates()` check in
-`src/optimizer/chromosome.py`.
-
-**New backend** — implement `LLMBackend`, register it in
-`src/llm_backends/__init__.py`, and add a `--backend` choice.
-
----
-
-## Dependencies
-
-Managed by `uv` (Python ≥ 3.11), pinned in `uv.lock`.
-
-- **Code generation:** `anthropic`, `openai` (API path); `torch`, `transformers`, `accelerate`, `bitsandbytes` (`--extra gpu`, DelftBlue only).
-- **Scoring:** `semgrep` (pinned 1.85.0 for DelftBlue glibc 2.28).
-- **Output qualification:** Python standard-library AST; `tree-sitter==0.22.3` + `tree-sitter-java<0.22`.
-- **Validation:** `sentence-transformers` (`all-mpnet-base-v2`), `textstat`.
-- **Mutation:** `nlpaug`, `nltk`, `pyyaml`.
-- **Analysis (`--extra analysis`):** `matplotlib`, `scipy`, `pandas`.
-- **Dev (`--extra dev`):** `pytest`, `ruff`.
-
-**DelftBlue infrastructure:** A100 80GB (`gpu-a100`), HF cache at
-`/scratch/$USER/models/hub` (offline), Semgrep rules at
-`/scratch/$USER/semgrep-rules/security-audit`.
+To add a backend, implement `LLMBackend.generate`, register it in
+`src/llm_backends/__init__.py`, and add the backend/model provenance fields
+needed for exact reruns.
