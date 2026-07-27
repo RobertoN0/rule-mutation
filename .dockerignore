@@ -40,7 +40,6 @@ delftblue
 rule_maps/*progress*.jsonl
 old_security_smells_thesis
 python_notebook_experiment
-literature_review
 
 # OS noise
 .DS_Store

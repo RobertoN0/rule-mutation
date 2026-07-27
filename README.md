@@ -319,12 +319,11 @@ Reproduce any run with `python scripts/experiments/rerun_from_config.py <run_dir
 │   └── retrieval/         # Phase 1: task → CodeGuard-rule map builders (local + Anthropic; [retrieval] extra)
 ├── scripts/
 │   ├── experiments/       # run_experiment.py, rerun_from_config.py, Semgrep-debug filter
-│   ├── slurm/             # Qwen/Llama search launchers + final reframed retrieval launcher
+│   ├── slurm/             # Qwen/Llama search launchers + final retrieval launcher
 │   └── analyze/           # run validators and final search/replicate analysis
 ├── tests/unit/            # unit and integration-contract tests
 ├── project-codeguard/     # CodeGuard security rule library (git submodule)
 ├── rule_maps/             # Source-population audit + final maps under qualified/
-├── literature_review/     # Curated paper links and implementation-literature notes
 ├── experiments/results/   # Experiment outputs (gitignored)
 ├── Dockerfile             # API-only replication image
 ├── ARCHITECTURE.md        # Technical reference (modules, schema, extension points)
@@ -334,18 +333,10 @@ Reproduce any run with `python scripts/experiments/rerun_from_config.py <run_dir
 
 ---
 
-## Datasets, rules & literature
+## Datasets and rules
 
 - **CyberSecEval** (Meta AI) — code-generation prompts across Python, C, Java, JavaScript, PHP, covering many CWE types. Fetched from the HuggingFace Hub at runtime.
 - **CodeGuard** — the security rule library in the [`project-codeguard/`](project-codeguard/skills/software-security/rules/) submodule. Each rule is a Markdown document (YAML frontmatter + prose + code examples) covering input validation, cryptography, authentication, API security, logging, client-side web security, and more.
-- **Literature review** — theoretical grounding for the mutators and validation criteria:
-
-  | Document | Contents |
-  |----------|----------|
-  | [Index & Paper Links](literature_review/INDEX_AND_LINKS.md) | Paper descriptions and external links |
-  | [Thesis Relevance](literature_review/THESIS_RELEVANCE.md) | Quick map: paper → codebase component |
-
-
 ---
 
 ## Documentation
@@ -356,4 +347,3 @@ Reproduce any run with `python scripts/experiments/rerun_from_config.py <run_dir
 | [ARCHITECTURE.md](ARCHITECTURE.md) | High-level design: the pipeline, the two search strategies, the fitness model, data flow |
 | [IMPLEMENTATION.md](IMPLEMENTATION.md) | Module-by-module reference, output schema, extension points, dependencies |
 | [WORKFLOW.md](WORKFLOW.md) | Running experiments, result interpretation |
-| [literature_review/](literature_review/INDEX_AND_LINKS.md) | Paper index, thesis relevance |
