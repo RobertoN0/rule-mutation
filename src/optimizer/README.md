@@ -60,9 +60,31 @@ evaluate child
 offer child to the Pareto archive
 ```
 
-Identity proposals are recorded but do not consume an evaluation. The archive
-is never cleared. It currently has capacity six and removes the lowest-f1
-existing member on overflow, using the other objectives and age as tie-breakers.
+Identity proposals are recorded but do not consume an evaluation.
+
+### Archive contract
+
+The archive is never cleared and its capacity (`--archive-cap`) is **six** for
+the final matrix. `ParetoArchive.try_add` applies, in order:
+
+1. **duplicate** — reject if the child's `cid` already exists (including the
+   origin);
+2. **dominated** — reject if any front member dominates the child;
+3. **accept** — evict every front member the child dominates;
+4. **overflow** — if the front still exceeds the cap, evict the weakest member
+   by lexicographic `(f1, f2 + f3, −invalid_count, age)`.
+
+The just-added child is **structurally protected from overflow eviction**: the
+child is appended last and eviction only ever selects from `survivors[:-1]`, so
+the candidate that was just paid for with an evaluation can never be discarded
+in the same step. Every accept and eviction is logged and each evaluation writes
+an `archive_snapshots/evaluation_NNNN.json` with the front, the cap, and the
+running insert/reject counters.
+
+`_consider_best_ever` runs **before** any of the above, so a candidate counts
+towards the reported best fitness even when the archive rejects it as a
+duplicate or as dominated — this is also what makes the five shared
+initialization candidates eligible to be the reported best.
 
 ## Random search
 
