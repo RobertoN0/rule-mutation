@@ -1,68 +1,92 @@
-# `scripts/analyze/` — Current Analysis Entrypoints
+# Analysis and validation
 
-New search runs use schema 5. This directory now keeps only the analysis code
-that is still expected to be run from the current branch, the frozen schema-4
-analyzer needed to reproduce already completed historical reports, and a tiny
-schema-2 compatibility helper layer still imported by retained utilities. The
-older schema-2 trajectory/report CLIs, plotting modules, and migration tooling
-were removed; recover them from git only if an old artifact must be reprocessed.
+This directory contains the active validators and analysis entrypoints for the
+search and replicate phases.
 
-## Current Schema-5 Validation
+## Search validation
 
-Run this after every successful SLURM search and again after syncing results
-locally:
+Run the validator after every DelftBlue search and again after syncing the
+artifacts:
 
 ```bash
-.venv/bin/python scripts/analyze/validate_schema5_run.py --write <run_dir>
+.venv/bin/python scripts/analyze/validate_search_run.py --write <search_run_dir>
 ```
 
-The validator reconciles the exact task set, baseline rows, candidate rows,
-prompt-local imputation, raw f1, weighted diagnostics, persistent best,
-summary totals, map/rules provenance, Semgrep-debug coverage, and fatal failure
-artifacts. It exits non-zero when a completed run should not be trusted.
+The validator reconciles the run identity, selected population, rule and
+scanner provenance, prompt contract, shared initialization, baseline and
+candidate evidence, archive snapshots, summary totals, completion reason, and
+LLM-use accounting. Internal validity and final-comparison eligibility are
+reported separately: a gracefully stopped diagnostic run can be internally
+valid without satisfying the final approved wall-time experiment contract.
+Budget-complete runs require exact agreement between issued generation calls
+and persisted fresh task evaluations. A wall-time or rate-limit stop may discard
+one in-flight candidate after some model calls have already occurred; in that
+case the validator accepts a surplus of at most one population evaluation and
+reports its exact size as a warning.
 
-Semgrep debug compaction is an experiment-output hygiene step, not a statistical
-analysis step. It now lives at:
+Analyze a collection of validated matched runs with:
 
 ```bash
-.venv/bin/python scripts/experiments/filter_semgrep_debug.py --in-place <run_dir>
+.venv/bin/python scripts/analyze/analyze_search_runs.py \
+  <ea_run_dir> \
+  <random_run_dir> \
+  --output-dir <analysis_dir>
 ```
 
-The SLURM search wrappers run the filter automatically before schema-5
-validation when `semgrep_debug/semgrep_debug.jsonl` exists.
+The primary endpoint is the incumbent objective value at the common scheduler
+wall-time limit. Evaluation-indexed and elapsed-time incumbent curves are
+secondary views used to explain search behavior and unequal per-evaluation
+cost. Inferential comparisons use matched seeds within each model/language
+stratum. The analyzer rejects incomplete EA/random pairs in final mode and
+labels any pooled model/language summary as descriptive only.
 
-## Frozen Schema-4 Reports
+## Qualification validation
 
-These files are retained only for the historical schema-4 experiments already
-analyzed for the thesis:
+Phase 1 has its own validator:
 
-- `analyze_final_schema4.py`
-- `analyze_partial_schema4.py`
-- `final_schema4/`
+```bash
+.venv/bin/python scripts/analyze/validate_qualification_run.py \
+  --write <qualification_run_dir>
+```
 
-Do not extend these tools for schema 5. Use them only to reproduce or audit the
-old schema-4 reports with their explicit manifests.
+Qualification determines whether each temperature-zero generated task is
+usable in the frozen search population. A failure affecting one generated task
+excludes that task; systemic setup or scanner failures invalidate the run.
 
-## Temp>0 Baseline Replicates
+Validate the materialized final maps and their supporting hashes with:
 
-`baseline_harness.py` still writes replicate-style outputs. The small helper
-set kept for those runs is:
+```bash
+.venv/bin/python scripts/analyze/validate_qualified_maps.py \
+  rule_maps/qualified
+```
 
-- `analyze_replicates.py`
-- `stats.py`
-- `loaders.py`, `records.py`, `labels.py` only where retained historical helpers
-  still import them
+When validating artifacts copied from DelftBlue, pass `--map-root` to the
+search, qualification, or replicate validator if the absolute map path recorded
+on the cluster is unavailable locally. Resolution uses both filename and
+SHA-256.
 
-This path is separate from search-trajectory analysis. It reports replicate
-means, bootstrap confidence intervals, and paired with-rules versus no-rules
-effects for baseline harness outputs.
+## Replicate validation and analysis
 
-## Removed Legacy Toolkit
+Validate each temperature-greater-than-zero replicate run with:
 
-The previous schema-2 report stack (`analyze_run.py`, `analyze_search.py`,
-`validation_audit.py`, `metrics/`, `report/`, `viz/`, migration helpers, and
-related plotting/report CLIs) is intentionally gone from the working tree. The
-current schema-5 artifacts carry a different fitness contract: raw finding count
-is the primary objective, while severity weighting and validation metadata are
-diagnostics. Keeping the old scripts in-tree made it too easy to run an
-incompatible analyzer on current results.
+```bash
+.venv/bin/python scripts/analyze/validate_replicate_run.py \
+  --write <replicate_run_dir>
+```
+
+Then summarize a validated set with `analyze_replicates.py`. Invalid stochastic
+outputs are missing observations, not zero findings. Paired prompt observations
+are reduced to one effect per seed before inference so repeated tasks are not
+treated as independent experimental units.
+
+## Semgrep debug evidence
+
+Semgrep debug compaction is output hygiene rather than statistical analysis:
+
+```bash
+.venv/bin/python scripts/experiments/filter_semgrep_debug.py \
+  --in-place <run_dir>
+```
+
+The DelftBlue launchers perform this step automatically before validation when
+the raw debug stream exists.

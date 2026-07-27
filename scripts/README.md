@@ -1,52 +1,77 @@
-# Scripts layout (rule-mutation)
+# Scripts layout
 
-This folder is grouped by script type.
+The executable workflow has three distinct phases: map construction and
+qualification, the main search experiment, and targeted stochastic
+replication.
 
-## experiments/
-- run_experiment.py: Main experiment runner (current production path).
+## Phase 1 — Retrieve, qualify, and freeze maps
 
-Run as:
-- `python scripts/experiments/run_experiment.py`
+- `slurm/slurm_rule_retrieval_reframed.sh`: retrieve task-to-rule mappings with
+  the reframed retrieval request.
+- `setup/materialize_retrieval_consensus.py`: validate exactly 20 retrievals
+  and materialize the 11-of-20 consensus maps.
+- `setup/materialize_eligible_population.py`: audit and apply reviewed,
+  outcome-independent task exclusions.
+- `analyze/analyze_population_screening.py`: reconcile the complete 20-seed,
+  four-stratum temperature-0.6 screening block and materialize qualification
+  inputs.
+- `experiments/run_qualification.py`: generate and validate the
+  temperature-zero search population for one model, language, and map.
+- `slurm/slurm_qualification.sh`: DelftBlue launcher for the dedicated
+  qualification entrypoint.
+- `setup/materialize_qualified_search_maps.py`: combine the four validated
+  model/language qualifications with the observed-finding gate and freeze a
+  shared population per language.
+- `analyze/validate_qualified_maps.py`: verify every final map, fingerprint,
+  supporting-artifact hash, and task-order contract.
 
-Why needed:
-- Keeps core experiment entry point separate from validation and ops utilities.
+Example:
 
-## experiments/ (reproduction)
-- rerun_from_config.py: reproduce a run from its `run_config.json` (API backend →
-  re-invoke the python entrypoint; delftblue → `sbatch` the SLURM wrapper). Accepts a
-  run directory or a `run_config.json` path.
+```bash
+sbatch scripts/slurm/slurm_rule_retrieval_reframed.sh
+MODEL=qwen LANGUAGES=python RULES_MAP=<screened-qwen-python-map> \
+  sbatch scripts/slurm/slurm_qualification.sh
+```
 
-## slurm/
-- slurm_ea_qwen32b.sh / slurm_ea_llama70b.sh: SBATCH launchers for the (1+1) EA and random_search optimizers (Qwen / Llama backends).
-- slurm_rule_retrieval_local.sh: SBATCH launcher for the rule-retrieval pipeline.
+## Phase 2 — Run the search experiment
 
-Run as:
-- `sbatch scripts/slurm/slurm_ea_qwen32b.sh`
+- `experiments/run_experiment.py`: main EA/random-search entrypoint.
+- `setup/materialize_initialization_bundle.py`: freeze the shared five-candidate
+  initialization, including the evaluator cache and random-generator states,
+  from a validated zero-main-loop source run.
+- `slurm/slurm_ea_qwen32b.sh`: Qwen search launcher.
+- `slurm/slurm_ea_llama70b.sh`: Llama search launcher.
+- `experiments/rerun_from_config.py`: reconstruct a search run from its
+  `run_config.json`.
 
-Why needed:
-- Encapsulates cluster resource config and reproducible runtime setup.
+Every final EA/random pair must use the same map, selected task population,
+seed, prompt contract, and initialization bundle. The primary comparison uses
+the same scheduler wall-time limit.
 
-## analyze/ (run validation + retained historical reports)
+Validate every completed or gracefully stopped run with:
 
-- validate_schema5_run.py: strict schema-5 run reconciliation after each SLURM
-  search.
-- analyze_final_schema4.py / analyze_partial_schema4.py / final_schema4/: frozen
-  historical analyzers for the already completed schema-4 reports.
-- analyze_replicates.py / stats.py: temp>0 baseline-harness replicate summaries.
+```bash
+.venv/bin/python scripts/analyze/validate_search_run.py --write <search_run_dir>
+```
 
-The old schema-2 report stack was removed from the working tree to avoid
-accidentally analyzing current schema-5 runs with incompatible metrics.
+## Phase 3 — Replicate selected configurations
 
-## experiments/ (run and output hygiene)
+- `experiments/run_replicates.py`: repeat no-rules, with-rules, or a selected
+  chromosome at temperature greater than zero.
+- `slurm/slurm_replicates.sh`: DelftBlue launcher for replicate runs.
+- `analyze/validate_replicate_run.py`: reconcile one replicate run.
+- `analyze/analyze_replicates.py`: summarize valid paired replicate evidence.
 
-- filter_semgrep_debug.py: compact and audit `semgrep_debug.jsonl` after a run;
-  the search SLURM wrappers call it automatically before schema-5 validation.
+This phase supports baseline reporting and significance checks for selected
+search outcomes; it is not part of the search budget.
 
-## setup/
-- download_semgrep_security_audit_rules.sh: One-time local Semgrep rules bootstrap;
-  requires an immutable upstream commit and records it in `SOURCE_COMMIT`.
-- qualify_final_maps.py: Idempotently materializes the declared task-1301
-  exclusion in the final search maps and reconciles their derived metadata.
+## Analysis and output utilities
 
-Why needed:
-- Required for offline/consistent Semgrep scans on compute nodes.
+- `analyze/analyze_search_runs.py`: analyze validated matched search runs at the
+  common wall-time endpoint and produce evaluation- and time-indexed incumbent
+  curves.
+- `analyze/stats.py`: shared bootstrap and paired-statistics helpers.
+- `experiments/filter_semgrep_debug.py`: compact and audit
+  `semgrep_debug.jsonl` before validation.
+- `setup/download_semgrep_security_audit_rules.sh`: install a pinned Semgrep
+  ruleset and record its immutable upstream commit in `SOURCE_COMMIT`.
