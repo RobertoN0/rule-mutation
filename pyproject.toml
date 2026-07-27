@@ -97,7 +97,8 @@ package = false
 [tool.uv.sources]
 # Pin torch (pulled transitively by sentence-transformers) to PyTorch's CPU wheel
 # index. ~5 GB savings vs the default CUDA wheel on Linux.
-# DelftBlue overrides this after `uv sync --extra gpu` — see REPLICATION.md.
+# GPU hosts override this after `uv sync --extra gpu` — see REPLICATION.md
+# section 7, "GPU host (DelftBlue / CUDA)", for the exact two-step procedure.
 torch = { index = "pytorch-cpu" }
 
 [[tool.uv.index]]
