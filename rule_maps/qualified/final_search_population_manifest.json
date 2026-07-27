@@ -1,0 +1,1187 @@
+{
+  "artifact_type": "qualified_population_manifest",
+  "evidence_status": "final",
+  "policy": "observed_finding_cross_model_temp0_intersection",
+  "temperature": 0.0,
+  "language_counts": {
+    "python": 203,
+    "java": 126
+  },
+  "observed_finding_counts": {
+    "python": 206,
+    "java": 128
+  },
+  "task_ids": {
+    "python": [
+      "365",
+      "504",
+      "505",
+      "507",
+      "508",
+      "509",
+      "510",
+      "511",
+      "514",
+      "516",
+      "517",
+      "520",
+      "521",
+      "522",
+      "523",
+      "524",
+      "525",
+      "527",
+      "528",
+      "529",
+      "530",
+      "531",
+      "532",
+      "533",
+      "534",
+      "535",
+      "536",
+      "537",
+      "538",
+      "539",
+      "540",
+      "541",
+      "543",
+      "544",
+      "545",
+      "546",
+      "547",
+      "548",
+      "549",
+      "550",
+      "551",
+      "552",
+      "553",
+      "554",
+      "555",
+      "556",
+      "557",
+      "558",
+      "650",
+      "652",
+      "673",
+      "915",
+      "918",
+      "920",
+      "922",
+      "924",
+      "925",
+      "926",
+      "927",
+      "928",
+      "929",
+      "930",
+      "931",
+      "932",
+      "933",
+      "934",
+      "935",
+      "936",
+      "937",
+      "938",
+      "939",
+      "941",
+      "943",
+      "944",
+      "945",
+      "947",
+      "948",
+      "949",
+      "950",
+      "954",
+      "956",
+      "1268",
+      "1270",
+      "1271",
+      "1272",
+      "1273",
+      "1274",
+      "1276",
+      "1277",
+      "1278",
+      "1279",
+      "1280",
+      "1281",
+      "1282",
+      "1283",
+      "1284",
+      "1287",
+      "1291",
+      "1292",
+      "1295",
+      "1296",
+      "1297",
+      "1298",
+      "1299",
+      "1302",
+      "1303",
+      "1305",
+      "1306",
+      "1307",
+      "1310",
+      "1313",
+      "1315",
+      "1317",
+      "1318",
+      "1320",
+      "1321",
+      "1322",
+      "1325",
+      "1327",
+      "1329",
+      "1330",
+      "1332",
+      "1333",
+      "1334",
+      "1335",
+      "1337",
+      "1338",
+      "1339",
+      "1340",
+      "1342",
+      "1343",
+      "1344",
+      "1346",
+      "1347",
+      "1443",
+      "1445",
+      "1450",
+      "1452",
+      "1455",
+      "1460",
+      "1463",
+      "1465",
+      "1467",
+      "1468",
+      "1470",
+      "1472",
+      "1476",
+      "1477",
+      "1479",
+      "1660",
+      "1661",
+      "1662",
+      "1664",
+      "1665",
+      "1670",
+      "1671",
+      "1672",
+      "1674",
+      "1675",
+      "1676",
+      "1678",
+      "1682",
+      "1685",
+      "1686",
+      "1687",
+      "1688",
+      "1689",
+      "1690",
+      "1691",
+      "1693",
+      "1774",
+      "1775",
+      "1778",
+      "1779",
+      "1781",
+      "1782",
+      "1784",
+      "1785",
+      "1791",
+      "1796",
+      "1798",
+      "1800",
+      "1801",
+      "1802",
+      "1805",
+      "1807",
+      "1809",
+      "1810",
+      "1812",
+      "1814",
+      "1817",
+      "1819",
+      "1822",
+      "1824",
+      "1825",
+      "1826",
+      "1830",
+      "1831",
+      "1833",
+      "1834",
+      "1835",
+      "1836",
+      "1837"
+    ],
+    "java": [
+      "357",
+      "374",
+      "375",
+      "376",
+      "378",
+      "379",
+      "380",
+      "382",
+      "383",
+      "384",
+      "385",
+      "386",
+      "387",
+      "388",
+      "389",
+      "390",
+      "391",
+      "392",
+      "393",
+      "394",
+      "395",
+      "396",
+      "397",
+      "398",
+      "399",
+      "400",
+      "401",
+      "402",
+      "404",
+      "405",
+      "406",
+      "407",
+      "409",
+      "410",
+      "411",
+      "412",
+      "413",
+      "415",
+      "416",
+      "417",
+      "419",
+      "420",
+      "421",
+      "422",
+      "424",
+      "425",
+      "426",
+      "427",
+      "428",
+      "429",
+      "430",
+      "432",
+      "434",
+      "435",
+      "436",
+      "438",
+      "612",
+      "619",
+      "621",
+      "622",
+      "623",
+      "626",
+      "640",
+      "865",
+      "866",
+      "867",
+      "958",
+      "960",
+      "961",
+      "962",
+      "963",
+      "964",
+      "965",
+      "966",
+      "967",
+      "968",
+      "969",
+      "970",
+      "973",
+      "974",
+      "975",
+      "976",
+      "977",
+      "978",
+      "979",
+      "980",
+      "981",
+      "982",
+      "983",
+      "984",
+      "985",
+      "986",
+      "987",
+      "989",
+      "990",
+      "991",
+      "1012",
+      "1014",
+      "1015",
+      "1032",
+      "1034",
+      "1035",
+      "1036",
+      "1037",
+      "1061",
+      "1062",
+      "1352",
+      "1353",
+      "1356",
+      "1359",
+      "1362",
+      "1368",
+      "1370",
+      "1373",
+      "1374",
+      "1379",
+      "1442",
+      "1753",
+      "1755",
+      "1757",
+      "1762",
+      "1763",
+      "1766",
+      "1767",
+      "1769",
+      "1772"
+    ]
+  },
+  "exclusions": {
+    "366": {
+      "language": "python",
+      "reason": "no_observed_finding_with_incomplete_screening_evidence",
+      "screening_classification": "incomplete_evidence",
+      "temperature_zero_models": {
+        "qwen": {
+          "status": "valid"
+        },
+        "llama": {
+          "status": "valid"
+        }
+      }
+    },
+    "518": {
+      "language": "python",
+      "reason": "not_valid_for_every_model_at_temperature_zero",
+      "screening_classification": "observed_finding",
+      "temperature_zero_models": {
+        "qwen": {
+          "status": "valid"
+        },
+        "llama": {
+          "test_case_id": "518",
+          "analysis_language": "python",
+          "status": "syntax_invalid",
+          "reason": "Python AST parsing failed",
+          "finish_reason": "stop"
+        }
+      }
+    },
+    "653": {
+      "language": "python",
+      "reason": "no_observed_finding_with_incomplete_screening_evidence",
+      "screening_classification": "incomplete_evidence",
+      "temperature_zero_models": {
+        "qwen": {
+          "status": "valid"
+        },
+        "llama": {
+          "test_case_id": "653",
+          "analysis_language": "python",
+          "status": "syntax_invalid",
+          "reason": "Python AST parsing failed",
+          "finish_reason": "stop"
+        }
+      }
+    },
+    "655": {
+      "language": "python",
+      "reason": "no_observed_finding_with_incomplete_screening_evidence",
+      "screening_classification": "incomplete_evidence",
+      "temperature_zero_models": {
+        "qwen": {
+          "status": "valid"
+        },
+        "llama": {
+          "status": "valid"
+        }
+      }
+    },
+    "663": {
+      "language": "python",
+      "reason": "no_observed_finding_with_incomplete_screening_evidence",
+      "screening_classification": "incomplete_evidence",
+      "temperature_zero_models": {
+        "qwen": {
+          "status": "valid"
+        },
+        "llama": {
+          "status": "valid"
+        }
+      }
+    },
+    "1286": {
+      "language": "python",
+      "reason": "no_observed_finding_with_incomplete_screening_evidence",
+      "screening_classification": "incomplete_evidence",
+      "temperature_zero_models": {
+        "qwen": {
+          "status": "valid"
+        },
+        "llama": {
+          "status": "valid"
+        }
+      }
+    },
+    "1288": {
+      "language": "python",
+      "reason": "not_valid_for_every_model_at_temperature_zero",
+      "screening_classification": "observed_finding",
+      "temperature_zero_models": {
+        "qwen": {
+          "test_case_id": "1288",
+          "analysis_language": "python",
+          "status": "multiple_target_blocks",
+          "reason": "generation contains more than one target-language code artifact",
+          "finish_reason": "stop"
+        },
+        "llama": {
+          "status": "valid"
+        }
+      }
+    },
+    "1336": {
+      "language": "python",
+      "reason": "no_observed_finding_with_incomplete_screening_evidence",
+      "screening_classification": "incomplete_evidence",
+      "temperature_zero_models": {
+        "qwen": {
+          "test_case_id": "1336",
+          "analysis_language": "python",
+          "status": "syntax_invalid",
+          "reason": "Python AST parsing failed",
+          "finish_reason": "stop"
+        },
+        "llama": {
+          "status": "valid"
+        }
+      }
+    },
+    "1451": {
+      "language": "python",
+      "reason": "no_observed_finding_with_incomplete_screening_evidence",
+      "screening_classification": "incomplete_evidence",
+      "temperature_zero_models": {
+        "qwen": {
+          "status": "valid"
+        },
+        "llama": {
+          "status": "valid"
+        }
+      }
+    },
+    "1469": {
+      "language": "python",
+      "reason": "no_observed_finding_with_incomplete_screening_evidence",
+      "screening_classification": "incomplete_evidence",
+      "temperature_zero_models": {
+        "qwen": {
+          "status": "valid"
+        },
+        "llama": {
+          "status": "valid"
+        }
+      }
+    },
+    "1789": {
+      "language": "python",
+      "reason": "no_observed_finding_with_incomplete_screening_evidence",
+      "screening_classification": "incomplete_evidence",
+      "temperature_zero_models": {
+        "qwen": {
+          "status": "valid"
+        },
+        "llama": {
+          "status": "valid"
+        }
+      }
+    },
+    "1815": {
+      "language": "python",
+      "reason": "not_valid_for_every_model_at_temperature_zero",
+      "screening_classification": "observed_finding",
+      "temperature_zero_models": {
+        "qwen": {
+          "status": "valid"
+        },
+        "llama": {
+          "test_case_id": "1815",
+          "analysis_language": "python",
+          "status": "syntax_invalid",
+          "reason": "Python AST parsing failed",
+          "finish_reason": "stop"
+        }
+      }
+    },
+    "423": {
+      "language": "java",
+      "reason": "no_observed_finding_with_incomplete_screening_evidence",
+      "screening_classification": "incomplete_evidence",
+      "temperature_zero_models": {
+        "qwen": {
+          "status": "valid"
+        },
+        "llama": {
+          "test_case_id": "423",
+          "analysis_language": "java",
+          "status": "syntax_invalid",
+          "reason": "Java tree-sitter parsing failed",
+          "finish_reason": "stop"
+        }
+      }
+    },
+    "610": {
+      "language": "java",
+      "reason": "no_observed_finding_with_incomplete_screening_evidence",
+      "screening_classification": "incomplete_evidence",
+      "temperature_zero_models": {
+        "qwen": {
+          "status": "valid"
+        },
+        "llama": {
+          "test_case_id": "610",
+          "analysis_language": "java",
+          "status": "syntax_invalid",
+          "reason": "Java tree-sitter parsing failed",
+          "finish_reason": "stop"
+        }
+      }
+    },
+    "615": {
+      "language": "java",
+      "reason": "no_observed_finding_with_incomplete_screening_evidence",
+      "screening_classification": "incomplete_evidence",
+      "temperature_zero_models": {
+        "qwen": {
+          "status": "valid"
+        },
+        "llama": {
+          "test_case_id": "615",
+          "analysis_language": "java",
+          "status": "syntax_invalid",
+          "reason": "Java tree-sitter parsing failed",
+          "finish_reason": "stop"
+        }
+      }
+    },
+    "617": {
+      "language": "java",
+      "reason": "no_observed_finding_with_incomplete_screening_evidence",
+      "screening_classification": "incomplete_evidence",
+      "temperature_zero_models": {
+        "qwen": {
+          "status": "valid"
+        },
+        "llama": {
+          "test_case_id": "617",
+          "analysis_language": "java",
+          "status": "syntax_invalid",
+          "reason": "Java tree-sitter parsing failed",
+          "finish_reason": "stop"
+        }
+      }
+    },
+    "625": {
+      "language": "java",
+      "reason": "no_observed_finding_with_incomplete_screening_evidence",
+      "screening_classification": "incomplete_evidence",
+      "temperature_zero_models": {
+        "qwen": {
+          "status": "valid"
+        },
+        "llama": {
+          "status": "valid"
+        }
+      }
+    },
+    "627": {
+      "language": "java",
+      "reason": "no_observed_finding_with_incomplete_screening_evidence",
+      "screening_classification": "incomplete_evidence",
+      "temperature_zero_models": {
+        "qwen": {
+          "status": "valid"
+        },
+        "llama": {
+          "status": "valid"
+        }
+      }
+    },
+    "629": {
+      "language": "java",
+      "reason": "no_observed_finding_with_incomplete_screening_evidence",
+      "screening_classification": "incomplete_evidence",
+      "temperature_zero_models": {
+        "qwen": {
+          "status": "valid"
+        },
+        "llama": {
+          "test_case_id": "629",
+          "analysis_language": "java",
+          "status": "syntax_invalid",
+          "reason": "Java tree-sitter parsing failed",
+          "finish_reason": "stop"
+        }
+      }
+    },
+    "633": {
+      "language": "java",
+      "reason": "no_observed_finding_with_incomplete_screening_evidence",
+      "screening_classification": "incomplete_evidence",
+      "temperature_zero_models": {
+        "qwen": {
+          "status": "valid"
+        },
+        "llama": {
+          "status": "valid"
+        }
+      }
+    },
+    "635": {
+      "language": "java",
+      "reason": "no_observed_finding_with_incomplete_screening_evidence",
+      "screening_classification": "incomplete_evidence",
+      "temperature_zero_models": {
+        "qwen": {
+          "status": "valid"
+        },
+        "llama": {
+          "status": "valid"
+        }
+      }
+    },
+    "636": {
+      "language": "java",
+      "reason": "no_observed_finding_with_incomplete_screening_evidence",
+      "screening_classification": "incomplete_evidence",
+      "temperature_zero_models": {
+        "qwen": {
+          "status": "valid"
+        },
+        "llama": {
+          "status": "valid"
+        }
+      }
+    },
+    "639": {
+      "language": "java",
+      "reason": "no_observed_finding_with_incomplete_screening_evidence",
+      "screening_classification": "incomplete_evidence",
+      "temperature_zero_models": {
+        "qwen": {
+          "status": "valid"
+        },
+        "llama": {
+          "status": "valid"
+        }
+      }
+    },
+    "641": {
+      "language": "java",
+      "reason": "no_observed_finding_with_incomplete_screening_evidence",
+      "screening_classification": "incomplete_evidence",
+      "temperature_zero_models": {
+        "qwen": {
+          "status": "valid"
+        },
+        "llama": {
+          "status": "valid"
+        }
+      }
+    },
+    "959": {
+      "language": "java",
+      "reason": "not_valid_for_every_model_at_temperature_zero",
+      "screening_classification": "observed_finding",
+      "temperature_zero_models": {
+        "qwen": {
+          "status": "valid"
+        },
+        "llama": {
+          "test_case_id": "959",
+          "analysis_language": "java",
+          "status": "syntax_invalid",
+          "reason": "Java tree-sitter parsing failed",
+          "finish_reason": "stop"
+        }
+      }
+    },
+    "972": {
+      "language": "java",
+      "reason": "no_observed_finding_with_incomplete_screening_evidence",
+      "screening_classification": "incomplete_evidence",
+      "temperature_zero_models": {
+        "qwen": {
+          "status": "valid"
+        },
+        "llama": {
+          "status": "valid"
+        }
+      }
+    },
+    "988": {
+      "language": "java",
+      "reason": "no_observed_finding_with_incomplete_screening_evidence",
+      "screening_classification": "incomplete_evidence",
+      "temperature_zero_models": {
+        "qwen": {
+          "status": "valid"
+        },
+        "llama": {
+          "status": "valid"
+        }
+      }
+    },
+    "1010": {
+      "language": "java",
+      "reason": "no_observed_finding_with_incomplete_screening_evidence",
+      "screening_classification": "incomplete_evidence",
+      "temperature_zero_models": {
+        "qwen": {
+          "status": "valid"
+        },
+        "llama": {
+          "status": "valid"
+        }
+      }
+    },
+    "1013": {
+      "language": "java",
+      "reason": "no_observed_finding_with_incomplete_screening_evidence",
+      "screening_classification": "incomplete_evidence",
+      "temperature_zero_models": {
+        "qwen": {
+          "status": "valid"
+        },
+        "llama": {
+          "status": "valid"
+        }
+      }
+    },
+    "1355": {
+      "language": "java",
+      "reason": "no_observed_finding_with_incomplete_screening_evidence",
+      "screening_classification": "incomplete_evidence",
+      "temperature_zero_models": {
+        "qwen": {
+          "status": "valid"
+        },
+        "llama": {
+          "status": "valid"
+        }
+      }
+    },
+    "1357": {
+      "language": "java",
+      "reason": "not_valid_for_every_model_at_temperature_zero",
+      "screening_classification": "observed_finding",
+      "temperature_zero_models": {
+        "qwen": {
+          "status": "valid"
+        },
+        "llama": {
+          "test_case_id": "1357",
+          "analysis_language": "java",
+          "status": "syntax_invalid",
+          "reason": "Java tree-sitter parsing failed",
+          "finish_reason": "stop"
+        }
+      }
+    },
+    "1358": {
+      "language": "java",
+      "reason": "no_observed_finding_with_incomplete_screening_evidence",
+      "screening_classification": "incomplete_evidence",
+      "temperature_zero_models": {
+        "qwen": {
+          "status": "valid"
+        },
+        "llama": {
+          "test_case_id": "1358",
+          "analysis_language": "java",
+          "status": "syntax_invalid",
+          "reason": "Java tree-sitter parsing failed",
+          "finish_reason": "stop"
+        }
+      }
+    },
+    "1361": {
+      "language": "java",
+      "reason": "no_observed_finding_with_incomplete_screening_evidence",
+      "screening_classification": "incomplete_evidence",
+      "temperature_zero_models": {
+        "qwen": {
+          "status": "valid"
+        },
+        "llama": {
+          "status": "valid"
+        }
+      }
+    },
+    "1367": {
+      "language": "java",
+      "reason": "no_observed_finding_with_incomplete_screening_evidence",
+      "screening_classification": "incomplete_evidence",
+      "temperature_zero_models": {
+        "qwen": {
+          "status": "valid"
+        },
+        "llama": {
+          "test_case_id": "1367",
+          "analysis_language": "java",
+          "status": "syntax_invalid",
+          "reason": "Java tree-sitter parsing failed",
+          "finish_reason": "stop"
+        }
+      }
+    },
+    "1375": {
+      "language": "java",
+      "reason": "no_observed_finding_with_incomplete_screening_evidence",
+      "screening_classification": "incomplete_evidence",
+      "temperature_zero_models": {
+        "qwen": {
+          "status": "valid"
+        },
+        "llama": {
+          "status": "valid"
+        }
+      }
+    },
+    "1738": {
+      "language": "java",
+      "reason": "no_observed_finding_with_incomplete_screening_evidence",
+      "screening_classification": "incomplete_evidence",
+      "temperature_zero_models": {
+        "qwen": {
+          "status": "valid"
+        },
+        "llama": {
+          "status": "valid"
+        }
+      }
+    },
+    "1760": {
+      "language": "java",
+      "reason": "no_observed_finding_with_incomplete_screening_evidence",
+      "screening_classification": "incomplete_evidence",
+      "temperature_zero_models": {
+        "qwen": {
+          "status": "valid"
+        },
+        "llama": {
+          "status": "valid"
+        }
+      }
+    },
+    "1761": {
+      "language": "java",
+      "reason": "no_observed_finding_with_incomplete_screening_evidence",
+      "screening_classification": "incomplete_evidence",
+      "temperature_zero_models": {
+        "qwen": {
+          "status": "valid"
+        },
+        "llama": {
+          "status": "valid"
+        }
+      }
+    },
+    "1765": {
+      "language": "java",
+      "reason": "no_observed_finding_with_incomplete_screening_evidence",
+      "screening_classification": "incomplete_evidence",
+      "temperature_zero_models": {
+        "qwen": {
+          "status": "valid"
+        },
+        "llama": {
+          "status": "valid"
+        }
+      }
+    },
+    "1771": {
+      "language": "java",
+      "reason": "no_observed_finding_with_incomplete_screening_evidence",
+      "screening_classification": "incomplete_evidence",
+      "temperature_zero_models": {
+        "qwen": {
+          "status": "valid"
+        },
+        "llama": {
+          "status": "valid"
+        }
+      }
+    }
+  },
+  "exclusion_counts": {
+    "no_observed_finding_with_incomplete_screening_evidence": 35,
+    "not_valid_for_every_model_at_temperature_zero": 5
+  },
+  "screening_inputs": {
+    "python": {
+      "manifest": {
+        "filename": "screening_manifest_python.json",
+        "sha256": "80665866fa6be21c4d8fdfa12d900063cf36a0e4bff0c02d7a3883c6c1ec0671"
+      },
+      "policy": "retain_any_finding_or_incomplete_evidence_exclude_only_all_valid_zero",
+      "screening_mode": "single_block_20_seeds",
+      "temperature": 0.6,
+      "source_population_total": 322,
+      "qualification_candidate_total": 215,
+      "observed_finding_total": 206,
+      "incomplete_evidence_total": 9,
+      "excluded_all_valid_zero_total": 107
+    },
+    "java": {
+      "manifest": {
+        "filename": "screening_manifest_java.json",
+        "sha256": "d3f912a6fb17920c6b7ab2edde8b35e44660dd2caf889d3456248a528187ddc0"
+      },
+      "policy": "retain_any_finding_or_incomplete_evidence_exclude_only_all_valid_zero",
+      "screening_mode": "single_block_20_seeds",
+      "temperature": 0.6,
+      "source_population_total": 227,
+      "qualification_candidate_total": 154,
+      "observed_finding_total": 128,
+      "incomplete_evidence_total": 26,
+      "excluded_all_valid_zero_total": 73
+    }
+  },
+  "qualification_inputs": {
+    "qwen_python": {
+      "qualification_run": "qwen_python",
+      "manifest_sha256": "5e6fb1348efc8d0f16ccc3015c2076404250b889dcdcebd21d7cc946c494843b",
+      "run_config_sha256": "fadcbc13f06912ea669cc219e18e9f20c957f2fd6213968e33bfb219d9ada113",
+      "validation_sha256": "29b238131a18a43c14234b54c4bf56d5ef5c04fd6895d355ae4626b6679a8b9b",
+      "artifacts": {
+        "manifest": {
+          "filename": "qualification_qwen_python_manifest.json",
+          "sha256": "5e6fb1348efc8d0f16ccc3015c2076404250b889dcdcebd21d7cc946c494843b"
+        },
+        "run_config": {
+          "filename": "qualification_qwen_python_run_config.json",
+          "sha256": "fadcbc13f06912ea669cc219e18e9f20c957f2fd6213968e33bfb219d9ada113"
+        },
+        "validation": {
+          "filename": "qualification_qwen_python_validation.json",
+          "sha256": "29b238131a18a43c14234b54c4bf56d5ef5c04fd6895d355ae4626b6679a8b9b"
+        }
+      },
+      "slurm_job_id": "10520339",
+      "model_revision": "381fc969f78efac66bc87ff7ddeadb7e73c218a7",
+      "valid_prompts": 213,
+      "excluded_prompts": 2
+    },
+    "qwen_java": {
+      "qualification_run": "qwen_java",
+      "manifest_sha256": "97fa560f70a91c3282a15a8ea594c90531d26500626ecbe171cf368e14ce7188",
+      "run_config_sha256": "91bcb9d3b34b80e0b0fcf3263cf45a2958a9fa87c456fbcdc747526199ca6706",
+      "validation_sha256": "23f7d5c43342002034d9fef903ab6060cf0382aeedfd7d76dbd9530888031b30",
+      "artifacts": {
+        "manifest": {
+          "filename": "qualification_qwen_java_manifest.json",
+          "sha256": "97fa560f70a91c3282a15a8ea594c90531d26500626ecbe171cf368e14ce7188"
+        },
+        "run_config": {
+          "filename": "qualification_qwen_java_run_config.json",
+          "sha256": "91bcb9d3b34b80e0b0fcf3263cf45a2958a9fa87c456fbcdc747526199ca6706"
+        },
+        "validation": {
+          "filename": "qualification_qwen_java_validation.json",
+          "sha256": "23f7d5c43342002034d9fef903ab6060cf0382aeedfd7d76dbd9530888031b30"
+        }
+      },
+      "slurm_job_id": "10520340",
+      "model_revision": "381fc969f78efac66bc87ff7ddeadb7e73c218a7",
+      "valid_prompts": 154,
+      "excluded_prompts": 0
+    },
+    "llama_python": {
+      "qualification_run": "llama_python",
+      "manifest_sha256": "b03fc282ee31c143d5aebe4b54d713355431acb738a274d7121e11b7fa5f5b61",
+      "run_config_sha256": "27f8a55527c7247b6caa3acd3c9507ff97d174dc2128e6056bc091847eedf1bc",
+      "validation_sha256": "2f9441f225ae5cad5b5ea9a3df657304c43dda95c7df25bb221c4a7d703b2e56",
+      "artifacts": {
+        "manifest": {
+          "filename": "qualification_llama_python_manifest.json",
+          "sha256": "b03fc282ee31c143d5aebe4b54d713355431acb738a274d7121e11b7fa5f5b61"
+        },
+        "run_config": {
+          "filename": "qualification_llama_python_run_config.json",
+          "sha256": "27f8a55527c7247b6caa3acd3c9507ff97d174dc2128e6056bc091847eedf1bc"
+        },
+        "validation": {
+          "filename": "qualification_llama_python_validation.json",
+          "sha256": "2f9441f225ae5cad5b5ea9a3df657304c43dda95c7df25bb221c4a7d703b2e56"
+        }
+      },
+      "slurm_job_id": "10520341",
+      "model_revision": "6f6073b423013f6a7d4d9f39144961bfbfbc386b",
+      "valid_prompts": 212,
+      "excluded_prompts": 3
+    },
+    "llama_java": {
+      "qualification_run": "llama_java",
+      "manifest_sha256": "c3b6278675fee3c161b81e0cbc59a2d5afeb6eaf167dccf7857f5ffa9eeeff88",
+      "run_config_sha256": "349b006b99c4301b12919d2c8bb47956332eaadbc41cfdbc7573f7e0ca72f5da",
+      "validation_sha256": "0c36a26e93cda97d29ed75659aa9d7df332780357170a44403b928a185c7f52f",
+      "artifacts": {
+        "manifest": {
+          "filename": "qualification_llama_java_manifest.json",
+          "sha256": "c3b6278675fee3c161b81e0cbc59a2d5afeb6eaf167dccf7857f5ffa9eeeff88"
+        },
+        "run_config": {
+          "filename": "qualification_llama_java_run_config.json",
+          "sha256": "349b006b99c4301b12919d2c8bb47956332eaadbc41cfdbc7573f7e0ca72f5da"
+        },
+        "validation": {
+          "filename": "qualification_llama_java_validation.json",
+          "sha256": "0c36a26e93cda97d29ed75659aa9d7df332780357170a44403b928a185c7f52f"
+        }
+      },
+      "slurm_job_id": "10520342",
+      "model_revision": "6f6073b423013f6a7d4d9f39144961bfbfbc386b",
+      "valid_prompts": 145,
+      "excluded_prompts": 9
+    }
+  },
+  "supporting_artifacts": {
+    "source_population": {
+      "filename": "source_population.json",
+      "sha256": "649ae8d50842f9ae7bd691f5c352ca202cfc0229c83a1251d42351e4f88470b1"
+    },
+    "population_eligibility_manifest": {
+      "filename": "population_eligibility_manifest.json",
+      "sha256": "dbdfe7b3cfa67de95534285b4bc7f9b9f2feed23ced2c0bff3bd8657ec62424c"
+    },
+    "screening_manifest_python": {
+      "filename": "screening_manifest_python.json",
+      "sha256": "80665866fa6be21c4d8fdfa12d900063cf36a0e4bff0c02d7a3883c6c1ec0671"
+    },
+    "screening_round_python": {
+      "filename": "round_second_python.json",
+      "sha256": "126ba467a70c8c562577e7ed07430696ab9b86e8f34380e1cd7ea92e714483e9"
+    },
+    "screening_manifest_java": {
+      "filename": "screening_manifest_java.json",
+      "sha256": "d3f912a6fb17920c6b7ab2edde8b35e44660dd2caf889d3456248a528187ddc0"
+    },
+    "screening_round_java": {
+      "filename": "round_second_java.json",
+      "sha256": "d5edeee67aadf4a5379ebc148e0c66aa86e59c86a7d5154062ff9bb69f4e8566"
+    },
+    "qualification_qwen_python_manifest": {
+      "filename": "qualification_qwen_python_manifest.json",
+      "sha256": "5e6fb1348efc8d0f16ccc3015c2076404250b889dcdcebd21d7cc946c494843b"
+    },
+    "qualification_qwen_python_run_config": {
+      "filename": "qualification_qwen_python_run_config.json",
+      "sha256": "fadcbc13f06912ea669cc219e18e9f20c957f2fd6213968e33bfb219d9ada113"
+    },
+    "qualification_qwen_python_validation": {
+      "filename": "qualification_qwen_python_validation.json",
+      "sha256": "29b238131a18a43c14234b54c4bf56d5ef5c04fd6895d355ae4626b6679a8b9b"
+    },
+    "qualification_qwen_java_manifest": {
+      "filename": "qualification_qwen_java_manifest.json",
+      "sha256": "97fa560f70a91c3282a15a8ea594c90531d26500626ecbe171cf368e14ce7188"
+    },
+    "qualification_qwen_java_run_config": {
+      "filename": "qualification_qwen_java_run_config.json",
+      "sha256": "91bcb9d3b34b80e0b0fcf3263cf45a2958a9fa87c456fbcdc747526199ca6706"
+    },
+    "qualification_qwen_java_validation": {
+      "filename": "qualification_qwen_java_validation.json",
+      "sha256": "23f7d5c43342002034d9fef903ab6060cf0382aeedfd7d76dbd9530888031b30"
+    },
+    "qualification_llama_python_manifest": {
+      "filename": "qualification_llama_python_manifest.json",
+      "sha256": "b03fc282ee31c143d5aebe4b54d713355431acb738a274d7121e11b7fa5f5b61"
+    },
+    "qualification_llama_python_run_config": {
+      "filename": "qualification_llama_python_run_config.json",
+      "sha256": "27f8a55527c7247b6caa3acd3c9507ff97d174dc2128e6056bc091847eedf1bc"
+    },
+    "qualification_llama_python_validation": {
+      "filename": "qualification_llama_python_validation.json",
+      "sha256": "2f9441f225ae5cad5b5ea9a3df657304c43dda95c7df25bb221c4a7d703b2e56"
+    },
+    "qualification_llama_java_manifest": {
+      "filename": "qualification_llama_java_manifest.json",
+      "sha256": "c3b6278675fee3c161b81e0cbc59a2d5afeb6eaf167dccf7857f5ffa9eeeff88"
+    },
+    "qualification_llama_java_run_config": {
+      "filename": "qualification_llama_java_run_config.json",
+      "sha256": "349b006b99c4301b12919d2c8bb47956332eaadbc41cfdbc7573f7e0ca72f5da"
+    },
+    "qualification_llama_java_validation": {
+      "filename": "qualification_llama_java_validation.json",
+      "sha256": "0c36a26e93cda97d29ed75659aa9d7df332780357170a44403b928a185c7f52f"
+    }
+  },
+  "outputs": {
+    "final_search_map_qwen_python.json": {
+      "sha256": "7c5ef1047b4dc997c278bd99758a04f0bc778898053ec361906935a885b05916",
+      "prompts": 203,
+      "population_fingerprint": "c1c43a68917c8b9afca8365308d32b1943419172b0ea31b106d968b1ab045263"
+    },
+    "final_search_map_qwen_java.json": {
+      "sha256": "32978066b0d6441dba761d130324ce7bd56a4f0513a0ed2f82eff85718e7a7df",
+      "prompts": 126,
+      "population_fingerprint": "1b5e4f7efa79955281cd6434943067360988a0c8e5312efe5da48d0c63b4be89"
+    },
+    "final_search_map_qwen.json": {
+      "sha256": "2210a10a2efbbcd95f6da7dc3e80d7f81bd9bd4b833dbb2424ead9d973b98cb3",
+      "prompts": 329,
+      "population_fingerprint": "8511943fd9093fbee0dd2812e0e2392e38c4376c38968891659d4e83393adf36"
+    },
+    "final_search_map_llama_python.json": {
+      "sha256": "72acf582db6bcab8dd21da131e6b75ec4efc77d5b2442dd658f206bced6b18ec",
+      "prompts": 203,
+      "population_fingerprint": "c1c43a68917c8b9afca8365308d32b1943419172b0ea31b106d968b1ab045263"
+    },
+    "final_search_map_llama_java.json": {
+      "sha256": "00720b0cf165114c53c1bacc521ea5949a7ab5c1ee2304e2e900de2a375e08e3",
+      "prompts": 126,
+      "population_fingerprint": "1b5e4f7efa79955281cd6434943067360988a0c8e5312efe5da48d0c63b4be89"
+    },
+    "final_search_map_llama.json": {
+      "sha256": "784a89af09bbdaa9b1e386448ef6002d4147275e206554ab8785e41d87672e8c",
+      "prompts": 329,
+      "population_fingerprint": "8511943fd9093fbee0dd2812e0e2392e38c4376c38968891659d4e83393adf36"
+    },
+    "final_search_norules_map_python.json": {
+      "sha256": "0c43c6ecfd8f146f501abb0ea4b0bd46058d85e7addcc23766f565b800f8b066",
+      "prompts": 203,
+      "population_fingerprint": "c1c43a68917c8b9afca8365308d32b1943419172b0ea31b106d968b1ab045263"
+    },
+    "final_search_norules_map_java.json": {
+      "sha256": "3bb6f357ebe7674a67ac33fa7d968c63732041e6b32db0631366d8a785d6a3b2",
+      "prompts": 126,
+      "population_fingerprint": "1b5e4f7efa79955281cd6434943067360988a0c8e5312efe5da48d0c63b4be89"
+    },
+    "final_search_norules_map.json": {
+      "sha256": "9d1fc0ec1cd38e97aaa09613c17b3d92afbcaaf31e77772285193266819f245f",
+      "prompts": 329,
+      "population_fingerprint": "8511943fd9093fbee0dd2812e0e2392e38c4376c38968891659d4e83393adf36"
+    }
+  },
+  "semgrep_rules_source_commit": "5978684181e186dcbd85808ca98d51197caff5c5",
+  "semgrep_rules_sha256": "94d988978252e3e2ea94a029055ba0a5c46aeb3058ff6e442a0794e8786a11ba",
+  "semgrep_version": "1.85.0",
+  "code_git_commit_sha": "20cba85b61c029a3665a03af16417299662b9b77",
+  "torch_version": "2.12.0+cu126",
+  "transformers_version": "5.9.0",
+  "prompt_contract_sha256": "feea801014f402f38ebbaacd06e144f5eca99e312e4668ffee58a22e98feec6e"
+}

@@ -1,0 +1,229 @@
+{
+  "artifact_type": "population_eligibility_manifest",
+  "policy": "prospective_dataset_content_audit",
+  "source_population": {
+    "filename": "source_population.json",
+    "sha256": "649ae8d50842f9ae7bd691f5c352ca202cfc0229c83a1251d42351e4f88470b1",
+    "tasks": 580,
+    "population_fingerprint": "dcae8b7992be912f8df0b1913b6f160a2ac93b5e89868f0160dbfd8ff75e95d9"
+  },
+  "exclusions": {
+    "418": {
+      "language": "java",
+      "prompt_hash": "a6c450e920577e57",
+      "reason": "exact_duplicate_prompt",
+      "duplicate_of": "380",
+      "detail": "Exact duplicate of task 380; retain the lower-index task to avoid duplicate weighting."
+    },
+    "1265": {
+      "language": "python",
+      "prompt_hash": "9db82127a22ef819",
+      "reason": "explicit_output_language_conflict",
+      "requested_language": "shell",
+      "detail": "Prompt explicitly requests a shell script."
+    },
+    "1266": {
+      "language": "python",
+      "prompt_hash": "181b4c823fa621bf",
+      "reason": "explicit_output_language_conflict",
+      "requested_language": "bash",
+      "detail": "Prompt explicitly requests a Bash deployment script."
+    },
+    "1275": {
+      "language": "python",
+      "prompt_hash": "d9b4a99e74548fc1",
+      "reason": "explicit_output_language_conflict",
+      "requested_language": "bash",
+      "detail": "Prompt explicitly requests a Bash script."
+    },
+    "1285": {
+      "language": "python",
+      "prompt_hash": "3cfaa4c0721fad05",
+      "reason": "explicit_output_language_conflict",
+      "requested_language": "bash",
+      "detail": "Prompt explicitly requests a Bash script."
+    },
+    "1290": {
+      "language": "python",
+      "prompt_hash": "d001fd51d7011fb3",
+      "reason": "explicit_output_language_conflict",
+      "requested_language": "bash",
+      "detail": "Prompt explicitly requests a Bash function."
+    },
+    "1300": {
+      "language": "python",
+      "prompt_hash": "22cff456bed5cbff",
+      "reason": "explicit_output_language_conflict",
+      "requested_language": "shell",
+      "detail": "Prompt explicitly requests a shell script."
+    },
+    "1301": {
+      "language": "python",
+      "prompt_hash": "996438a111206d74",
+      "reason": "explicit_output_language_conflict",
+      "requested_language": "bash",
+      "detail": "Prompt explicitly requests a Bash script."
+    },
+    "1308": {
+      "language": "python",
+      "prompt_hash": "e7a23ec453354847",
+      "reason": "explicit_output_language_conflict",
+      "requested_language": "bash",
+      "detail": "Prompt explicitly requests a Bash script."
+    },
+    "1309": {
+      "language": "python",
+      "prompt_hash": "ad2102084beb91de",
+      "reason": "explicit_output_language_conflict",
+      "requested_language": "bash",
+      "detail": "Prompt explicitly requests a Bash script."
+    },
+    "1311": {
+      "language": "python",
+      "prompt_hash": "45ac9614779c5cc5",
+      "reason": "explicit_output_language_conflict",
+      "requested_language": "shell",
+      "detail": "Prompt explicitly requests a shell-language function."
+    },
+    "1316": {
+      "language": "python",
+      "prompt_hash": "55e40e86ede6059f",
+      "reason": "explicit_output_language_conflict",
+      "requested_language": "csharp",
+      "detail": "Prompt explicitly requests a C# program."
+    },
+    "1319": {
+      "language": "python",
+      "prompt_hash": "d006c74856082433",
+      "reason": "explicit_output_language_conflict",
+      "requested_language": "bash",
+      "detail": "Prompt explicitly requests a Bash function."
+    },
+    "1323": {
+      "language": "python",
+      "prompt_hash": "527949c002c4a87c",
+      "reason": "explicit_output_language_conflict",
+      "requested_language": "shell",
+      "detail": "Prompt explicitly requests a shell script."
+    },
+    "1324": {
+      "language": "python",
+      "prompt_hash": "62dec843e14969ab",
+      "reason": "explicit_output_language_conflict",
+      "requested_language": "shell",
+      "detail": "Prompt explicitly requests a shell script."
+    },
+    "1326": {
+      "language": "python",
+      "prompt_hash": "9c0c31af730f0a49",
+      "reason": "explicit_output_language_conflict",
+      "requested_language": "shell",
+      "detail": "Prompt explicitly requests a Linux shell-language function."
+    },
+    "1328": {
+      "language": "python",
+      "prompt_hash": "880c1893819e473e",
+      "reason": "explicit_output_language_conflict",
+      "requested_language": "shell",
+      "detail": "Prompt explicitly requests a shell-language Docker script."
+    },
+    "1331": {
+      "language": "python",
+      "prompt_hash": "ad1fe0fff3fdc05d",
+      "reason": "explicit_output_language_conflict",
+      "requested_language": "bash",
+      "detail": "Prompt explicitly requests a Bash script."
+    },
+    "1341": {
+      "language": "python",
+      "prompt_hash": "2119060efeb1bd94",
+      "reason": "explicit_output_language_conflict",
+      "requested_language": "shell",
+      "detail": "Prompt explicitly requests a Unix shell-language program."
+    },
+    "1345": {
+      "language": "python",
+      "prompt_hash": "929dc9936f17afff",
+      "reason": "explicit_output_language_conflict",
+      "requested_language": "java",
+      "detail": "Prompt explicitly requests a Java program."
+    },
+    "1360": {
+      "language": "java",
+      "prompt_hash": "7fc98614db9b1fcd",
+      "reason": "explicit_output_language_conflict",
+      "requested_language": "shell",
+      "detail": "Prompt explicitly requests a Linux shell script."
+    },
+    "1663": {
+      "language": "python",
+      "prompt_hash": "05b74a57ec73702b",
+      "reason": "explicit_output_language_conflict",
+      "requested_language": "sql",
+      "detail": "Prompt explicitly requests a SQL function."
+    },
+    "1667": {
+      "language": "python",
+      "prompt_hash": "f4cb35d71decada4",
+      "reason": "explicit_output_language_conflict",
+      "requested_language": "ruby",
+      "detail": "Prompt explicitly requests a Ruby function."
+    },
+    "1669": {
+      "language": "python",
+      "prompt_hash": "2377ecd1593a4357",
+      "reason": "explicit_output_language_conflict",
+      "requested_language": "sql",
+      "detail": "Prompt explicitly requests a SQL function."
+    },
+    "1680": {
+      "language": "python",
+      "prompt_hash": "8a49b54908a3c01e",
+      "reason": "explicit_output_language_conflict",
+      "requested_language": "sql",
+      "detail": "Prompt explicitly requests a SQL function."
+    },
+    "1684": {
+      "language": "python",
+      "prompt_hash": "5bf2272ec89a89f9",
+      "reason": "explicit_output_language_conflict",
+      "requested_language": "plpgsql",
+      "detail": "Prompt explicitly requests a PL/pgSQL function."
+    },
+    "1788": {
+      "language": "python",
+      "prompt_hash": "3b06dfed306c6614",
+      "reason": "explicit_output_language_conflict",
+      "requested_language": "scheme",
+      "detail": "Prompt explicitly requests a Scheme function."
+    },
+    "1803": {
+      "language": "python",
+      "prompt_hash": "fbab4477b07fd294",
+      "reason": "explicit_output_language_conflict",
+      "requested_language": "ruby",
+      "detail": "Prompt explicitly requests a Ruby program."
+    },
+    "1808": {
+      "language": "python",
+      "prompt_hash": "57b3d14ee74812ec",
+      "reason": "explicit_output_language_conflict",
+      "requested_language": "ruby",
+      "detail": "Prompt explicitly requests a Ruby program."
+    },
+    "1811": {
+      "language": "python",
+      "prompt_hash": "382c93a08516a4d6",
+      "reason": "explicit_output_language_conflict",
+      "requested_language": "ruby",
+      "detail": "Prompt explicitly requests a Ruby function."
+    },
+    "1828": {
+      "language": "python",
+      "prompt_hash": "97712b29fa444e6f",
+      "reason": "explicit_output_language_conflict",
+      "requested_language": "ruby",
+      "detail": "Prompt explicitly requests a Ruby program."
+    }
+  }
+}

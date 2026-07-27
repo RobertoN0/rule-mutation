@@ -1,149 +1,214 @@
 # Architecture
 
-High-level design of the framework: the pipeline, the two search strategies, the
-fitness model, and the data flow. For the module-by-module code reference, the
-output schema, and extension points see [IMPLEMENTATION.md](IMPLEMENTATION.md);
-for orientation see [README.md](README.md).
+This document describes the study pipeline and the relationship between its
+components. See [IMPLEMENTATION.md](IMPLEMENTATION.md) for the module and
+artifact reference and [WORKFLOW.md](WORKFLOW.md) for commands.
 
-## System overview
+## Study structure
 
-The framework implements **Search-Based Software Testing (SBST)** over the space
-of rephrasings of a CodeGuard security rule. Each iteration mutates a rule,
-regenerates code for the prompts that use that rule, scores the result with
-Semgrep (security findings) and CodeBLEU (how much the generated code changed),
-and lets a search strategy decide what to keep.
+The study has two main phases and one follow-up analysis stage:
+
+1. **Phase 1 — retrieval and population freezing.** Retrieve the CodeGuard rules
+   relevant to each task, aggregate repeated retrievals into consensus maps,
+   screen the full language-compatible population under both no-rules and
+   original-rules conditions, qualify the retained original-rule population at
+   temperature zero, and freeze the shared Qwen/Llama task population and prompt
+   contract.
+2. **Phase 2 — search.** Evaluate the origin rule set, then compare an
+   archive-based EA with independent random search over the same mapped rules,
+   operators, five initial candidates, and scheduler allocation.
+3. **Phase 3 — repetitions.** Re-evaluate no-rules, original-rules, and selected
+   chromosomes at temperature>0 under multiple seeds for paired statistical
+   analysis.
 
 ```mermaid
 flowchart TD
-    %% ===== Inputs =====
-    R[("CodeGuard rules R")]
-    P[("Test prompts P<br/>CyberSecEval")]
+    P[(CyberSecEval tasks)]
+    R[(CodeGuard rule corpus)]
 
-    %% ===== Rule parsing / safe-zone contract =====
-    R --> RP[Rule parser]
-    RP -->|YAML frontmatter +<br/>fenced code blocks| SZ[Safe zone<br/>immutable]
-    RP -->|Prose directives| MZ[Mutable prose]
+    subgraph PHASE1["Phase 1 · Retrieval and population freezing"]
+        direction TD
+        ELIG[Prospective language<br/>and duplicate audit]
+        RET[20 temperature-0.6<br/>rule-retrieval repetitions]
+        CONS[11-of-20 consensus<br/>task-to-rule maps]
+        SCREEN[20-seed temperature-0.6 screening<br/>2 models × no rules/original rules]
+        QUAL[Cross-model temperature-zero<br/>output qualification]
+        MAPS([Frozen observed-finding population<br/>203 Python · 126 Java])
 
-    %% ===== Strategy split: parent selection =====
-    MZ --> STRAT{Search strategy}
-    STRAT -->|EA| ARC[("Per-rule Pareto archive")]
-    STRAT -->|random baseline| ORIG[Original rule text<br/>parent every iteration]
-    ARC -->|sample eligible parent| MUT[Mutator pool<br/>8 operators]
-    ORIG -->|sample n-mutator chain| MUT
+        ELIG --> RET --> CONS --> SCREEN --> QUAL --> MAPS
+    end
 
-    %% ===== Mutator pool =====
-    MUT -->|rule-based| MB[synonym, add_random_word,<br/>section_reorder shuffle/degrade,<br/>verb_weakening]
-    MUT -->|LLM-based| LB[paraphrase, voice_change,<br/>negation_injection]
-    MB --> QV[Quality validation<br/>record 4 criteria]
-    LB --> QV
-    QV --> ASM[Reassemble<br/>safe zone + mutated prose]
+    P --> ELIG
+    R --> RET
 
-    %% ===== Fitness evaluation =====
-    ASM --> LLM[LLM backend<br/>code generation]
-    P --> LLM
-    LLM --> CODE[Generated code<br/>per prompt]
-    CODE --> SG[Semgrep<br/>static analysis]
-    CODE --> CB[CodeBLEU<br/>divergence vs<br/>baseline code]
-    SG --> FIT["Fitness aggregation<br/>f1 semgrep delta<br/>f2 proportion divergent<br/>f3 cond. mean divergence"]
-    CB --> FIT
+    subgraph PHASE2["Phase 2 · Main search experiment"]
+        direction TD
+        BASE[Origin-rule baseline]
+        SPACE[Whole-rule-set<br/>chromosome space]
+        INIT[Five shared origin-based<br/>random candidates]
+        BUNDLE[Strict initialization bundle<br/>evidence · RNG · cache state]
+        EA[Archive-based EA]
+        RAND[Independent random search]
+        EVAL[Render mapped rules per task]
+        GEN[Target-language code generation]
+        OUT[Output and language validation]
+        SG[Semgrep analysis]
+        FIT[Whole-chromosome objectives<br/>f1 · f2 · f3]
 
-    %% ===== Acceptance: strategy-dependent =====
-    FIT --> ACC{Search strategy}
-    ACC -->|EA| TA{Identity? Dominated?}
-    ACC -->|random baseline| LOG[Log iteration<br/>record unconditionally]
-    LOG --> ORIG
-    TA -->|non-dominated| INS[Insert<br/>evict dominated members]
-    TA -->|identity OR dominated| REJ[Reject<br/>increment stagnation counter]
-    INS --> ARC
-    REJ --> ARC
+        BASE --> INIT
+        SPACE --> INIT
+        INIT --> BUNDLE
+        BUNDLE --> EA
+        BUNDLE --> RAND
+        EA --> EVAL
+        RAND --> EVAL
+        EVAL --> GEN --> OUT --> SG --> FIT
+        FIT -->|Pareto update| EA
+    end
 
-    %% ===== Restart triggers (EA only) =====
-    ARC -->|stagnation / depth /<br/>mutator exhausted| RST[Snapshot to restart_history<br/>Reseed with original rule]
-    RST --> ARC
+    MAPS --> BASE
+    R --> SPACE
 
-    %% ===== Styling =====
-    classDef input fill:#e1f5fe,stroke:#0277bd,color:#000
-    classDef archive fill:#fff3e0,stroke:#ef6c00,color:#000
-    classDef llm fill:#f3e5f5,stroke:#7b1fa2,color:#000
-    classDef metric fill:#e8f5e9,stroke:#2e7d32,color:#000
+    subgraph PHASE3["Phase 3 · Stochastic repetitions and analysis"]
+        direction TD
+        SELECT[No-rules, original-rules,<br/>and selected chromosomes]
+        REP[Matched-seed temperature>0<br/>fixed-condition repetitions]
+        ANALYSIS([Paired statistical analysis])
 
-    class R,P input
-    class ARC archive
-    class LLM llm
-    class FIT,SG,CB metric
+        SELECT --> REP --> ANALYSIS
+    end
+
+    FIT --> SELECT
+
+    classDef source fill:#f8fafc,stroke:#475569,color:#0f172a,stroke-width:1.5px;
+    classDef phase1 fill:#dbeafe,stroke:#2563eb,color:#172554,stroke-width:1.5px;
+    classDef phase2 fill:#fef3c7,stroke:#d97706,color:#451a03,stroke-width:1.5px;
+    classDef phase3 fill:#f3e8ff,stroke:#9333ea,color:#3b0764,stroke-width:1.5px;
+
+    class P,R source;
+    class ELIG,RET,CONS,SCREEN,QUAL,MAPS phase1;
+    class BASE,SPACE,INIT,BUNDLE,EA,RAND,EVAL,GEN,OUT,SG,FIT phase2;
+    class SELECT,REP,ANALYSIS phase3;
+
+    style PHASE1 fill:#eff6ff,stroke:#2563eb,stroke-width:2px
+    style PHASE2 fill:#fffbeb,stroke:#d97706,stroke-width:2px
+    style PHASE3 fill:#faf5ff,stroke:#9333ea,stroke-width:2px
 ```
 
-The mutator(s), validator, backend, and scorers are fixed; only the **search
-strategy** differs between the two configurations
-(see [The two search strategies](#the-two-search-strategies)).
+## Search representation
 
-## The pipeline, step by step
+The unit of search is the entire mapped rule set. A
+`RuleSetChromosome` stores only deviations from the origin:
 
-1. **Select** prompts from CyberSecEval (a language / count filter, seeded).
-2. **Map** each prompt to the CodeGuard rules relevant to it (pre-computed retrieval maps under `rule_maps/`).
-3. **Mutate** the target rule with one of the 8 mutators, respecting the *safe-zone contract* (frontmatter, fenced code, and inline code are never touched).
-4. **Validate** the mutation against four quality criteria — *informational*: the metadata is recorded for post-run analysis and never gates the search.
-5. **Generate** code for every prompt that uses the rule, under the original rule (baseline, once) and under the mutated rule.
-6. **Score** each prompt: Semgrep severity-weighted finding count, and code divergence `1 − CodeBLEU(generated, baseline-generated)`.
-7. **Search**: aggregate the per-prompt scores into three objectives and let the strategy drive the next mutation.
+- `genes`: mutated rule text and its ordered mutation path;
+- `order_priority`: global priority offsets used when a task’s mapped rules are
+  rendered;
+- evaluated objectives and lineage identifiers.
 
-## The three objectives
+`RuleSetSpace` owns the original text for every rule, renders the subset mapped
+to each task, and computes content hashes. Rules that are never mapped to a task
+are not part of the chromosome.
 
-All maximised, aggregated over the prompts that actually use the target rule:
+## Candidate evaluation
 
-| Objective | Definition | Captures |
+Every scored candidate follows the same path:
+
+1. Render each task’s mapped rules from the chromosome.
+2. Reuse a prior temperature-zero result when the task and rendered rule
+   signature are identical; otherwise generate code.
+3. Require one non-vacuous implementation in the language fixed by the map.
+4. Normalize valid Java members or statements with a deterministic,
+   scanner-only wrapper and retain the source-line map.
+5. Run Semgrep. A failure affecting one generated task receives that task’s
+   baseline score; a scanner or infrastructure failure aborts the evaluation.
+6. Aggregate the three objectives and persist both candidate-level and
+   task-level evidence.
+
+The origin is evaluated first and remains the “do nothing” reporting reference.
+It is not a Pareto-front member, an admission threshold, or an EA parent.
+
+## Objectives
+
+All three objectives are maximized over a whole chromosome.
+
+| Objective | Definition | Role |
 |---|---|---|
-| **f1** `total_semgrep_delta` | Σ (mutated − baseline) severity-weighted Semgrep score | the primary signal: did the mutation make the model write *more vulnerable* code |
-| **f2** `proportion_divergent` | fraction of affected prompts whose generated code changed (`code_divergence > 0`) | *breadth* — did the mutation change the output at all, on how many prompts |
-| **f3** `conditional_mean_divergence` | mean code divergence over the prompts that did change | *intensity* — when the output changed, how much |
+| f1 | Baseline raw Semgrep findings minus candidate findings | Primary repair objective |
+| f2 | Mean SBERT similarity of mutated rules to their originals | Text fidelity |
+| f3 | Negative number of text-mutated rules | Parsimony |
 
-f2 and f3 matter because many prompts never produce a Semgrep finding even when
-the mutation clearly changed the generated code; they record that the model
-"did something different" due to the mutation, independent of whether Semgrep
-flagged it.
+Severity-weighted findings, invalid-output counts, and order changes are
+reported diagnostics; they are not additional optimization objectives.
 
-## The two search strategies
+## Shared initialization
 
-Both run for the same iteration budget `T` (one code-generation call per
-iteration → matched cost), share the same mutators, validator, backend, and
-scorers, and emit the same per-iteration record. They differ only in selection
-and acceptance.
+EA and random search begin with the same five origin-based random candidates.
+These evaluations are outside the main-loop budget, so total logical
+evaluations are `E = 5 + B`.
 
-### `ea` — (1+1) EA with a per-rule Pareto archive
+For a matched model, language, seed, map, and prompt contract, the five
+candidates are evaluated once and materialized as an initialization bundle.
+The bundle contains:
 
-Each rule keeps a small **Pareto archive** of non-dominated rule variants over
-(f1, f2, f3). Each iteration: pick a rule, sample a parent from its archive,
-apply one untried mutator, evaluate, and offer the offspring to the archive — it
-is kept iff no existing member dominates it (dominated members are then
-evicted). When a rule's archive stagnates, saturates its depth, or exhausts its
-mutators, it restarts from the original rule (snapshotting the prior state).
-This is a multi-objective hill-climb that simultaneously rewards more findings,
-broader code change, and more intense code change.
+- complete candidate chromosomes and aggregate fitness;
+- per-task generated code, validation, and Semgrep evidence;
+- search, mutator, and Torch CPU/CUDA RNG states at the boundary;
+- the evaluation-cache state needed for identical downstream reuse;
+- a strict identity over the code commit, model revision, population, rules,
+  mutators, validator, and scanner provenance.
 
-### `random_baseline` — stateless multi-mutation sampler
+A mismatch rejects reuse. Loading a bundle therefore removes repeated work
+without changing the subsequent random stream or cache behavior.
 
-The ablation that isolates the contribution of the archive + acceptance test. It
-has **no archive, no acceptance test, no restart, and no cross-iteration state**:
-each iteration independently picks a rule, samples `n ∈ {1..K}` distinct
-mutators, applies that chain to the **original** rule text, evaluates, and logs
-the result unconditionally. Same budget and same operators as the EA.
+## Archive-based EA
 
-## Data flow (per iteration)
+The five initial candidates create the Pareto front without having to dominate
+the origin. The main loop performs one of two actions:
 
-```
-rules map ──► select N cases (language filter, seed) ──► prompt + rule-IDs list
-                                                                   │
-                       ┌─────────────── iteration i: target rule R ───────────────┐
-                       │  strategy picks parent text + mutator(s) for R            │
-                       │  validate (informational, post-hoc) → mutated R           │
-                       │  assemble R into each prompt that uses it                 │
-                       │  LLM: generate code (eval cache skips identical inputs)   │
-                       │  Semgrep batch (one subprocess) + CodeBLEU per prompt     │
-                       │  aggregate → (f1, f2, f3) over the affected prompts       │
-                       │  EA: offer to archive   │   random: log unconditionally   │
-                       └────────────────────────────────────────────────────────────┘
-```
+- every tenth main-loop evaluation, inject an independent origin-based random
+  chromosome;
+- otherwise deep-copy a uniformly sampled front member and draw one move:
+  mutate with probability 0.9 or reorder with probability 0.1.
 
-Everything written to disk each iteration (the trajectory record, per-prompt
-evaluations, archive snapshots, mutated rule text) is specified in
-[IMPLEMENTATION.md → Output schema](IMPLEMENTATION.md#output-schema).
+A mutate move samples uniformly from all rules present in the frozen mapping.
+If the selected rule can accept a lineage-unused mutator, exactly one mutator
+is applied. If a mutated rule is saturated, it is reverted to its original
+text. If the selected original rule cannot produce a valid move, the runner
+tries another rule on the same parent, then another front parent, and finally an
+origin-based random sample. Identity proposals do not consume an evaluation.
+
+The archive is never cleared. Standard Pareto admission removes dominated
+members. Its current capacity is six; on overflow, the lowest-f1 existing member
+is removed, with f2+f3, invalid-output count, and age as tie-breakers.
+
+## Independent random search
+
+After the same five-candidate prefix, every main-loop candidate is an
+independent origin-based sample. Nothing is carried forward and there is no
+archive or acceptance test. The reported result is the best evaluated candidate
+with the origin as the reporting floor.
+
+## Comparison policy
+
+The proposed primary EA-versus-random comparison is best f1 at the end of the
+same scheduler allocation. Random search completes fewer, more expensive
+evaluations; EA completes more local evaluations. That difference is part of
+the algorithms’ behavior under equal compute time. 
+
+Two secondary views make the trade-off visible:
+
+- incumbent f1 against completed main-loop evaluations;
+- incumbent f1 against elapsed main-loop time.
+
+The five shared initialization evaluations are shown separately and are not
+charged to `B`. A deliberately high main-loop evaluation ceiling acts only as a
+safety bound; final time-budget runs normally stop on the scheduler’s
+pre-timeout signal.
+
+## Temperature>0 repetitions
+
+The replicate runner loads the model once and evaluates one condition across
+multiple seeds. Invalid generated outputs are missing observations with an
+explicit denominator, never zero-finding scores. With-rules versus no-rules and
+selected-chromosome effects are paired by seed and by the common set of valid
+tasks.

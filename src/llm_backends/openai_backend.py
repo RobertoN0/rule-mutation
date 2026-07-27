@@ -1,9 +1,8 @@
 """
 OpenAI LLM backend implementation.
 
-Direct OpenAI Chat Completions API. Shares the OpenAI SDK with the Groq /
-OpenRouter backends, but points at `api.openai.com`. Suitable for the
-replication path when reviewers want to use GPT-4o-mini, GPT-4o, or similar.
+Direct OpenAI Chat Completions API. Suitable for the replication path when
+reviewers want to use GPT-4o-mini, GPT-4o, or a compatible current model.
 
 Notes on quirks handled here:
 - Reasoning models (the `o1*` / `o3*` family and `gpt-5*-thinking` variants)
@@ -153,8 +152,7 @@ class OpenAIBackend(LLMBackend):
 
         Args:
             system: System prompt (string, or list of content blocks which we
-                flatten into a single string — OpenAI accepts both formats but
-                we mirror Groq's behaviour for consistency).
+                flatten into a single string for the SDK message contract).
             messages: List of {"role": ..., "content": ...} dicts.
             **kwargs: Optional overrides: `temperature`, `max_tokens`,
                 `top_p`, `stop`, etc.
@@ -259,6 +257,6 @@ def create_openai_backend(
     model: str = "gpt-4o-mini",
     **kwargs: Any,
 ) -> OpenAIBackend:
-    """Convenience factory mirroring create_claude_backend / create_groq_backend."""
+    """Build an OpenAI backend from an :class:`LLMConfig`."""
     config = LLMConfig(model=model, **kwargs)
     return OpenAIBackend(config)

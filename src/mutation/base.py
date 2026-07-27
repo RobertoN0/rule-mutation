@@ -42,9 +42,8 @@ class MutationResult:
         """Fraction of the text that changed (0.0 = identical, 1.0 = completely different).
 
         Uses word-level sequence matching so that reworded or reordered
-        passages produce meaningful nonzero values.  The previous
-        character-*set* Jaccard was always ≈0 for any two English texts
-        because they share the same ~70 characters.
+        passages produce meaningful nonzero values; character-set overlap
+        cannot distinguish ordinary English passages reliably.
         """
         if not self.original:
             return 1.0 if self.mutated else 0.0

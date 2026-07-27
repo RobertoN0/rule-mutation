@@ -1,13 +1,20 @@
 """
-Optimizer module for SBST hill climbing.
+Search over rule-set chromosomes.
 
-Implements search algorithms to find worst-case rule mutations.
+* ``search``     — the algorithms: archive EA (random init + periodic injection)
+                   and the i.i.d. random-search baseline, over one shared
+                   random-chromosome sampler.
+* ``engine``     — the experiment engine around them: baseline evaluation, the
+                   chromosome-evaluation seam (LLM + Semgrep + cache), and
+                   result persistence.
+* ``chromosome`` — the representation: rule-text alleles + global rule order,
+                   and the single Pareto archive (conservative objectives).
 """
 
-from .hill_climber import (
-    HillClimber,
-    HillClimbResult,
-    HillClimbConfig,
+from .engine import (
+    ExperimentEngine,
+    SearchResult,
+    SearchConfig,
     TestPrompt,
     EvaluationResult,
     IterationResult,
@@ -17,9 +24,9 @@ from .hill_climber import (
 from ..evaluation.rule_mapping import PromptWithRules
 
 __all__ = [
-    "HillClimber",
-    "HillClimbResult",
-    "HillClimbConfig",
+    "ExperimentEngine",
+    "SearchResult",
+    "SearchConfig",
     "TestPrompt",
     "EvaluationResult",
     "IterationResult",

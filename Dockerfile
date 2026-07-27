@@ -19,10 +19,10 @@
 #     --env-file .env \
 #     -v "$(pwd)/results:/app/results" \
 #     codeguard-sbst:replication \
-#     python scripts/experiments/run_with_rules_map.py \
-#       --backend claude --optimizer random_baseline \
-#       --rules-map rule_maps/map_qwen32b_python_java.json \
-#       --n-cases 2 --iterations 3 --languages python --seed 42 \
+#     python scripts/experiments/run_experiment.py \
+#       --backend claude --optimizer random_search --enable-validation \
+#       --rules-map rule_maps/qualified/final_search_map_qwen_python.json \
+#       --n-cases 2 --main-loop-budget 3 --languages python --seed 42 \
 #       --mutators synonym_replacement add_random_word verb_weakening \
 #       --output-dir /app/results/docker_smoke
 # =============================================================================
@@ -47,6 +47,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     UV_LINK_MODE=copy \
     UV_PROJECT_ENVIRONMENT=/app/.venv \
+    NLTK_DATA=/usr/local/share/nltk_data \
     PATH="/app/.venv/bin:$PATH" \
     PYTHONPATH="/app"
 
@@ -61,6 +62,9 @@ COPY pyproject.toml uv.lock .python-version ./
 # --no-dev   — skip dev extras (pytest, ruff)
 # (Default install: no extras, so the [gpu] group is NOT pulled in.)
 RUN uv sync --frozen --no-dev
+RUN python -m nltk.downloader -d "$NLTK_DATA" \
+        wordnet omw-1.4 \
+        averaged_perceptron_tagger averaged_perceptron_tagger_eng
 
 # --- Source layer ----------------------------------------------------------
 COPY src                 ./src

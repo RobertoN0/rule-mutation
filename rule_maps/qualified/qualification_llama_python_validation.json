@@ -1,0 +1,25 @@
+{
+  "artifact_type": "qualification_validation",
+  "run_dir": "/home/rnegro/thesis/rule-mutation/experiments/final_map_pipeline_20260724/phase4_qualification/llama_python",
+  "status": "VALID",
+  "issues": [],
+  "warnings": [],
+  "manifest_sha256": "b03fc282ee31c143d5aebe4b54d713355431acb738a274d7121e11b7fa5f5b61",
+  "artifact_sha256": {
+    "run_config": "27f8a55527c7247b6caa3acd3c9507ff97d174dc2128e6056bc091847eedf1bc",
+    "qualification_manifest": "b03fc282ee31c143d5aebe4b54d713355431acb738a274d7121e11b7fa5f5b61",
+    "qualification_generations": "9f5f16984f5ed7ef50ac7d2e3629e3154a398aad191975b45303d8b0edb091b3",
+    "qualification_tasks": "788bf9019be3c9490c42832d8b195880a01a7cbbcd73dd5fd034fa588df5e23b",
+    "semgrep_debug": "9a18610f2d543779deea7106a5d337a9a435a62c371259e373eb9a6090ebf918",
+    "evaluation_failures": "fc2afeedda7fb151f5c53c4b5dc6aedf2e546b8d7e1080c669185407fe239693"
+  },
+  "counts": {
+    "prompts": 215,
+    "valid": 212,
+    "excluded": 3,
+    "statuses": {
+      "valid": 212,
+      "syntax_invalid": 3
+    }
+  }
+}

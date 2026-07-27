@@ -9,6 +9,7 @@ return a result object with ``p`` = None and a ``note`` rather than raising.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import sqrt
 from typing import Sequence
 
 import numpy as np
@@ -81,6 +82,129 @@ def sign_test(deltas: Sequence[float]) -> TestResult:
                       note=f"pos={pos}, neg={neg}")
 
 
+def ttest_paired(baseline: Sequence[float], treatment: Sequence[float]) -> TestResult:
+    """Paired t-test on paired observations (e.g. per-seed totals, norules vs withrules).
+
+    Parametric counterpart to the sign / Wilcoxon tests: uses the magnitude of each
+    paired difference and assumes the differences are roughly normal. Degrades
+    gracefully on <2 pairs or zero-variance differences (returns p=None + note).
+    Statistic sign follows ``treatment - baseline`` (negative → treatment lower).
+    """
+    from scipy import stats
+
+    a, b = np.asarray(baseline, float), np.asarray(treatment, float)
+    n = len(a)
+    if n < 2:
+        return TestResult("Paired t-test", None, None, n, note="need >=2 pairs")
+    diffs = b - a
+    if np.allclose(diffs, diffs[0]):
+        return TestResult("Paired t-test", None, None, n,
+                          note="zero variance in differences (all pairs identical delta)")
+    res = stats.ttest_rel(b, a)
+    return TestResult("Paired t-test", float(res.statistic), float(res.pvalue), n)
+
+
+def friedman_test(*conditions: Sequence[float]) -> TestResult:
+    """Friedman test — non-parametric repeated-measures ANOVA across >=3 related
+    conditions measured on the same blocks (RQ1/RQ3 aggregate across coding tasks).
+
+    Each ``conditions[i]`` is one condition's value per block (e.g. per coding
+    task), so all conditions must share the same length (the blocks are matched
+    rows). With exactly 2 conditions Friedman is undefined and reduces to the
+    Wilcoxon/sign test — use those instead. Degrades gracefully (p=None + note)
+    on <3 conditions, mismatched lengths, <2 blocks, or zero within-block variance
+    (all conditions identical on every block).
+    """
+    from scipy import stats
+
+    k = len(conditions)
+    arrs = [np.asarray(c, float) for c in conditions]
+    n = arrs[0].size if arrs else 0
+    if k < 3:
+        return TestResult("Friedman", None, None, n,
+                          note=f"need >=3 conditions (got {k}); 2 conditions -> use Wilcoxon/sign")
+    if any(a.size != n for a in arrs):
+        return TestResult("Friedman", None, None, n, note="conditions have mismatched lengths")
+    if n < 2:
+        return TestResult("Friedman", None, None, n, note="need >=2 blocks (tasks)")
+    stacked = np.vstack(arrs)               # k x n
+    if np.allclose(stacked.max(axis=0), stacked.min(axis=0)):
+        return TestResult("Friedman", None, None, n,
+                          note="no within-block variance (all conditions identical on every task)")
+    try:
+        res = stats.friedmanchisquare(*arrs)
+        return TestResult("Friedman", float(res.statistic), float(res.pvalue), n,
+                          note=f"k={k} conditions, n={n} blocks")
+    except ValueError as e:
+        return TestResult("Friedman", None, None, n, note=str(e))
+
+
+def mann_whitney_u(a: Sequence[float], b: Sequence[float],
+                   alternative: str = "two-sided") -> TestResult:
+    """Mann-Whitney U on two INDEPENDENT samples — the RQ3 primary
+    (EA best_f1 vs random best_f1 across seeds).
+
+    Use this, not a paired test: at a fixed prompt set the per-seed runs are
+    independent draws, not matched pairs (a shared seed integer induces no common
+    nuisance once the prompt set is constant). Note the small-n floor: n1=n2=3 can
+    reach p=0.10 at best, n1=n2=4 → 0.029, n1=n2=5 → 0.0079 — report the effect
+    size (``vargha_delaney_a12``) alongside, which is informative at any n.
+    """
+    from scipy import stats
+
+    x, y = np.asarray(a, float), np.asarray(b, float)
+    n = len(x) + len(y)
+    if len(x) == 0 or len(y) == 0:
+        return TestResult("Mann-Whitney U", None, None, n, note="empty sample")
+    try:
+        res = stats.mannwhitneyu(x, y, alternative=alternative)
+        return TestResult("Mann-Whitney U", float(res.statistic), float(res.pvalue), n,
+                          note=f"n_a={len(x)}, n_b={len(y)}, alt={alternative}")
+    except ValueError as e:
+        return TestResult("Mann-Whitney U", None, None, n, note=str(e))
+
+
+def vargha_delaney_a12(a: Sequence[float], b: Sequence[float]) -> tuple[float, str]:
+    """Vargha-Delaney Â₁₂ — the standardized effect size Arcuri & Briand require.
+
+    Â₁₂ = P(a > b) + 0.5·P(a == b): the probability a randomly chosen run from
+    ``a`` beats one from ``b``. 0.5 = no difference; >0.5 = ``a`` tends larger.
+    Magnitude (distance from 0.5): <0.06 negligible, <0.14 small, <0.21 medium,
+    else large. Returns (a12, magnitude). Meaningful even at tiny n.
+    """
+    from scipy import stats
+
+    x, y = np.asarray(a, float), np.asarray(b, float)
+    m, k = len(x), len(y)
+    if m == 0 or k == 0:
+        return (float("nan"), "n/a")
+    ranks = stats.rankdata(np.concatenate([x, y]))
+    r1 = float(ranks[:m].sum())
+    a12 = (r1 / m - (m + 1) / 2) / k
+    d = abs(a12 - 0.5)
+    mag = ("negligible" if d < 0.06 else "small" if d < 0.14
+           else "medium" if d < 0.21 else "large")
+    return (float(a12), mag)
+
+
+def cliffs_delta(treatment: Sequence[float], baseline: Sequence[float]) -> tuple[float, str]:
+    """Cliff's delta — non-parametric effect size for the Stage-2 replicate
+    comparison (pairs with Wilcoxon). δ = P(t>b) − P(t<b) ∈ [−1, 1]; equals
+    2·Â₁₂ − 1. |δ| thresholds (Romano 2006): <0.147 negligible, <0.33 small,
+    <0.474 medium, else large. Returns (delta, magnitude).
+    """
+    t, b = np.asarray(treatment, float), np.asarray(baseline, float)
+    if t.size == 0 or b.size == 0:
+        return (float("nan"), "n/a")
+    gt = int((t[:, None] > b[None, :]).sum())
+    lt = int((t[:, None] < b[None, :]).sum())
+    delta = (gt - lt) / (t.size * b.size)
+    ad = abs(delta)
+    mag = ("negligible" if ad < 0.147 else "small" if ad < 0.33
+           else "medium" if ad < 0.474 else "large")
+    return (float(delta), mag)
+
+
 def bootstrap_ci(outcomes: Sequence[float], n_boot: int = 10000, ci: float = 0.95,
                  seed: int = 0) -> tuple[float, float, float]:
     """Bootstrap CI for the mean of a sample (e.g. per-mutator effective rate).
@@ -99,3 +223,19 @@ def bootstrap_ci(outcomes: Sequence[float], n_boot: int = 10000, ci: float = 0.9
     lo = float(np.quantile(means, (1 - ci) / 2))
     hi = float(np.quantile(means, 1 - (1 - ci) / 2))
     return (point, lo, hi)
+
+
+def wilson_ci(successes: int, n: int, z: float = 1.959963984540054) -> tuple[float, float, float]:
+    """Wilson score interval for a binomial proportion.
+
+    Returns (point_estimate, lo, hi). Empty samples return NaN values.
+    """
+    if n <= 0:
+        return (float("nan"), float("nan"), float("nan"))
+    phat = successes / n
+    denom = 1 + z * z / n
+    centre = phat + z * z / (2 * n)
+    margin = z * sqrt((phat * (1 - phat) + z * z / (4 * n)) / n)
+    lo = (centre - margin) / denom
+    hi = (centre + margin) / denom
+    return (phat, lo, hi)

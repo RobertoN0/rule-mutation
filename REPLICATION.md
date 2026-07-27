@@ -11,8 +11,9 @@ The framework supports two execution paths:
 | **A. API-based** (this doc) | Any laptop / VM, CPU only | Anthropic / OpenAI API | ✅ Yes |
 | **B. Local GPU** | DelftBlue A100 nodes | HuggingFace + transformers | ❌ Cluster-only |
 
-Both paths run the *same* mutation → generate → Semgrep → CodeBLEU → search
-pipeline and write the *same* output schema. Only the
+Both paths run the *same Phase 2 search workflow*: baseline → mutation →
+generation → output validation → Semgrep → search. They write the same
+output schema. Only the
 code-generation backend differs. Everything below refers to **Path A**.
 
 ---
@@ -60,6 +61,8 @@ $EDITOR .env       # fill in ANTHROPIC_API_KEY (or OPENAI_API_KEY)
 
 ```bash
 uv sync                                              # API-only deps into .venv/
+uv run python -m nltk.downloader wordnet omw-1.4 \
+  averaged_perceptron_tagger averaged_perceptron_tagger_eng
 uv run python scripts/validation/validate_claude.py  # one ~$0.0001 Claude call
 ```
 
@@ -78,33 +81,36 @@ docker run --rm --env-file .env codeguard-sbst:replication
 
 ## 4. Tiny end-to-end run
 
-Once the smoke test passes, reproduce a short search run (the default rules map
-covers Python + Java; `--languages python` keeps it small and cheap):
+Once the smoke test passes, reproduce a short search run with the final Python
+map:
 
 ```bash
 # uv:           prefix with `uv run`
 # activated venv:  source .venv/bin/activate first
-python scripts/experiments/run_with_rules_map.py \
-  --backend claude --optimizer ea \
-  --rules-map rule_maps/map_qwen32b_python_java.json \
-  --n-cases 2 --iterations 5 \
-  --archive-cap 6 --restart-h 8 --max-depth-ea 4 \
+python scripts/experiments/run_experiment.py \
+  --backend claude --optimizer ea --enable-validation \
+  --rules-map rule_maps/qualified/final_search_map_qwen_python.json \
+  --n-cases 2 --main-loop-budget 2 \
+  --archive-cap 6 --max-depth 4 \
+  --ea-injection-every 10 --random-max-changes 10 \
   --mutators synonym_replacement add_random_word verb_weakening \
              section_reorder_shuffle section_reorder_degrade \
   --languages python --seed 42 \
   --output-dir experiments/results/replication_smoke
 ```
 
-This makes ~6 API calls (a baseline pass + 5 iterations, minus eval-cache hits)
-and writes a complete run directory (see §6). To run the random-baseline
-ablation instead, swap `--optimizer random_baseline` and replace the EA knobs
-with `--max-mutations-per-iter 4`.
+This evaluates a five-candidate initialization followed by two main-loop
+candidates and writes a complete run directory (see §6). The number of API
+calls depends on the task count and evaluation-cache reuse. To run independent
+random search instead, use `--optimizer random_search` (same initialization and
+sampler, no archive).
 
-To also record the (informational, post-hoc) quality-validation metadata — SBERT
-similarity, instruction adherence, keyword retention, etc. — add
-`--enable-validation`. Nothing is rejected; the metadata
-is written into `iterations.jsonl` and can be summarised with
-`scripts/analyze/validation_audit.py` (see §5).
+`--enable-validation` is **required** on every real run: it computes the f2
+rule-fidelity objective (SBERT similarity of each mutated rule to its original)
+and records the post-hoc quality metadata (instruction adherence, keyword
+retention, etc.) into `evaluations.jsonl` — nothing is rejected. Only `--dry-run`
+may omit it. The run validator checks that the resulting artifacts
+reconcile before they are used as evidence.
 
 Reproduce that exact run from its recorded config:
 
@@ -116,25 +122,28 @@ python scripts/experiments/rerun_from_config.py experiments/results/replication_
 > **PATH note:** the pipeline shells out to `semgrep`. Either `source
 > .venv/bin/activate` (recommended) or run via `uv run …`. If you invoke
 > `.venv/bin/python` directly, prefix with `PATH="$PWD/.venv/bin:$PATH"` so the
-> subprocess can find `semgrep`; otherwise scans fail with "Semgrep not
-> installed" (the run still completes, but every finding count is 0). The
+> subprocess can find `semgrep`; otherwise the evaluator aborts the run instead
+> of recording a failed scan as zero findings. The
 > `semgrep_debug/semgrep_debug.jsonl` trace distinguishes a failed scan
 > (`error != null`) from a genuinely clean scan (`error: null`).
 
 ---
 
-## 5. Generate report figures
+## 5. Inspect the results
+
+A completed run records everything needed for analysis directly on disk (see
+§6). The `evaluations.jsonl` trajectory and the `intermediate/*.jsonl` per-task
+evaluations are plain JSON lines you can read without any extra tooling.
+
+For search-run health, use:
 
 ```bash
-uv sync --extra analysis     # matplotlib + scipy (run on top of the base install)
-uv run python scripts/analyze/analyze_run.py experiments/results/replication_smoke
+.venv/bin/python scripts/analyze/validate_search_run.py --write <run_dir>
 ```
 
-Outputs land in `experiments/results/replication_smoke/analysis/` as a
-`summary.md`, CSV tables, and PNG figures. See
-[README.md → Analyze results](README.md#analyze-results) for the other scripts
-(`compare_runs.py` for cross-run comparison, `validation_audit.py` for
-`--enable-validation` runs).
+This is a reconciliation validator, not the final multi-run thesis analyzer:
+it checks artifact consistency, raw f1, imputation, map/rule provenance, and
+Semgrep-debug coverage.
 
 > `uv sync --extra analysis` replaces the resolved set, so it removes the `dev`
 > extras (pytest/ruff) if they were installed. To keep everything, sync all the
@@ -146,15 +155,18 @@ Outputs land in `experiments/results/replication_smoke/analysis/` as a
 
 ```
 experiments/results/<name>/
-├── run_config.json                  # every CLI arg + git SHA + schema_version: 2
-├── hillclimb_summary_*.json         # run-level totals, mutator stats, cache hygiene
-├── iterations.jsonl                 # one record per search iteration (the trajectory)
-├── archive_snapshots/iterNNNN.json  # EA only — per-rule Pareto archive every 20 iters + final
-├── intermediate/                    # per-prompt evaluation records
+├── run_config.json                  # arguments + code/model/map/scanner provenance
+├── search_summary.json              # termination, runtime, LLM/mutator/cache accounting
+├── evaluations.jsonl                # attempts and completed candidate evaluations
+├── archive_snapshots/evaluation_NNNN.json # EA only — periodic and final front
+├── intermediate/                    # per-task evaluation records
 │   ├── baseline.jsonl
-│   └── {ea_iter0001,rand_iter0001,…}.jsonl
-├── mutated_rules/iterNNN/           # mutated rule text (.md) + meta.json (mutation_chain, changes)
+│   └── evaluation_NNNN.jsonl
+├── mutated_rules/evaluation_NNNN/   # mutated rule text (.md) + evaluation metadata
 ├── semgrep_debug/semgrep_debug.jsonl  # per-scan trace (failure vs zero-findings)
+├── evaluation_manifest.json         # exact task set + map-fixed analysis language
+├── evaluation_failures.jsonl        # present only when a fatal evaluation was recorded
+├── search_validation.json           # validator result when --write was used
 └── run.log                          # stdout/stderr tee
 ```
 
@@ -168,12 +180,12 @@ The full field-level schema is documented in
 `pyproject.toml` declares the base dependencies plus optional extras:
 
 - **Default (`uv sync`)** — the API path: `anthropic`, `openai`, `semgrep`,
-  `codebleu` + tree-sitter grammars, `sentence-transformers` (for the optional
+  `tree-sitter-java` for Java qualification, `sentence-transformers` (for the
   validator), `datasets`, `pandas`. Pinned exactly in `uv.lock` (committed); the
   Dockerfile consumes the same lockfile via `uv sync --frozen --no-dev`.
 - **`--extra gpu`** — `accelerate`, `bitsandbytes` (+ a CUDA torch reinstall on
   DelftBlue). **Only needed for Path B.**
-- **`--extra analysis`** — `matplotlib`, `scipy` for the report scripts.
+- **`--extra analysis`** — `scipy` for paired statistical analysis.
 - **`--extra dev`** — `pytest`, `ruff`.
 
 ---
@@ -182,7 +194,7 @@ The full field-level schema is documented in
 
 **Deterministic given the same `--seed`:**
 
-- Mutator behaviour and the search trajectory (rule/mutator draws).
+- Rule-based mutator behaviour and the seeded search draws.
 - Test-case selection order (`--selection first`, or `--selection random --seed N`).
 - Semgrep findings on identical generated source (Semgrep is deterministic).
 - The eval cache: identical assembled rule text → reused code + findings.
@@ -196,7 +208,19 @@ The full field-level schema is documented in
   the model.
 - Byte-equality of generated code across provider/model versions.
 
-`--seed`, the model, and the git SHA are recorded in `run_config.json`.
+`--seed`, the exact model revision (for the local backend), library versions,
+the Git commit, map/rule hashes, and Semgrep provenance are recorded in
+`run_config.json`. For the final local-model matrix, the shared initialization
+bundle additionally restores the search, mutator, and Torch RNG states at the
+five-candidate boundary.
+
+The output-token cap is fixed at 4096 and recorded in `run_config.json`.
+`finish_reason` is saved per task. The final maps carry the reviewed eligibility,
+stochastic-screening, and temperature-zero qualification evidence that fixes
+their task membership and analysis language. If one
+candidate output is invalid, that task receives its baseline score; an invalid
+baseline or evaluator/system error aborts rather than being counted as a clean
+zero-finding result.
 
 ---
 
@@ -205,9 +229,9 @@ The full field-level schema is documented in
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | `ANTHROPIC_API_KEY is not set` | `.env` missing or unfilled | `cp .env.example .env`, add the key |
-| `Semgrep not installed or not in PATH` (and findings all 0) | venv not active when calling `.venv/bin/python` directly | `source .venv/bin/activate`, or run via `uv run …`, or prefix `PATH="$PWD/.venv/bin:$PATH"` |
+| `Semgrep not installed or not in PATH` | venv not active when calling `.venv/bin/python` directly | `source .venv/bin/activate`, or run via `uv run …`, or prefix `PATH="$PWD/.venv/bin:$PATH"`; the run aborts rather than recording zero findings |
+| `Mutator preflight failed for 'synonym_replacement'` | WordNet or the NLTK POS tagger is absent (compute nodes cannot fetch it) | On an internet-connected/login node run `python -m nltk.downloader wordnet omw-1.4 averaged_perceptron_tagger averaged_perceptron_tagger_eng`; the experiment aborts before model inference instead of silently using identity mutations |
 | `pytest` missing after `uv sync --extra analysis` | uv pruned the `dev` extra | `uv sync --extra dev --extra analysis` (combine extras) |
 | `FileNotFoundError: project-codeguard/...` | submodule not initialised | `git submodule update --init --recursive` |
 | Docker build fails on `COPY project-codeguard` | same — submodule empty | initialise the submodule before `docker build` |
 | Rate-limited (429 / 529) | provider throttling | wait and retry; the run saves all completed iterations and exits gracefully |
-| `WARNING: There is no reference data-flows extracted…` (only visible in old logs) | CodeBLEU's data-flow extractor can't parse a few prompts | harmless and **silenced by default** (a root-logger filter in `composite_fitness.py`); that prompt's code-divergence simply omits the data-flow sub-score. Semgrep findings are unaffected. |

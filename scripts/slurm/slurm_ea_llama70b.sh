@@ -11,47 +11,47 @@
 #SBATCH --error=/home/rnegro/thesis/rule-mutation/logs/%j_%x.err
 # Graceful pre-timeout: deliver SIGUSR1 to the batch shell (B:) 300s before the
 # wall-time SIGKILL so the run can save final results. Override per-job for
-# long-iteration (full-population) runs, e.g.:  sbatch --signal=B:USR1@700 ...
+# long-evaluation (full-population) runs, e.g.: sbatch --signal=B:USR1@700 ...
 #SBATCH --signal=B:USR1@300
 
 #############################################################################
-# SBST Experiment: (1+1) EA + Pareto archive OR random_baseline.
+# SBST Experiment: archive EA (shared init + injection) OR i.i.d. random search.
 #
 # MODEL: meta-llama/Llama-3.3-70B-Instruct, 4-bit NF4 quantization.
 #   70B-4bit needs ~35 GB weights + KV cache → fits on ONE A100 80GB.
 #   bf16 compute dtype (Llama-3.3 is bf16-native; fp16 dequant can overflow).
 #
-# Wall-time: NOT yet calibrated for this model. The 32B-fp16 baseline was
-#   ~2.7 min/iteration (25 cases, gpu-a100). 70B-4bit is expected ~1.5-2x
-#   slower per token, plus a longer (~3-5 min) weight-load step. ALWAYS run a
-#   smoke test first and read the per-iteration timing before sizing a full run.
+# Choose wall time at submission from the run objective. Use a short smoke, an
+# extended behavior validation, or the supervisor-approved final allocation.
+# Always calibrate from the same frozen population/model; old subset timings
+# are not reliable for final-run sizing.
 #
 # Mirrors scripts/slurm/slurm_ea_qwen32b.sh; only the model, default
 # quantization (4bit) and compute dtype (bf16) differ. OPTIMIZER ∈ {ea,
-# random_baseline}.
+# random_search}.
 #
 # Usage:
-#   # Smoke test FIRST — 2 cases, 5 iters (validates load + a few iterations)
-#   N_CASES=2 N_ITERATIONS=5 \
+#   # Smoke test FIRST — 2 cases, 5 main-loop evaluations
+#   N_CASES=2 MAIN_LOOP_BUDGET=5 \
 #     sbatch --time=0:40:00 --job-name="ea_llama_smoke" \
 #            scripts/slurm/slurm_ea_llama70b.sh
 #
-#   # Default: (1+1) EA, 16 cases, 10 iterations, archive_cap=6, restart_h=8.
+#   # Default: EA, 16 cases, 5 shared initialization + 10 main-loop evaluations.
 #   sbatch scripts/slurm/slurm_ea_llama70b.sh
 #
-#   # Full sweep — 200 iters python (bump --time after smoke-test calibration!)
-#   N_CASES=25 N_ITERATIONS=200 LANGUAGES=python SELECTION=random \
-#     sbatch --time=20:00:00 --job-name="ea_llama_python_200" \
+#   # Full-population final candidate. Wall time is the primary budget.
+#   N_CASES=all MAIN_LOOP_BUDGET="$EVALUATION_CEILING" LANGUAGES=python SELECTION=first \
+#     sbatch --time="$APPROVED_SLURM_TIME" --job-name="ea_llama_python_final" \
 #            scripts/slurm/slurm_ea_llama70b.sh
 #
-#   # Full sweep — 200 iters java
-#   N_CASES=25 N_ITERATIONS=200 LANGUAGES=java SELECTION=random \
-#     sbatch --time=18:00:00 --job-name="ea_llama_java_200" \
+#   # Full-population Java
+#   N_CASES=all MAIN_LOOP_BUDGET="$EVALUATION_CEILING" LANGUAGES=java SELECTION=first \
+#     sbatch --time="$APPROVED_SLURM_TIME" --job-name="ea_llama_java_final" \
 #            scripts/slurm/slurm_ea_llama70b.sh
 #
-#   # Pure random baseline for ablation — python
-#   OPTIMIZER=random_baseline N_CASES=25 N_ITERATIONS=200 LANGUAGES=python SELECTION=random \
-#     sbatch --time=18:00:00 --job-name="rand_llama_python_200" \
+#   # Independent random-search comparison — Python
+#   OPTIMIZER=random_search N_CASES=all MAIN_LOOP_BUDGET="$EVALUATION_CEILING" LANGUAGES=python SELECTION=first \
+#     sbatch --time="$APPROVED_SLURM_TIME" --job-name="rand_llama_python_final" \
 #            scripts/slurm/slurm_ea_llama70b.sh
 #
 #   # Override quantization back to fp16 (will NOT fit 70B on one 80GB GPU;
@@ -61,45 +61,60 @@
 
 set -e
 
-# ─────── Optimizer (new) ────────────────────────────────────────────────────
-OPTIMIZER=${OPTIMIZER:-ea}                # "ea" | "random_baseline"
-ARCHIVE_CAP=${ARCHIVE_CAP:-6}             # Pareto archive size per rule (EA)
-RESTART_H=${RESTART_H:-8}                 # stagnation threshold (EA)
-MAX_DEPTH_EA=${MAX_DEPTH_EA:-4}           # per-entry depth cap (EA)
-MAX_MUTATIONS_PER_ITER=${MAX_MUTATIONS_PER_ITER:-4}  # chain length K (random_baseline)
+# ─────── Optimizer ───────────────────────────────────────────────────────────
+OPTIMIZER=${OPTIMIZER:-ea}                # "ea" | "random_search"
+ARCHIVE_CAP=${ARCHIVE_CAP:-6}             # Pareto archive size (EA)
+MAX_DEPTH=${MAX_DEPTH:-4}                 # per-rule stacked-mutation depth cap (both arms)
+RANDOM_MAX_CHANGES=${RANDOM_MAX_CHANGES:-10}  # sampler K: n_changes in [1,K]
+EA_INJECTION_EVERY=${EA_INJECTION_EVERY:-10}  # inject a random sample every N EA iters (0=off)
+ORDER_MOVE_WEIGHT=${ORDER_MOVE_WEIGHT:-0.1}   # rule-order move probability
 
-# ─────── Standard config (unchanged) ────────────────────────────────────────
+# ─────── Standard config ─────────────────────────────────────────────────────
 N_CASES=${N_CASES:-16}
-N_ITERATIONS=${N_ITERATIONS:-10}
+MAIN_LOOP_BUDGET=${MAIN_LOOP_BUDGET:-10}
 QUANTIZATION=${QUANTIZATION:-4bit}        # 70B fits on one 80GB A100 only at 4bit
 BNB_COMPUTE_DTYPE=${BNB_COMPUTE_DTYPE:-bfloat16}  # Llama-3.3 is bf16-native
+TEMPERATURE=${TEMPERATURE:-0.0}
 SEED=${SEED:-42}
 SELECTION=${SELECTION:-first}
 LANGUAGES=${LANGUAGES:-}
 SEMGREP_RULESET=${SEMGREP_RULESET:-/scratch/$USER/semgrep-rules/security-audit}
 SEMGREP_TIMEOUT_SECONDS=${SEMGREP_TIMEOUT_SECONDS:-180}
 SEMGREP_JOBS=${SEMGREP_JOBS:-4}
-# Mutator pool: the full 8-mutator set. EA and random_baseline do their own
+# Mutator pool: the full 8-mutator set. EA and random_search do their own
 # constrained random selection over this pool (no pool-level strategy).
 MUTATORS=${MUTATORS:-"synonym_replacement add_random_word verb_weakening negation_injection voice_change paraphrase section_reorder_shuffle section_reorder_degrade"}
-ENABLE_VALIDATION=${ENABLE_VALIDATION:-0}
+# Validation default ON: the f2 rule-fidelity objective is SBERT-based.
+ENABLE_VALIDATION=${ENABLE_VALIDATION:-1}
 ENABLE_PERPLEXITY=${ENABLE_PERPLEXITY:-0}
-MUTATION_MAX_RETRIES=${MUTATION_MAX_RETRIES:-2}
 ENABLE_EVAL_CACHE=${ENABLE_EVAL_CACHE:-1}
+# Optimization direction: "minimize" (REPAIR: fewer vulns, default) | "maximize".
+OBJECTIVE_DIRECTION=${OBJECTIVE_DIRECTION:-minimize}
+ALLOW_UNQUALIFIED_MAP=${ALLOW_UNQUALIFIED_MAP:-0}
+REPO_ROOT=${REPO_ROOT:-/home/rnegro/thesis/rule-mutation}
+OUTPUT_BASE=${OUTPUT_BASE:-"$REPO_ROOT/experiments/results"}
+INITIALIZATION_BUNDLE=${INITIALIZATION_BUNDLE:-}
+TIME_BUDGET_SECONDS=${TIME_BUDGET_SECONDS:-}
+PRETIMEOUT_LEAD_SECONDS=${PRETIMEOUT_LEAD_SECONDS:-300}
 
 MODEL_ID="meta-llama/Llama-3.3-70B-Instruct"
-# Reusing the Qwen-generated retrieval map for now (same prompts+rules; only the
-# code-gen model changes). Regenerate a Llama-specific map later if needed.
-RULES_MAP=${RULES_MAP:-"/home/rnegro/thesis/rule-mutation/rule_maps/map_qwen32b_python_java.json"}
+# Use the model-specific final consensus map.
+if [ -z "${RULES_MAP:-}" ]; then
+    if [ "$LANGUAGES" = "python" ] || [ "$LANGUAGES" = "java" ]; then
+        RULES_MAP="$REPO_ROOT/rule_maps/qualified/final_search_map_llama_${LANGUAGES}.json"
+    else
+        RULES_MAP="$REPO_ROOT/rule_maps/qualified/final_search_map_llama.json"
+    fi
+fi
 
 # Validate OPTIMIZER value
-if [ "$OPTIMIZER" != "ea" ] && [ "$OPTIMIZER" != "random_baseline" ]; then
-    echo "❌ ERROR: OPTIMIZER must be 'ea' or 'random_baseline' (got: $OPTIMIZER)."
+if [ "$OPTIMIZER" != "ea" ] && [ "$OPTIMIZER" != "random_search" ]; then
+    echo "❌ ERROR: OPTIMIZER must be 'ea' or 'random_search' (got: $OPTIMIZER)."
     exit 1
 fi
 
 echo "=========================================================================="
-echo "SBST: (1+1) EA / random_baseline run with Llama-3.3-70B-Instruct (4bit)"
+echo "SBST: archive EA / random-search run with Llama-3.3-70B-Instruct (4bit)"
 echo "=========================================================================="
 echo "Started: $(date)"
 echo "Job ID: $SLURM_JOB_ID"
@@ -109,19 +124,22 @@ echo ""
 echo "Optimizer configuration:"
 echo "  Optimizer:       $OPTIMIZER"
 if [ "$OPTIMIZER" = "ea" ]; then
+    echo "  Init samples:    5 (shared, outside main-loop budget)"
+    echo "  Inject every:    $EA_INJECTION_EVERY"
     echo "  Archive cap:     $ARCHIVE_CAP"
-    echo "  Restart h:       $RESTART_H"
-    echo "  Max depth (EA):  $MAX_DEPTH_EA"
-else
-    echo "  Max chain K:     $MAX_MUTATIONS_PER_ITER"
 fi
+echo "  Max depth:       $MAX_DEPTH"
+echo "  Sampler K:       $RANDOM_MAX_CHANGES (n_changes in [1,K])"
+echo "  Order weight:    $ORDER_MOVE_WEIGHT"
 echo ""
 echo "Run configuration:"
 echo "  Model:           $MODEL_ID"
 echo "  Quantization:    $QUANTIZATION"
 echo "  BnB compute:     $BNB_COMPUTE_DTYPE"
+echo "  Temperature:     $TEMPERATURE"
 echo "  Test cases:      $N_CASES"
-echo "  Iterations:      $N_ITERATIONS"
+echo "  Main-loop budget:$MAIN_LOOP_BUDGET"
+echo "  Total ceiling:   $((MAIN_LOOP_BUDGET + 5)) evaluations"
 echo "  Seed:            $SEED"
 echo "  Selection:       $SELECTION"
 echo "  Languages:       ${LANGUAGES:-all}"
@@ -132,12 +150,14 @@ echo "  Mutators:        $MUTATORS"
 echo "  Validation:      $ENABLE_VALIDATION (1=enabled)"
 echo "  Perplexity gate: $ENABLE_PERPLEXITY (1=enabled; requires ENABLE_VALIDATION=1)"
 echo "  Eval cache:      $ENABLE_EVAL_CACHE (0=disabled)"
+echo "  Init bundle:     ${INITIALIZATION_BUNDLE:-none}"
+echo "  Time budget:     ${TIME_BUDGET_SECONDS:-not declared} seconds"
+echo "  Pretimeout lead: ${PRETIMEOUT_LEAD_SECONDS}s"
 echo ""
 echo "Input files:"
 echo "  Rules map:       $RULES_MAP"
 echo ""
 
-REPO_ROOT="${REPO_ROOT:-/home/rnegro/thesis/rule-mutation}"
 cd "$REPO_ROOT"
 
 # Activate the venv and call python directly below. NEVER switch to `uv run python`:
@@ -166,15 +186,16 @@ echo "=== GPU Check ==="
 nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv
 echo ""
 
-# Output dir: tag the optimizer (and cap for EA) so EA / random / sweep runs don't mingle
+# Match the Qwen launcher's output contract so curated validation/final batches
+# can be routed without changing the per-run naming or losing seed/language provenance.
 DATE=$(date +%m%d)
-if [ "$OPTIMIZER" = "ea" ]; then
-    OUTPUT_DIR="experiments/results/job${SLURM_JOB_ID}_ea_llama_cap${ARCHIVE_CAP}_h${RESTART_H}_${N_CASES}_${DATE}"
-else
-    OUTPUT_DIR="experiments/results/job${SLURM_JOB_ID}_rand_llama_${N_CASES}_${DATE}"
-fi
+STRAT_TAG=$([ "$OPTIMIZER" = "ea" ] && echo "ea" || echo "rand")
+LANG_TAG=${LANGUAGES:-all}
+OUTPUT_DIR="${OUTPUT_BASE}/job${SLURM_JOB_ID}_${STRAT_TAG}_${LANG_TAG}_s${SEED}_${DATE}"
 mkdir -p "$OUTPUT_DIR"
-mkdir -p logs
+mkdir -p "$OUTPUT_BASE/slurm_logs"
+exec >"$OUTPUT_BASE/slurm_logs/${SLURM_JOB_ID}_${SLURM_JOB_NAME}.out" \
+     2>"$OUTPUT_BASE/slurm_logs/${SLURM_JOB_ID}_${SLURM_JOB_NAME}.err"
 
 echo "=== Starting Experiment ==="
 echo "Output directory: $OUTPUT_DIR"
@@ -188,7 +209,11 @@ export SEMGREP_JOBS
 if [ ! -e "$SEMGREP_RULESET" ]; then
     echo "❌ ERROR: Local Semgrep rules not found: $SEMGREP_RULESET"
     echo "   Run this once on a login node first:"
-    echo "   scripts/setup/download_semgrep_security_audit_rules.sh"
+    echo "   scripts/setup/download_semgrep_security_audit_rules.sh <target-dir> <commit>"
+    exit 1
+fi
+if [ ! -s "$SEMGREP_RULESET/SOURCE_COMMIT" ]; then
+    echo "❌ ERROR: search requires pinned Semgrep rules with SOURCE_COMMIT."
     exit 1
 fi
 
@@ -198,10 +223,15 @@ if [ -n "$LANGUAGES" ]; then
     LANG_ARG="--languages $LANGUAGES"
 fi
 
+CASE_ARG=""
+if [ "$N_CASES" != "all" ]; then
+    CASE_ARG="--n-cases $N_CASES"
+fi
+
 # Build optional validation flag (and optional perplexity extension)
 VALIDATION_FLAG=""
 if [ "$ENABLE_VALIDATION" = "1" ]; then
-    VALIDATION_FLAG="--enable-validation --mutation-max-retries $MUTATION_MAX_RETRIES"
+    VALIDATION_FLAG="--enable-validation"
     if [ "$ENABLE_PERPLEXITY" = "1" ]; then
         VALIDATION_FLAG="$VALIDATION_FLAG --enable-perplexity"
     fi
@@ -213,29 +243,51 @@ if [ "$ENABLE_EVAL_CACHE" = "0" ]; then
     NO_EVAL_CACHE_FLAG="--no-eval-cache"
 fi
 
+UNQUALIFIED_MAP_FLAG=""
+if [ "$ALLOW_UNQUALIFIED_MAP" = "1" ]; then
+    UNQUALIFIED_MAP_FLAG="--allow-unqualified-map"
+fi
+
+INITIALIZATION_BUNDLE_FLAG=""
+if [ -n "$INITIALIZATION_BUNDLE" ]; then
+    INITIALIZATION_BUNDLE_FLAG="--initialization-bundle $INITIALIZATION_BUNDLE"
+fi
+
+TIME_BUDGET_FLAG=""
+if [ -n "$TIME_BUDGET_SECONDS" ]; then
+    TIME_BUDGET_FLAG="--wall-time-budget-seconds $TIME_BUDGET_SECONDS"
+fi
+
 # Run in the background so the batch shell stays responsive to SIGUSR1. The
 # trap forwards SLURM's pre-timeout signal to Python, which breaks the optimizer
 # loop and saves final results before the wall-time SIGKILL. The while-loop
 # re-issues `wait` because `wait` returns early when interrupted by the trap.
-python scripts/experiments/run_with_rules_map.py \
+python scripts/experiments/run_experiment.py \
     --rules-map "$RULES_MAP" \
-    --n-cases "$N_CASES" \
+    $CASE_ARG \
     $LANG_ARG \
     --selection "$SELECTION" \
-    --iterations "$N_ITERATIONS" \
+    --main-loop-budget "$MAIN_LOOP_BUDGET" \
     --model "$MODEL_ID" \
     --backend delftblue \
     --quantization "$QUANTIZATION" \
     --bnb-compute-dtype "$BNB_COMPUTE_DTYPE" \
+    --temperature "$TEMPERATURE" \
     --seed "$SEED" \
     --mutators $MUTATORS \
     --optimizer "$OPTIMIZER" \
     --archive-cap "$ARCHIVE_CAP" \
-    --restart-h "$RESTART_H" \
-    --max-depth-ea "$MAX_DEPTH_EA" \
-    --max-mutations-per-iter "$MAX_MUTATIONS_PER_ITER" \
+    --max-depth "$MAX_DEPTH" \
+    --random-max-changes "$RANDOM_MAX_CHANGES" \
+    --ea-injection-every "$EA_INJECTION_EVERY" \
+    --order-move-weight "$ORDER_MOVE_WEIGHT" \
+    $INITIALIZATION_BUNDLE_FLAG \
+    $TIME_BUDGET_FLAG \
+    --pretimeout-lead-seconds "$PRETIMEOUT_LEAD_SECONDS" \
     $VALIDATION_FLAG \
     $NO_EVAL_CACHE_FLAG \
+    $UNQUALIFIED_MAP_FLAG \
+    --objective-direction "$OBJECTIVE_DIRECTION" \
     --semgrep-config "$SEMGREP_RULESET" \
     --semgrep-timeout-seconds "$SEMGREP_TIMEOUT_SECONDS" \
     --semgrep-jobs "$SEMGREP_JOBS" \
@@ -256,6 +308,25 @@ while [ "$EXIT_CODE" -gt 128 ]; do
 done
 set -e
 trap - USR1
+
+# Keep the prompt-level audit while removing Semgrep's very large raw JSON
+# payload. This is identical to the Qwen wrapper's post-run handling.
+FILTER="$REPO_ROOT/scripts/experiments/filter_semgrep_debug.py"
+if [ -f "$OUTPUT_DIR/semgrep_debug/semgrep_debug.jsonl" ]; then
+    echo ""
+    echo "→ Filtering semgrep_debug (strip raw stdout, keep findings + error audit)…"
+    timeout 250 python "$FILTER" --in-place --audit-json "$OUTPUT_DIR" \
+        || echo "⚠️  semgrep_debug filter incomplete/skipped (raw kept — re-run on login)"
+fi
+
+VALIDATOR="$REPO_ROOT/scripts/analyze/validate_search_run.py"
+if [ "${EXIT_CODE:-1}" -eq 0 ]; then
+    echo "→ Validating search artifacts…"
+    if ! python "$VALIDATOR" --write "$OUTPUT_DIR"; then
+        echo "❌ Search-run validation failed"
+        EXIT_CODE=3
+    fi
+fi
 
 echo ""
 echo "=========================================================================="

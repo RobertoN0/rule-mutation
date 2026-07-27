@@ -1,8 +1,8 @@
 """
 Abstract base class for LLM backends.
 
-All LLM providers (Groq, OpenRouter, Together AI) implement this interface
-to ensure consistent behavior across the SBST framework.
+The API and local-model providers implement this interface to keep generation
+and usage accounting consistent across the SBST framework.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ class LLMConfig:
     """Configuration for an LLM backend."""
     
     model: str
-    """Model identifier (e.g., 'llama-3.1-8b-instant')."""
+    """Model identifier (for example, ``gpt-4o-mini``)."""
     
     temperature: float = 0.0
     """Sampling temperature (0.0 = deterministic)."""

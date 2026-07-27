@@ -1,247 +1,359 @@
-"""Smoke tests for run_ea and run_random_baseline.
+"""Behavior tests for the final EA structure."""
 
-These bypass the LLM/Semgrep pipeline by stubbing evaluate_fn. They verify
-the runner's iteration logic, archive integration, and restart behavior in
-isolation.
-"""
+from __future__ import annotations
 
-import pytest
+import random
+from copy import deepcopy
 
 from src.evaluation.fitness import AggregatedFitness
 from src.evaluation.rule_mapping import PromptWithRules
-from src.mutation.base import Mutator, MutationResult
-from src.optimizer.ea_optimizer import run_ea
-from src.optimizer.hill_climber import IterationResult, PerRuleResult
+from src.mutation.base import MutationResult, Mutator
+from src.optimizer.engine import IterationResult
+from src.optimizer.chromosome import RuleSetSpace
+from src.optimizer.search import (
+    INITIALIZATION_SAMPLES,
+    PrecomputedInitializationCandidate,
+    _choose_and_build_move,
+    run_ea,
+    run_random_search,
+)
 
-
-# ---------------------------------------------------------------------------
-# Stubs
-# ---------------------------------------------------------------------------
 
 class FakeMutator(Mutator):
-    """Deterministic mutator that appends its name to the input."""
-
-    def __init__(self, fake_name: str, seed: int | None = None):
-        super().__init__(seed)
-        self._name = fake_name
+    def __init__(self, name: str):
+        super().__init__(0)
+        self._name = name
 
     @property
     def name(self) -> str:
         return self._name
 
     def mutate(self, text: str) -> MutationResult:
-        out = f"{text}|{self._name}"
         return MutationResult(
             original=text,
-            mutated=out,
-            mutation_type=self._name,
-            changes=[f"applied {self._name}"],
+            mutated=f"{text}|{self.name}",
+            mutation_type=self.name,
+            changes=[f"+{self.name}"],
         )
 
 
-def _fit(f1: float = 0.0, f2: float = 0.0, f3: float = 0.0) -> AggregatedFitness:
+def _fit(f1: float, *, fidelity: float = 0.8, parsimony: int = 1) -> AggregatedFitness:
     return AggregatedFitness(
         total_fitness=f1,
         mean_fitness=f1,
         max_fitness=f1,
-        num_prompts=2,
+        num_prompts=1,
         num_vulnerable=int(f1 > 0),
         individual_results=[],
-        total_semgrep_delta=f1,
-        total_code_divergence=f3 * 2,
-        n_divergent_prompts=int(f2 * 2),
-        mean_code_divergence=f3,
-        proportion_divergent=f2,
-        conditional_mean_divergence=f3,
+        total_raw_reduction=f1,
+        total_raw_count=max(0, 10 - int(f1)),
+        num_valid_prompts=1,
+        rule_fidelity=fidelity,
+        parsimony=parsimony,
     )
 
 
-def _make_prompts(rule_ids_per_prompt: list[list[str]]) -> list[PromptWithRules]:
-    out = []
-    for i, rids in enumerate(rule_ids_per_prompt):
-        individual = {rid: f"ORIGINAL[{rid}]" for rid in rids}
-        out.append(PromptWithRules(
-            prompt=f"prompt-{i}",
+def _space() -> RuleSetSpace:
+    return RuleSetSpace(
+        all_rule_ids=["r1", "r2", "r3"],
+        originals={"r1": "R1", "r2": "R2", "r3": "R3"},
+    )
+
+
+def _prompts() -> list[PromptWithRules]:
+    return [
+        PromptWithRules(
+            prompt="p",
             language="python",
-            cwe_id="cwe-079",
-            rule_ids=rids,
-            combined_rules="\n---\n".join(individual.values()),
-            individual_rules=individual,
-            metadata={"test_case_id": f"tc{i}"},
-        ))
-    return out
+            cwe_id="c",
+            rule_ids=["r1", "r2", "r3"],
+            combined_rules="",
+            individual_rules={"r1": "R1", "r2": "R2", "r3": "R3"},
+            metadata={"test_case_id": "tc0"},
+        )
+    ]
 
 
-def _silent_log(_: str) -> None:
-    pass
+def _origin(space: RuleSetSpace):
+    origin = space.origin()
+    origin.f1, origin.f2, origin.f3 = 0.0, 1.0, 0.0
+    origin.fitness = _fit(0.0, fidelity=1.0, parsimony=0)
+    return origin
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# (1+1) EA
-# ═══════════════════════════════════════════════════════════════════════════════
+def _run_ea(*, main_loop_budget=6, seed=42, records=None, **overrides):
+    space = _space()
 
-class TestRunEA:
+    def evaluate(chromosome, _iter_id):
+        depth = sum(g.depth for g in chromosome.genes.values())
+        return _fit(float(depth), parsimony=len(chromosome.genes)), [], 0, 1
 
-    def test_completes_and_returns_archives(self):
-        prompts = _make_prompts([["r1", "r2"], ["r1"]])
-        all_rids = sorted({rid for p in prompts for rid in p.rule_ids})
-        mutators = [FakeMutator("m0"), FakeMutator("m1"), FakeMutator("m2")]
-        rule_originals = {rid: f"ORIGINAL[{rid}]" for rid in all_rids}
+    kwargs = {
+        "space": space,
+        "origin": _origin(space),
+        "prompts_with_rules": _prompts(),
+        "mutators": [FakeMutator("m0"), FakeMutator("m1"), FakeMutator("m2")],
+        "evaluate_chromosome_fn": evaluate,
+        "iteration_result_factory": IterationResult,
+        "main_loop_budget": main_loop_budget,
+        "archive_cap": 6,
+        "max_depth": 3,
+        "random_injection_every": 10,
+        "random_max_changes": 3,
+        "order_move_weight": 0.0,
+        "seed": seed,
+        "log": lambda _message: None,
+        "iter_record_fn": records.append if records is not None else None,
+    }
+    kwargs.update(overrides)
+    return run_ea(**kwargs)
 
-        # Counter for monotonically improving fitness — every offspring strictly
-        # dominates its parent on f1, ensuring archive inserts happen.
-        counter = {"i": 0}
-        def stub_eval(target_rid, parent_text, mutator, iteration, phase, mutation_chain):
-            counter["i"] += 1
-            f = float(counter["i"])
-            return (
-                _fit(f1=f, f2=min(0.1 * f, 1.0), f3=min(0.05 * f, 1.0)),
-                [], [f"stub change for {mutator.name}"], {}, f"{parent_text}|{mutator.name}",
+
+def test_total_budget_is_five_plus_main_loop_budget():
+    result = _run_ea(main_loop_budget=7)
+    assert len(result.iterations) == INITIALIZATION_SAMPLES + 7
+    assert result.initialization_evaluations == 5
+    assert result.main_loop_evaluations == 7
+
+
+def test_initial_candidates_create_front_without_origin_threshold():
+    space = _space()
+
+    def evaluate(_chromosome, _iter_id):
+        return _fit(-1.0, fidelity=0.5, parsimony=2), [], 0, 1
+
+    result = run_ea(
+        space=space,
+        origin=_origin(space),
+        prompts_with_rules=_prompts(),
+        mutators=[FakeMutator("m")],
+        evaluate_chromosome_fn=evaluate,
+        iteration_result_factory=IterationResult,
+        main_loop_budget=0,
+        archive_cap=6,
+        max_depth=1,
+        random_injection_every=10,
+        random_max_changes=1,
+        order_move_weight=0.0,
+        seed=1,
+        log=lambda _message: None,
+    )
+    assert result.archive_snapshot["entries"]
+    assert result.best_chromosome.cid == _origin(space).cid
+
+
+def test_initialization_and_injection_phases_use_expected_indices():
+    records: list[dict] = []
+    _run_ea(
+        main_loop_budget=6,
+        random_injection_every=3,
+        records=records,
+    )
+    evaluated = [record for record in records if record["evaluation_consumed"]]
+    assert [record["phase"] for record in evaluated[:5]] == ["initialization"] * 5
+    main = evaluated[5:]
+    assert [record["main_loop_iteration"] for record in main] == [1, 2, 3, 4, 5, 6]
+    assert [record["phase"] for record in main] == [
+        "ea",
+        "ea",
+        "injection",
+        "ea",
+        "ea",
+        "injection",
+    ]
+
+
+def test_ea_and_random_share_the_same_seeded_five_candidate_prefix():
+    ea_records: list[dict] = []
+    random_records: list[dict] = []
+    _run_ea(main_loop_budget=0, seed=9, records=ea_records)
+
+    space = _space()
+
+    def evaluate(chromosome, _iter_id):
+        return _fit(float(len(chromosome.genes))), [], 0, 1
+
+    run_random_search(
+        space=space,
+        origin=_origin(space),
+        prompts_with_rules=_prompts(),
+        mutators=[FakeMutator("m0"), FakeMutator("m1"), FakeMutator("m2")],
+        evaluate_chromosome_fn=evaluate,
+        iteration_result_factory=IterationResult,
+        main_loop_budget=0,
+        max_changes=3,
+        max_depth=3,
+        order_move_prob=0.0,
+        seed=9,
+        log=lambda _message: None,
+        iter_record_fn=random_records.append,
+    )
+    ea_cids = [
+        record["chromosome_id"]
+        for record in ea_records
+        if record["evaluation_consumed"]
+    ]
+    random_cids = [
+        record["chromosome_id"]
+        for record in random_records
+        if record["evaluation_consumed"]
+    ]
+    assert ea_cids == random_cids
+
+
+def test_precomputed_prefix_restores_the_same_next_ea_candidate():
+    source_records: list[dict] = []
+    source_candidates = []
+
+    def capture_candidate(**kwargs):
+        source_candidates.append(
+            (
+                deepcopy(kwargs["child"]),
+                list(kwargs["changes"]),
+                dict(kwargs.get("validation_metadata") or {}),
             )
-
-        result = run_ea(
-            prompts_with_rules=prompts,
-            all_rule_ids=all_rids,
-            rule_originals=rule_originals,
-            baseline_fitness=_fit(0, 0, 0),
-            mutators=mutators,
-            evaluate_fn=stub_eval,
-            iteration_result_factory=IterationResult,
-            per_rule_result_factory=PerRuleResult,
-            max_iterations=10,
-            archive_cap=3,
-            restart_h=8,
-            max_depth=4,
-            seed=42,
-            log=_silent_log,
         )
 
-        assert len(result.iterations) == 10
-        assert len(result.per_rule_results) == 10
-        # Every rule should have a snapshot
-        for rid in all_rids:
-            assert rid in result.archives_snapshot
-            snap = result.archives_snapshot[rid]
-            assert snap["cap"] == 3
-            assert snap["max_depth"] == 4
-        # Some inserts must have happened (monotone improvement guarantees it)
-        total_inserts = sum(s["n_inserts"] for s in result.archives_snapshot.values())
-        assert total_inserts >= 1
-        # Best fitness must be set
-        assert result.best_fitness is not None
-        assert result.best_fitness.total_semgrep_delta > 0
-
-    def test_graceful_stop_breaks_loop_and_labels_final_snapshot(self):
-        # should_stop_fn flips True after 3 iterations; the loop must break before
-        # iteration 4, run only 3 iterations, and label the final archive snapshot
-        # with the actual completed count (3), not max_iterations (10).
-        prompts = _make_prompts([["r1", "r2"], ["r1"]])
-        all_rids = sorted({rid for p in prompts for rid in p.rule_ids})
-        mutators = [FakeMutator("m0"), FakeMutator("m1"), FakeMutator("m2")]
-        rule_originals = {rid: f"ORIGINAL[{rid}]" for rid in all_rids}
-
-        counter = {"i": 0}
-        def stub_eval(target_rid, parent_text, mutator, iteration, phase, mutation_chain):
-            counter["i"] += 1
-            f = float(counter["i"])
-            return (
-                _fit(f1=f, f2=min(0.1 * f, 1.0), f3=min(0.05 * f, 1.0)),
-                [], [f"stub change for {mutator.name}"], {}, f"{parent_text}|{mutator.name}",
-            )
-
-        records: list[dict] = []
-        snapshots: list[int] = []  # iteration labels passed to archive_snapshot_fn
-
-        def stop_after_three() -> bool:
-            # len(records) == number of completed iterations so far
-            return len(records) >= 3
-
-        result = run_ea(
-            prompts_with_rules=prompts,
-            all_rule_ids=all_rids,
-            rule_originals=rule_originals,
-            baseline_fitness=_fit(0, 0, 0),
-            mutators=mutators,
-            evaluate_fn=stub_eval,
-            iteration_result_factory=IterationResult,
-            per_rule_result_factory=PerRuleResult,
-            max_iterations=10,
-            archive_cap=3,
-            restart_h=8,
-            max_depth=4,
-            seed=42,
-            log=_silent_log,
-            iter_record_fn=records.append,
-            archive_snapshot_fn=lambda it, snap: snapshots.append(it),
-            snapshot_every=20,  # periodic never fires; only the final snapshot does
-            should_stop_fn=stop_after_three,
+    source = _run_ea(
+        main_loop_budget=0,
+        seed=17,
+        records=source_records,
+        save_move_fn=capture_candidate,
+    )
+    evaluated_source = [
+        row for row in source_records if row["evaluation_consumed"]
+    ]
+    prepared = [
+        PrecomputedInitializationCandidate(
+            child=child,
+            fitness=iteration.aggregated_fitness,
+            n_requested_changes=row["n_requested_changes"],
+            n_attempted_changes=row["n_attempted_changes"],
+            n_effective_changes=row["n_effective_changes"],
+            attempted_operators=row["attempted_operators"],
+            attempted_mutators=row["attempted_mutators"],
+            effective_mutators=row["mutation_chain"],
+            changes=changes,
+            validation_metadata=validation,
         )
-
-        # Exactly 3 iterations ran (broke at the top of iteration 4)
-        assert len(result.iterations) == 3
-        assert len(records) == 3
-        # The final snapshot is labelled with the real stop point, not max_iterations
-        assert snapshots == [3]
-
-    def test_no_stop_fn_runs_to_completion(self):
-        # Regression: omitting should_stop_fn (default None) must not change behaviour.
-        prompts = _make_prompts([["r1"]])
-        mutators = [FakeMutator("m0"), FakeMutator("m1")]
-        snapshots: list[int] = []
-        result = run_ea(
-            prompts_with_rules=prompts,
-            all_rule_ids=["r1"],
-            rule_originals={"r1": "ORIGINAL[r1]"},
-            baseline_fitness=_fit(0, 0, 0),
-            mutators=mutators,
-            evaluate_fn=lambda rid, pt, m, it, ph, mc: (
-                _fit(float(it), 0.0, 0.0), [], [], {}, f"{pt}|{m.name}",
-            ),
-            iteration_result_factory=IterationResult,
-            per_rule_result_factory=PerRuleResult,
-            max_iterations=5,
-            archive_cap=3,
-            restart_h=8,
-            max_depth=4,
-            seed=1,
-            log=_silent_log,
-            archive_snapshot_fn=lambda it, snap: snapshots.append(it),
-            snapshot_every=20,
+        for (child, changes, validation), iteration, row in zip(
+            source_candidates,
+            source.iterations,
+            evaluated_source,
         )
-        assert len(result.iterations) == 5
-        # Final snapshot labelled with the full run length
-        assert snapshots == [5]
+    ]
 
-    def test_archive_dedup_eventually_restarts(self):
-        prompts = _make_prompts([["r1"]])
-        mutators = [FakeMutator("m0"), FakeMutator("m1")]
-        # max_depth small + only 2 mutators → mutator-exhausted restart should fire
-        result = run_ea(
-            prompts_with_rules=prompts,
-            all_rule_ids=["r1"],
-            rule_originals={"r1": "ORIGINAL[r1]"},
-            baseline_fitness=_fit(0, 0, 0),
-            mutators=mutators,
-            evaluate_fn=lambda rid, pt, m, it, ph, mc: (
-                _fit(0.0, 0.0, 0.0),  # never improves → never inserts → stagnation
-                [], [], {}, f"{pt}|{m.name}",
-            ),
-            iteration_result_factory=IterationResult,
-            per_rule_result_factory=PerRuleResult,
-            max_iterations=20,
-            archive_cap=3,
-            restart_h=4,  # short — should trigger stagnation fast
-            max_depth=2,
-            seed=0,
-            log=_silent_log,
-        )
-        # We expect at least one restart in r1's history
-        r1_snap = result.archives_snapshot["r1"]
-        assert len(r1_snap["restart_history"]) >= 1
-        # All restart reasons should be one of the documented triggers
-        for h in r1_snap["restart_history"]:
-            assert h["reason"] in {"stagnation", "depth_saturated", "mutator_exhausted", "fully_exhausted"}
+    normal_records: list[dict] = []
+    _run_ea(main_loop_budget=1, seed=17, records=normal_records)
+    reused_records: list[dict] = []
+    evaluations = 0
+
+    def evaluate_main(chromosome, _iter_id):
+        nonlocal evaluations
+        evaluations += 1
+        depth = sum(g.depth for g in chromosome.genes.values())
+        return _fit(float(depth), parsimony=len(chromosome.genes)), [], 0, 1
+
+    _run_ea(
+        main_loop_budget=1,
+        seed=17,
+        records=reused_records,
+        evaluate_chromosome_fn=evaluate_main,
+        precomputed_initialization=prepared,
+        runner_random_state_after_initialization=(
+            source.runner_random_state_after_initialization
+        ),
+    )
+
+    normal_sixth = [
+        row for row in normal_records if row["evaluation_consumed"]
+    ][5]
+    reused_sixth = [
+        row for row in reused_records if row["evaluation_consumed"]
+    ][5]
+    assert evaluations == 1
+    assert reused_sixth["chromosome_id"] == normal_sixth["chromosome_id"]
+    assert all(
+        row["initialization_source"] == "precomputed_bundle"
+        for row in reused_records[:5]
+    )
 
 
-# The redesigned random baseline (stateless per-iteration multi-mutation
-# sampler) is covered by tests/unit/test_random_baseline.py.
+def test_local_text_move_applies_exactly_one_mutator():
+    records: list[dict] = []
+    _run_ea(main_loop_budget=12, records=records, random_injection_every=0)
+    local_mutations = [
+        record
+        for record in records
+        if record["phase"] == "ea"
+        and record["move_type"] == "mutate"
+        and record["evaluation_consumed"]
+    ]
+    assert local_mutations
+    assert all(record["chain_length"] == 1 for record in local_mutations)
+
+
+def test_saturated_mutated_rule_reverts_to_origin():
+    space = RuleSetSpace(all_rule_ids=["r1"], originals={"r1": "R1"})
+    parent = space.stamp(space.origin().with_gene("r1", "R1|m", "m"))
+    move = _choose_and_build_move(
+        parent,
+        space,
+        _prompts(),
+        [FakeMutator("m")],
+        random.Random(0),
+        1,
+        1.0,
+        0.0,
+    )
+    assert move is not None
+    child, _keys, move_type, rule_id, *_rest = move
+    assert move_type == "revert"
+    assert rule_id == "r1"
+    assert child.mutated_rule_ids() == set()
+
+
+def test_attempted_local_move_is_not_offered_again_on_same_parent():
+    space = RuleSetSpace(all_rule_ids=["r1"], originals={"r1": "R1"})
+    parent = space.origin()
+    mutator = FakeMutator("m")
+    move = _choose_and_build_move(
+        parent,
+        space,
+        _prompts(),
+        [mutator],
+        random.Random(0),
+        4,
+        1.0,
+        0.0,
+    )
+    assert move is not None
+    parent.tried.add(move[1])
+    assert _choose_and_build_move(
+        parent,
+        space,
+        _prompts(),
+        [mutator],
+        random.Random(0),
+        4,
+        1.0,
+        0.0,
+    ) is None
+
+
+def test_archive_is_never_wiped_and_origin_is_not_a_parent():
+    records: list[dict] = []
+    result = _run_ea(
+        main_loop_budget=20,
+        records=records,
+        random_injection_every=0,
+    )
+    assert "restart_history" not in result.archive_snapshot
+    origin_cid = _space().origin().cid
+    local = [
+        record
+        for record in records
+        if record["phase"] == "ea" and record["evaluation_consumed"]
+    ]
+    assert local
+    assert all(record["parent_chromosome_id"] != origin_cid for record in local)

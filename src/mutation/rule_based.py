@@ -8,10 +8,10 @@ verb weakening, synonym replacement, word insertion, and section reordering.
 from __future__ import annotations
 
 import random
-import re
 
 from .base import Mutator, MutationResult
 from .rule_parser import ParsedRule, mask_inline_code, unmask_inline_code
+from .security_lexicon import get_security_lexicon
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -99,8 +99,11 @@ class SynonymReplacementMutator(Mutator):
     afterwards so that algorithm names, CWE IDs, and function names are never
     modified.
 
-    Requires: ``nlpaug``, ``nltk`` + NLTK WordNet corpus downloaded once:
-        python -m nltk.downloader wordnet omw-1.4
+    Requires: ``nlpaug``, ``nltk`` + NLTK corpora downloaded once on an
+    internet-connected/login node::
+
+        python -m nltk.downloader wordnet omw-1.4 \
+            averaged_perceptron_tagger averaged_perceptron_tagger_eng
     """
 
     def __init__(
@@ -124,8 +127,36 @@ class SynonymReplacementMutator(Mutator):
     def name(self) -> str:
         return "synonym_replacement"
 
+    @staticmethod
+    def validate_runtime_dependencies() -> None:
+        """Verify WordNet and POS tagging without attempting a download.
+
+        ``nlpaug`` tries to download missing corpora itself.  That behavior is
+        unsafe for an offline experiment node because the failure can occur in
+        the middle of a run.  Exercise the two exact NLTK operations used by
+        ``SynonymAug`` and fail with an actionable message instead.
+        """
+        try:
+            import nltk  # type: ignore
+            from nltk.corpus import wordnet  # type: ignore
+        except ImportError as exc:
+            raise ImportError(
+                "synonym_replacement requires the installed nltk package"
+            ) from exc
+
+        try:
+            wordnet.synsets("testing")
+            nltk.pos_tag(["testing"])
+        except LookupError as exc:
+            raise RuntimeError(
+                "required NLTK data is missing. On a login node run: "
+                "python -m nltk.downloader wordnet omw-1.4 "
+                "averaged_perceptron_tagger averaged_perceptron_tagger_eng"
+            ) from exc
+
     def _get_aug(self):
         if self._aug is None:
+            self.validate_runtime_dependencies()
             try:
                 # nlpaug 1.1.x ships regex string literals with unescaped \s
                 # (context_word_embs.py), which Python 3.12 flags as
@@ -173,8 +204,11 @@ class SynonymReplacementMutator(Mutator):
                 try:
                     result = aug.augment(masked)
                     aug_line = result[0] if isinstance(result, list) else result
-                except Exception:
-                    aug_line = masked
+                except Exception as exc:
+                    raise RuntimeError(
+                        "synonym_replacement failed while augmenting a rule line; "
+                        "refusing to record a silent identity mutation"
+                    ) from exc
                 restored = unmask_inline_code(aug_line, restore_map)  # type: ignore
                 augmented_lines.append(restored + trailing_nl)
                 if restored != bare:
@@ -331,8 +365,11 @@ class AddRandomWordMutator(Mutator):
                 augmented = aug.augment(masked)
                 if isinstance(augmented, list):
                     augmented = augmented[0] if augmented else masked
-            except Exception:
-                augmented = masked
+            except Exception as exc:
+                raise RuntimeError(
+                    "add_random_word failed while augmenting a rule block; "
+                    "refusing to record a silent identity mutation"
+                ) from exc
 
             restored = unmask_inline_code(augmented, restore_map)
 
@@ -362,9 +399,6 @@ class AddRandomWordMutator(Mutator):
 # ═══════════════════════════════════════════════════════════════════════════════
 # SECTION REORDER MUTATOR — LLMORPH MR-19/107
 # ═══════════════════════════════════════════════════════════════════════════════
-
-from .security_lexicon import get_security_lexicon
-
 
 class SectionReorderMutator(Mutator):
     """Reorder top-level (##) sections of a security rule document.
@@ -434,7 +468,6 @@ class SectionReorderMutator(Mutator):
             stripped = text.lstrip()
             return stripped.startswith("#") or stripped.startswith("```")
 
-        pinned = [(i, t) for i, t in all_text if _is_pinned(t)]
         movable_indices = [i for i, t in all_text if not _is_pinned(t)]
         movable_texts = [parts[i] for i in movable_indices]
 

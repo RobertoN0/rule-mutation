@@ -6,7 +6,6 @@ PromptWithRules population, combined_rules formatting, and the
 """
 
 import json
-import textwrap
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -124,7 +123,7 @@ def _build_prompts_with_rules(
 
     # Language filter
     if languages:
-        lang_set = {l.lower() for l in languages}
+        lang_set = {language.lower() for language in languages}
         mappings = [m for m in mappings if m.language.lower() in lang_set]
 
     # Selection
@@ -309,3 +308,20 @@ class TestRuleMappingIndex:
         assert m is not None
         assert m.cwe_id == "CWE-89"
         assert m.language == "python"
+
+
+def test_runtime_loader_uses_map_membership_without_a_second_policy(
+    mini_map_file: Path,
+    mock_rule_loader,
+) -> None:
+    from scripts.experiments.run_experiment import load_prompts_with_rules
+
+    prompts = load_prompts_with_rules(
+        mini_map_file,
+        mock_rule_loader,
+        n_cases=5,
+    )
+
+    assert len(prompts) == 5
+    assert {p.metadata["test_case_id"] for p in prompts} == {"0", "1", "2", "3", "4"}
+    assert all("language_mode" not in p.metadata for p in prompts)

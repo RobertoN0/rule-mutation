@@ -1,7 +1,7 @@
 """
 LLM-based mutation operators (live runtime).
 
-These mutators call an LLM backend **live** during the hill-climbing loop
+These mutators call an LLM backend **live** during the search loop
 to produce high-quality, linguistically sound mutations.  The same
 ``DelftBlueLocalBackend`` instance used for code generation is reused —
 no second model load, no extra VRAM pressure.
@@ -142,6 +142,11 @@ class _LiveLLMMutator(Mutator):
         """
         super().__init__(seed)
         self._backend = backend
+        self.llm_call_attempts = 0
+        self.llm_calls_completed = 0
+        self.llm_input_tokens = 0
+        self.llm_output_tokens = 0
+        self.llm_latency_ms = 0.0
 
     def mutate(self, text: str) -> MutationResult:
         """Apply the mutation by calling the LLM live."""
@@ -156,6 +161,7 @@ class _LiveLLMMutator(Mutator):
             )
 
         try:
+            self.llm_call_attempts += 1
             response = self._backend.generate(
                 system=self._system_prompt,
                 messages=[{"role": "user", "content": body}],
@@ -174,6 +180,10 @@ class _LiveLLMMutator(Mutator):
             )
 
         mutated_body = response.content.strip()
+        self.llm_calls_completed += 1
+        self.llm_input_tokens += response.input_tokens
+        self.llm_output_tokens += response.output_tokens
+        self.llm_latency_ms += response.latency_ms
 
         # Reassemble: original frontmatter (unchanged) + LLM-mutated body
         full_doc = parsed.frontmatter_raw + mutated_body
@@ -256,11 +266,8 @@ class ParaphraseMutator(_LiveLLMMutator):
 
     Source: LLMORPH MR-51 + AUGMENT synonym-constraint paraphrase type.
 
-    Uses temperature=0.6 so that each call produces a genuinely different
-    candidate with visible lexical variation.
-    Short rules benefit from higher temperature to ensure visible lexical
-    variation (previous 0.3 produced near-identical outputs for rules with
-    limited synonymisable vocabulary).
+    Uses temperature=0.6 so that each call produces visible lexical variation,
+    including for short rules with limited synonymisable vocabulary.
 
     Inline code masking
     -------------------
@@ -305,6 +312,7 @@ class ParaphraseMutator(_LiveLLMMutator):
 
         # ── LLM call ─────────────────────────────────────────────────────
         try:
+            self.llm_call_attempts += 1
             response = self._backend.generate(
                 system=self._system_prompt,
                 messages=[{"role": "user", "content": masked_body}],
@@ -323,6 +331,10 @@ class ParaphraseMutator(_LiveLLMMutator):
             )
 
         mutated_body = response.content.strip()
+        self.llm_calls_completed += 1
+        self.llm_input_tokens += response.input_tokens
+        self.llm_output_tokens += response.output_tokens
+        self.llm_latency_ms += response.latency_ms
 
         # ── Restore inline code ──────────────────────────────────────────
         def _unmask(m: _re.Match) -> str:

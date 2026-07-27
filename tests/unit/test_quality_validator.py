@@ -6,9 +6,7 @@ deterministic vs stochastic mutators, and metadata flow.
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
-from src.mutation.base import MutationResult, Mutator
+from src.mutation.base import MutationResult
 from src.mutation.quality import MutationQualityValidator
 
 from tests.conftest import SAMPLE_RULE_TEXT
