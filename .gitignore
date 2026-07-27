@@ -45,4 +45,12 @@ rule_maps/rule_retrieval_map_*.json
 rule_maps/retrieval_map_*.json
 rule_maps/*progress*.jsonl
 
-experiments/final/
+/experiments/
+
+# DelftBlue-only ops/recovery helpers — useful here, no external value
+scripts/slurm/slurm_tar_archive.sh
+scripts/slurm/slurm_rescore_baseline.sh
+rule_maps/_smoke/
+rule_maps/temp_sweep/
+rule_maps/temp_sweep_reframed
+rule_maps/old_maps/

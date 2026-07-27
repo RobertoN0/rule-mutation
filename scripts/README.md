@@ -24,6 +24,11 @@ replication.
   shared population per language.
 - `analyze/validate_qualified_maps.py`: verify every final map, fingerprint,
   supporting-artifact hash, and task-order contract.
+- `mapping/analyze_prompt_rule_maps.py`: stdlib-only inspection of the raw
+  retrieval maps (`single`, `across`, `compare`, `all`). It reports the
+  seed-to-seed selection stability that justifies the 11-of-20 consensus
+  threshold; `setup/materialize_retrieval_consensus.py` is what actually writes
+  the frozen maps.
 
 Example:
 

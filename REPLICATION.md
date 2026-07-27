@@ -183,10 +183,69 @@ The full field-level schema is documented in
   `tree-sitter-java` for Java qualification, `sentence-transformers` (for the
   validator), `datasets`, `pandas`. Pinned exactly in `uv.lock` (committed); the
   Dockerfile consumes the same lockfile via `uv sync --frozen --no-dev`.
-- **`--extra gpu`** — `accelerate`, `bitsandbytes` (+ a CUDA torch reinstall on
-  DelftBlue). **Only needed for Path B.**
+- **`--extra gpu`** — `accelerate`, `bitsandbytes` (+ a CUDA torch reinstall, see
+  below). **Only needed for Path B.**
 - **`--extra analysis`** — `scipy` for paired statistical analysis.
 - **`--extra dev`** — `pytest`, `ruff`.
+
+### GPU host (DelftBlue / CUDA)
+
+`pyproject.toml` pins `torch` to PyTorch's **CPU** wheel index
+(`[tool.uv.sources]`), because the CUDA wheel is ~5 GB and no replicator on a
+laptop needs it. A GPU host therefore builds the environment in two steps: sync
+the extras, then swap torch for the CUDA build. This is the whole procedure for
+standing up a fresh account:
+
+```bash
+# 1. Keep the ~7 GB CUDA stack off the quota'd /home. /scratch is NOT backed up;
+#    treat the venv as rebuildable from these steps.
+export UV_PROJECT_ENVIRONMENT=/scratch/$USER/venvs/rule-mutation
+
+# 2. Sync every extra you need IN ONE COMMAND (uv prunes anything not named).
+uv sync --python 3.12 --extra gpu --extra analysis --extra dev
+ln -s "$UV_PROJECT_ENVIRONMENT" .venv    # so `source .venv/bin/activate` works
+
+# 3. Swap the CPU torch wheel for the CUDA one. The CUDA toolkit version is
+#    deliberately NOT in uv.lock — pinning it there would force the 5 GB wheel
+#    on every replicator.
+uv pip install --reinstall --index-url https://download.pytorch.org/whl/cu126 torch
+
+# 4. Verify. `cuda.is_available()` is False on a login node — check it in a job.
+source .venv/bin/activate
+python -c "import torch; print(torch.__version__)"   # expect 2.12.0+cu126
+semgrep --version                                     # expect 1.85.0
+python -c "import bitsandbytes, accelerate"           # must not raise
+srun --account=<your-slurm-account> --partition=gpu-a100 \
+     --ntasks=1 --gpus-per-task=1 --time=00:05:00 \
+     python -c "import torch; print(torch.cuda.is_available())"   # expect True
+```
+
+> **Never run a bare `uv sync` afterwards.** It reverts torch to the CPU wheel —
+> every GPU job then fails — and prunes the extras' helper packages, which is how
+> Semgrep silently starts reporting zero findings. If it happens, re-run steps 2
+> and 3.
+
+The exact package set behind the thesis results is frozen in
+`scripts/setup/venv_packages_delftblue.txt` (180 pins, including
+`torch==2.12.0+cu126` and the matching `nvidia-*-cu12` stack). Use it to
+reproduce the environment byte-for-byte rather than re-resolving:
+
+```bash
+uv pip install --index-url https://download.pytorch.org/whl/cu126 \
+               --extra-index-url https://pypi.org/simple \
+               -r scripts/setup/venv_packages_delftblue.txt
+```
+
+Two host-specific inputs live outside the venv and must be staged separately on
+a new account: the offline Hugging Face model cache (`/scratch/$USER/models/hub/`,
+populated on a login node — jobs run offline and will not download) and the
+Semgrep rule directory (`/scratch/$USER/semgrep-rules/security-audit`, via
+`scripts/setup/download_semgrep_security_audit_rules.sh`).
+
+Two values are also hard-coded in the SLURM wrappers and must be changed on a
+different account: `#SBATCH --account=` and the `REPO_ROOT` default (also used by
+the `--output`/`--error` header paths). `REPO_ROOT` is overridable by
+environment variable; the `#SBATCH` lines are not, so edit them.
 
 ---
 

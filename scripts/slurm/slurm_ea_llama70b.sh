@@ -9,10 +9,17 @@
 #SBATCH --mem-per-cpu=8000M
 #SBATCH --output=/home/rnegro/thesis/rule-mutation/logs/%j_%x.out
 #SBATCH --error=/home/rnegro/thesis/rule-mutation/logs/%j_%x.err
-# Graceful pre-timeout: deliver SIGUSR1 to the batch shell (B:) 300s before the
-# wall-time SIGKILL so the run can save final results. Override per-job for
-# long-evaluation (full-population) runs, e.g.: sbatch --signal=B:USR1@700 ...
-#SBATCH --signal=B:USR1@300
+# Graceful pre-timeout: deliver SIGUSR1 to the batch shell (B:) this many seconds
+# before the wall-time SIGKILL so the run can save final results. SLURM may
+# deliver up to 60s EARLIER than asked, never later, so the lead is the floor on
+# the shutdown budget. 1800s is sized from a measured graceful stop (job
+# 10526272: 526s total = 294s abort+write, 1s semgrep filter, 231s validator)
+# plus headroom for the worst case — an in-flight injection proposal mutating
+# K=10 rules through the mutation LLM, which has no stop check. See WORKFLOW.md
+# "Stopping condition on DelftBlue". It costs 2% of a 24h allocation and is
+# identical in both arms, so it cancels in the paired comparison. Keep
+# PRETIMEOUT_LEAD_SECONDS below in sync; short smokes may override both down.
+#SBATCH --signal=B:USR1@1800
 
 #############################################################################
 # SBST Experiment: archive EA (shared init + injection) OR i.i.d. random search.
@@ -95,7 +102,7 @@ REPO_ROOT=${REPO_ROOT:-/home/rnegro/thesis/rule-mutation}
 OUTPUT_BASE=${OUTPUT_BASE:-"$REPO_ROOT/experiments/results"}
 INITIALIZATION_BUNDLE=${INITIALIZATION_BUNDLE:-}
 TIME_BUDGET_SECONDS=${TIME_BUDGET_SECONDS:-}
-PRETIMEOUT_LEAD_SECONDS=${PRETIMEOUT_LEAD_SECONDS:-300}
+PRETIMEOUT_LEAD_SECONDS=${PRETIMEOUT_LEAD_SECONDS:-1800}
 
 MODEL_ID="meta-llama/Llama-3.3-70B-Instruct"
 # Use the model-specific final consensus map.
@@ -293,7 +300,8 @@ python scripts/experiments/run_experiment.py \
     --semgrep-jobs "$SEMGREP_JOBS" \
     --output-dir "$OUTPUT_DIR" &
 PYTHON_PID=$!
-trap 'echo "↪ Forwarding SLURM pre-timeout SIGUSR1 to Python (PID $PYTHON_PID)"; kill -USR1 "$PYTHON_PID" 2>/dev/null' USR1
+SIGNAL_EPOCH=""
+trap 'SIGNAL_EPOCH=$(date +%s); echo "↪ Forwarding SLURM pre-timeout SIGUSR1 to Python (PID $PYTHON_PID)"; kill -USR1 "$PYTHON_PID" 2>/dev/null' USR1
 # `set -e` (line 71) would abort the script the moment `wait` returns non-zero —
 # which happens every time the USR1 trap interrupts it. Disable errexit around
 # the wait so we can re-wait for Python's *real* exit after forwarding the signal.
@@ -309,23 +317,51 @@ done
 set -e
 trap - USR1
 
+PYTHON_DONE_EPOCH=$(date +%s)
+
 # Keep the prompt-level audit while removing Semgrep's very large raw JSON
 # payload. This is identical to the Qwen wrapper's post-run handling.
 FILTER="$REPO_ROOT/scripts/experiments/filter_semgrep_debug.py"
+FILTER_SECONDS=0
 if [ -f "$OUTPUT_DIR/semgrep_debug/semgrep_debug.jsonl" ]; then
     echo ""
     echo "→ Filtering semgrep_debug (strip raw stdout, keep findings + error audit)…"
+    _t0=$(date +%s)
     timeout 250 python "$FILTER" --in-place --audit-json "$OUTPUT_DIR" \
         || echo "⚠️  semgrep_debug filter incomplete/skipped (raw kept — re-run on login)"
+    FILTER_SECONDS=$(( $(date +%s) - _t0 ))
 fi
 
+# The validator is capped so it can never be the reason SLURM kills the job.
+# Everything irreplaceable is already on disk once Python exits; a validation
+# report can always be regenerated on a login node, a lost run cannot.
 VALIDATOR="$REPO_ROOT/scripts/analyze/validate_search_run.py"
+VALIDATOR_SECONDS=0
 if [ "${EXIT_CODE:-1}" -eq 0 ]; then
     echo "→ Validating search artifacts…"
-    if ! python "$VALIDATOR" --write "$OUTPUT_DIR"; then
+    _t0=$(date +%s)
+    # `set -e` is active here: guard the call so a non-zero exit reaches the
+    # branches below instead of aborting the wrapper.
+    timeout 600 python "$VALIDATOR" --write "$OUTPUT_DIR" && VALIDATOR_RC=0 || VALIDATOR_RC=$?
+    VALIDATOR_SECONDS=$(( $(date +%s) - _t0 ))
+    if [ "$VALIDATOR_RC" -eq 124 ]; then
+        echo "⚠️  Validation exceeded 600s and was stopped — run artifacts are intact."
+        echo "    Re-run on a login node: python $VALIDATOR --write $OUTPUT_DIR"
+    elif [ "$VALIDATOR_RC" -ne 0 ]; then
         echo "❌ Search-run validation failed"
         EXIT_CODE=3
     fi
+fi
+
+# Graceful-shutdown budget. Everything between the pre-timeout signal and this
+# point must fit inside --signal=B:USR1@<lead>, or SLURM SIGKILLs the job before
+# the artifacts are complete. Grep PRETIMEOUT_FINALIZE_SECONDS across a batch to
+# re-derive the lead from real runs rather than guessing it.
+if [ -n "$SIGNAL_EPOCH" ]; then
+    echo "⏱️  PRETIMEOUT_FINALIZE_SECONDS(total)=$(( $(date +%s) - SIGNAL_EPOCH )) \
+search_stop_and_write=$(( PYTHON_DONE_EPOCH - SIGNAL_EPOCH )) \
+semgrep_debug_filter=${FILTER_SECONDS} validator=${VALIDATOR_SECONDS} \
+lead=${PRETIMEOUT_LEAD_SECONDS}"
 fi
 
 echo ""

@@ -9,7 +9,10 @@
 #SBATCH --mem-per-cpu=8000M
 #SBATCH --output=/home/rnegro/thesis/rule-mutation/logs/%j_%x.out
 #SBATCH --error=/home/rnegro/thesis/rule-mutation/logs/%j_%x.err
-#SBATCH --signal=B:USR1@300
+# Same graceful-shutdown budget as the mutation wrappers: this job's post-run
+# stages (semgrep_debug filter, capped at 250s, then the validator) do not fit in
+# 300s on a contended node. See WORKFLOW.md "Stopping condition on DelftBlue".
+#SBATCH --signal=B:USR1@900
 
 set -euo pipefail
 
