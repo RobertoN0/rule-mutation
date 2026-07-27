@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from src.retrieval.rule_retrieval_mapping_local import (
+from src.retrieval.rule_retrieval_utils import (
     compile_mapping,
     load_progress,
     load_prompts_from_maps,

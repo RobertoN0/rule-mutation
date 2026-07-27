@@ -17,9 +17,9 @@ artifact contract.
 
 ## Phase 1 — Build and freeze the task-to-rule maps
 
-The current maps are built with the reframed retrieval prompt implemented in
-`src/retrieval/rule_retrieval_mapping_reframed.py`. The DelftBlue launcher is
-`scripts/slurm/slurm_rule_retrieval_reframed.sh`. Repeated retrievals are
+The current maps are built with the task-delimited retrieval request implemented
+in `src/retrieval/rule_retrieval_mapping.py`. The DelftBlue launcher is
+`scripts/slurm/slurm_rule_retrieval.sh`. Repeated retrievals are
 validated against their exact task carrier and retrieval contract, then
 aggregated into one 11-of-20 consensus map per model and language. Before
 qualification:

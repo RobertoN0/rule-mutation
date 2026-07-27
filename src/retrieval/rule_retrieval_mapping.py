@@ -1,42 +1,21 @@
 #!/usr/bin/env python3
-"""
-rule_retrieval_mapping_reframed.py — reframed-prompt variant of the local
-(DelftBlue) rule retrieval mapping.
+"""Build task-to-rule maps with local models on DelftBlue.
 
-Identical in behaviour to ``rule_retrieval_mapping_local.py`` EXCEPT for how the
-per-prompt message is built. Every leaf helper (rule loading, prompt loading,
-response parsing, progress files, output compilation, seeding, backends) is
-imported and reused from that module -- only the prompt STRUCTURE differs here.
-
-Why this exists
-───────────────
-The original single-turn framing puts the raw code-generation prompt (e.g.
-"Write a Python function that ...") in the USER turn and the "select guidelines,
-do NOT write code" instruction in the SYSTEM turn. Qwen2.5-Coder-32B follows
-this correctly, but Llama-3.3-70B resolves the conflict ("write code" vs "don't
-write code") in favour of the explicit user request and just writes the code --
-returning 0 rules on every prompt.
-
-The reframe (root cause fix): move the "do NOT write code / select guidelines"
-instruction into the USER turn and wrap the original prompt as delimited *data*
-between ``<task>`` and ``</task>``. The user turn then no longer reads as a bare
-imperative to write code, so both models perform the analysis task. The
-guidelines list stays in the system message (``build_list_guidelines_response``).
-
-Output format is byte-compatible with the original script; ``prompt_template_version``
-in the metadata records that the reframed framing produced the map, and
-``user_prompt_template`` stores the exact user-turn template for provenance.
+The original code-generation prompt is delimited as task data while the user
+turn asks the model only to select relevant CodeGuard guidelines. Retrieval
+artifacts record the exact system message, user template, and stable template
+version used to construct the final consensus maps.
 
 Usage
 ─────
   # Temperature/seed sweep over a FIXED prompt set (as with the original script):
-  python src/retrieval/rule_retrieval_mapping_reframed.py \\
+  python src/retrieval/rule_retrieval_mapping.py \\
       --from-map rule_maps/old_maps/map_qwen32b_vulnerable_py.json \\
       --temperature 0.6 --seed-start 1 --repetitions 20 \\
-      --output-dir rule_maps/temp_sweep_reframed/python
+      --output-dir rule_maps/retrieval_sweeps/python
 
   # Dry run:
-  python src/retrieval/rule_retrieval_mapping_reframed.py --dry-run \\
+  python src/retrieval/rule_retrieval_mapping.py --dry-run \\
       --from-map rule_maps/old_maps/map_qwen32b_vulnerable_py.json
 """
 
@@ -62,10 +41,7 @@ def _resolve_project_root() -> Path:
 PROJECT_ROOT = _resolve_project_root()
 sys.path.insert(0, str(PROJECT_ROOT))
 
-# ── Reuse ALL leaf helpers from the original local script ────────────────────
-# (Everything except how the per-prompt message is built is imported, so the two
-#  scripts share one implementation of loading/parsing/progress/compile/output.)
-from src.retrieval.rule_retrieval_mapping_local import (  # noqa: E402
+from src.retrieval.rule_retrieval_utils import (  # noqa: E402
     DEFAULT_MODEL,
     MAX_TOKENS,
     OUTPUT_DIR,
@@ -87,14 +63,7 @@ from src.llm_backends.delftblue_local_backend import DelftBlueLocalBackend  # no
 from src.llm_backends.base import LLMConfig, LLMError, LLMResponse  # noqa: E402
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# PROMPT STRUCTURE (the ONLY thing that differs from the original script)
-# ═════════════════════════════════════════════════════════════════════════════
-# v2_reframed_user_turn: the "do NOT write code / select guidelines" instruction
-# lives in the USER turn and the original code-generation prompt is wrapped as
-# delimited data between <task> and </task>. This stops instruction-following
-# models (Llama-3.3-70B) from treating the prompt as a bare "write code" command.
-
+# This identifier is part of the immutable provenance contract of existing maps.
 PROMPT_TEMPLATE_VERSION = "v2_reframed_user_turn"
 
 # The guidelines list is still supplied in the system message (reused
@@ -121,9 +90,9 @@ validation.
 ["codeguard-0-input-validation-injection", "codeguard-0-framework-and-languages"]\
 """
 
-# The reframed USER turn. The original prompt is inserted verbatim between
-# <task> and </task> so it reads as data to be analysed, not an instruction to
-# obey. "the coding guidelines listed above" refers to the system-message list.
+# The original prompt is inserted verbatim between <task> and </task> so it is
+# treated as data to analyse. "The coding guidelines listed above" refers to
+# the catalog embedded in the system message.
 USER_PROMPT_TEMPLATE = """\
 A developer has been given the following code-generation task, shown between \
 <task> and </task>. Do NOT write, complete, or output any code. Your ONLY job is \
@@ -138,8 +107,8 @@ List each relevant guideline with a one-sentence reason, then output a JSON arra
 containing ONLY the selected rule IDs, on its own line."""
 
 
-def build_reframed_user_content(prompt: str) -> str:
-    """Wrap the original code-generation prompt in the reframed user-turn template."""
+def build_user_content(prompt: str) -> str:
+    """Wrap the code-generation prompt as task data for rule selection."""
     return USER_PROMPT_TEMPLATE.format(prompt=prompt)
 
 
@@ -149,13 +118,8 @@ def retrieve_rules_for_prompt(
     valid_rule_ids: set[str],
     system_message: str,
 ) -> dict:
-    """Run single-turn rule retrieval for one prompt using the reframed user turn.
-
-    Same contract/return shape as the original script's helper -- the ONLY
-    difference is that the user message is the reframed <task>-wrapped content
-    rather than the bare prompt.
-    """
-    user_content = build_reframed_user_content(prompt)
+    """Run rule retrieval for one prompt and return its parsed evidence."""
+    user_content = build_user_content(prompt)
     messages = [{"role": "user", "content": user_content}]
 
     response: LLMResponse = backend.generate(
@@ -178,18 +142,11 @@ def retrieve_rules_for_prompt(
     }
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# MAIN — mirrors rule_retrieval_mapping_local.main(), reusing its helpers.
-# Differences vs the original: (1) new SYSTEM_MESSAGE_TEMPLATE + reframed user
-# turn, (2) default --output-dir is temp_sweep_reframed (never the old dir),
-# (3) prompt_template_version / user_prompt_template injected into metadata.
-# ═════════════════════════════════════════════════════════════════════════════
-
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
             "Map CyberSecEval prompts -> CodeGuard rules via local model on "
-            "DelftBlue, using the v2 reframed user-turn prompt structure."
+            "DelftBlue, using the final task-delimited retrieval prompt."
         )
     )
     parser.add_argument(
@@ -238,7 +195,7 @@ def main() -> None:
     parser.add_argument(
         "--output-dir", type=Path, default=None,
         help="Directory for repetition-sweep output files "
-             "(default: rule_maps/temp_sweep_reframed). Ignored when --repetitions 1 "
+             "(default: rule_maps/retrieval_sweeps). Ignored when --repetitions 1 "
              "and --output is given.",
     )
     parser.add_argument(
@@ -349,10 +306,10 @@ def main() -> None:
 
     if args.dry_run:
         print("\nDry run -- not running inference.")
-        print("\nExample reframed user turn (first prompt):")
+        print("\nExample retrieval user turn (first prompt):")
         if prompts:
             print("-" * 70)
-            print(build_reframed_user_content(prompts[0]["prompt"]))
+            print(build_user_content(prompts[0]["prompt"]))
             print("-" * 70)
         print(f"\nSystem message length: {len(system_message)} chars")
         print(f"Temperature: {args.temperature}")
@@ -368,7 +325,7 @@ def main() -> None:
     # ── Confirm ──────────────────────────────────────────────────────────
     if not args.yes:
         answer = input(
-            f"\nRun REFRAMED retrieval for {len(prompts)} prompts x {len(seeds)} "
+            f"\nRun retrieval for {len(prompts)} prompts x {len(seeds)} "
             f"seed(s) with {args.model} (temperature={args.temperature})? [y/N] "
         ).strip().lower()
         if answer != "y":
@@ -421,18 +378,7 @@ def main() -> None:
         set_tag = (
             "cwe_" + "-".join(sorted(args.languages)) if args.languages else "cwe_all"
         )
-    output_dir = args.output_dir or (OUTPUT_DIR / "temp_sweep_reframed")
-
-    # Safety net: never write reframed maps into the OLD (old-framing) temp_sweep
-    # dirs -- those must be preserved for comparison.
-    old_dir = (OUTPUT_DIR / "temp_sweep").resolve()
-    resolved_out = output_dir.resolve()
-    if resolved_out == old_dir or old_dir in resolved_out.parents:
-        parser.error(
-            f"--output-dir {output_dir} resolves inside the old-framing "
-            f"{old_dir} tree; reframed maps must go to a distinct location "
-            f"(e.g. rule_maps/temp_sweep_reframed/...)."
-        )
+    output_dir = args.output_dir or (OUTPUT_DIR / "retrieval_sweeps")
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -472,7 +418,7 @@ def main() -> None:
         start_time = time.time()
         model_config_captured: dict | None = None
 
-        print(f"\nStarting reframed retrieval for {total_prompts} prompts...\n")
+        print(f"\nStarting retrieval for {total_prompts} prompts...\n")
 
         for idx, item in enumerate(prompts):
             if idx in completed:
@@ -546,10 +492,8 @@ def main() -> None:
             seed=seed,
             from_map=args.from_map,
         )
-        # Record which framing produced this map (the imported compile_mapping
-        # does not know about the reframe). prompt_template_version discriminates
-        # v2 reframed maps from v1 old-framing ones; user_prompt_template stores
-        # the exact user-turn wording for full provenance.
+        # Store the stable template identifier and exact user-turn wording for
+        # provenance and consensus validation.
         mapping["metadata"]["prompt_template_version"] = PROMPT_TEMPLATE_VERSION
         mapping["metadata"]["user_prompt_template"] = USER_PROMPT_TEMPLATE
 
@@ -572,7 +516,7 @@ def main() -> None:
 
     # ── Batch summary ──────────────────────────────────────────────────────
     print(f"\n{'=' * 70}")
-    print(f"REFRAMED RETRIEVAL SWEEP COMPLETE: {len(seeds)} seed(s), "
+    print(f"RETRIEVAL SWEEP COMPLETE: {len(seeds)} seed(s), "
           f"{total_prompts} prompts each")
     print(f"{'=' * 70}")
     print(f"   Model:           {args.model}")

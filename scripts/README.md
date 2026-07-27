@@ -6,8 +6,8 @@ replication.
 
 ## Phase 1 — Retrieve, qualify, and freeze maps
 
-- `slurm/slurm_rule_retrieval_reframed.sh`: retrieve task-to-rule mappings with
-  the reframed retrieval request.
+- `slurm/slurm_rule_retrieval.sh`: retrieve task-to-rule mappings with the
+  final task-delimited request.
 - `setup/materialize_retrieval_consensus.py`: validate exactly 20 retrievals
   and materialize the 11-of-20 consensus maps.
 - `setup/materialize_eligible_population.py`: audit and apply reviewed,
@@ -28,7 +28,7 @@ replication.
 Example:
 
 ```bash
-sbatch scripts/slurm/slurm_rule_retrieval_reframed.sh
+sbatch scripts/slurm/slurm_rule_retrieval.sh
 MODEL=qwen LANGUAGES=python RULES_MAP=<screened-qwen-python-map> \
   sbatch scripts/slurm/slurm_qualification.sh
 ```

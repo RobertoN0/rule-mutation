@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name="rule_retrieval_reframed"
+#SBATCH --job-name="rule_retrieval"
 #SBATCH --account=education-eemcs-msc-cs
 #SBATCH --partition=gpu-a100
 #SBATCH --time=02:00:00
@@ -12,12 +12,11 @@
 #SBATCH --error=/home/rnegro/thesis/rule-mutation/logs/%j_%x.err
 
 #############################################################################
-# Rule Retrieval Mapping on DelftBlue -- REFRAMED prompt (v2), any model.
+# Rule Retrieval Mapping on DelftBlue, any supported local model.
 #
-# Runs src/retrieval/rule_retrieval_mapping_reframed.py, which moves the
-# "select guidelines, do NOT write code" instruction into the user turn and
-# wraps the code-generation prompt as <task> data -- the root-cause fix for
-# Llama-3.3-70B writing code instead of selecting rules.
+# Runs src/retrieval/rule_retrieval_mapping.py. The retrieval request wraps the
+# original code-generation prompt as <task> data and asks only for relevant
+# CodeGuard guideline identifiers.
 #
 # One script for BOTH models: model, quantization and compute dtype are env
 # vars (defaults = Qwen fp16). Single A100 80GB, one GPU / one node.
@@ -28,30 +27,30 @@
 #   FROM_MAP=rule_maps/staging/eligible_python_carrier.json \
 #   TEMPERATURE=0.6 SEED_START=1 REPETITIONS=20 \
 #   OUTPUT_DIR=experiments/final_map_pipeline/retrieval/qwen_python \
-#     sbatch --time=8:00:00 --job-name=reframed_qwen_py \
-#            scripts/slurm/slurm_rule_retrieval_reframed.sh
+#     sbatch --time=8:00:00 --job-name=retrieval_qwen_py \
+#            scripts/slurm/slurm_rule_retrieval.sh
 #
 #   # One replacement draw after rejecting an invalid seed:
 #   FROM_MAP=rule_maps/staging/eligible_java_carrier.json \
 #   TEMPERATURE=0.6 SEED_START=21 REPETITIONS=1 \
 #   OUTPUT_DIR=experiments/final_map_pipeline/retrieval/qwen_java \
-#     sbatch --time=2:00:00 --job-name=reframed_qwen_java_s21 \
-#            scripts/slurm/slurm_rule_retrieval_reframed.sh
+#     sbatch --time=2:00:00 --job-name=retrieval_qwen_java_s21 \
+#            scripts/slurm/slurm_rule_retrieval.sh
 #
 #   # Llama uses the same carrier with 4-bit/bfloat16 model settings:
 #   MODEL_ID=meta-llama/Llama-3.3-70B-Instruct QUANTIZATION=4bit BNB_COMPUTE_DTYPE=bfloat16 \
 #   FROM_MAP=rule_maps/staging/eligible_python_carrier.json \
 #   TEMPERATURE=0.6 SEED_START=1 REPETITIONS=20 \
 #   OUTPUT_DIR=experiments/final_map_pipeline/retrieval/llama_python \
-#     sbatch --time=18:00:00 --job-name=reframed_llama_py \
-#            scripts/slurm/slurm_rule_retrieval_reframed.sh
+#     sbatch --time=18:00:00 --job-name=retrieval_llama_py \
+#            scripts/slurm/slurm_rule_retrieval.sh
 #
 #   # Smoke (1 seed far outside the real range + dedicated dir, cleaned up after):
 #   FROM_MAP=rule_maps/_smoke/smoke_py8.json \
 #   TEMPERATURE=0.6 SEED_START=9001 REPETITIONS=1 \
-#   OUTPUT_DIR=rule_maps/_smoke/reframed_smoke \
-#     sbatch --time=1:00:00 --job-name=reframed_smoke \
-#            scripts/slurm/slurm_rule_retrieval_reframed.sh
+#   OUTPUT_DIR=rule_maps/_smoke/retrieval_smoke \
+#     sbatch --time=1:00:00 --job-name=retrieval_smoke \
+#            scripts/slurm/slurm_rule_retrieval.sh
 #
 # Resume: a wall-time-killed sweep is idempotent -- resubmit the same command
 # and seeds already written to OUTPUT_DIR are skipped.
@@ -68,17 +67,17 @@ FROM_MAP=${FROM_MAP:-}            # space-separated map path(s); the fixed promp
 TEMPERATURE=${TEMPERATURE:-0.0}
 SEED_START=${SEED_START:-1}
 REPETITIONS=${REPETITIONS:-1}
-OUTPUT_DIR=${OUTPUT_DIR:-}        # default in the Python script: rule_maps/temp_sweep_reframed
+OUTPUT_DIR=${OUTPUT_DIR:-}        # default in the Python script: rule_maps/retrieval_sweeps
 OUTPUT=${OUTPUT:-}
 RESUME=${RESUME:-}
 REPO_ROOT="${REPO_ROOT:-/home/rnegro/thesis/rule-mutation}"
 
 mkdir -p "$REPO_ROOT/logs"
-exec >"$REPO_ROOT/logs/rule_retrieval_reframed_${SLURM_JOB_ID}.out" \
-     2>"$REPO_ROOT/logs/rule_retrieval_reframed_${SLURM_JOB_ID}.err"
+exec >"$REPO_ROOT/logs/rule_retrieval_${SLURM_JOB_ID}.out" \
+     2>"$REPO_ROOT/logs/rule_retrieval_${SLURM_JOB_ID}.err"
 
 echo "=========================================================================="
-echo "Rule Retrieval Mapping on DelftBlue (REFRAMED v2)"
+echo "Rule Retrieval Mapping on DelftBlue"
 echo "=========================================================================="
 echo "Started: $(date)"
 echo "Job ID: $SLURM_JOB_ID"
@@ -92,7 +91,7 @@ echo "  Max tokens: $MAX_TOKENS"
 echo "  Temperature: $TEMPERATURE"
 echo "  Seed start / repetitions: $SEED_START / $REPETITIONS"
 echo "  From map: ${FROM_MAP:-none}"
-echo "  Output dir: ${OUTPUT_DIR:-default (rule_maps/temp_sweep_reframed)}"
+echo "  Output dir: ${OUTPUT_DIR:-default (rule_maps/retrieval_sweeps)}"
 echo "  Resume: ${RESUME:-none}"
 echo ""
 
@@ -134,7 +133,7 @@ mkdir -p logs
 
 export PYTHONUNBUFFERED=1
 
-echo "=== Starting Reframed Rule Retrieval ==="
+echo "=== Starting Rule Retrieval ==="
 
 # Build optional arguments
 ARGS=""
@@ -155,7 +154,7 @@ if [ -n "$OUTPUT_DIR" ]; then
     ARGS="$ARGS --output-dir $OUTPUT_DIR"
 fi
 
-python src/retrieval/rule_retrieval_mapping_reframed.py \
+python src/retrieval/rule_retrieval_mapping.py \
     --model "$MODEL_ID" \
     --quantization "$QUANTIZATION" \
     --bnb-compute-dtype "$BNB_COMPUTE_DTYPE" \
@@ -168,7 +167,7 @@ python src/retrieval/rule_retrieval_mapping_reframed.py \
 
 echo ""
 echo "=========================================================================="
-echo "Reframed Rule Retrieval Complete"
+echo "Rule Retrieval Complete"
 echo "=========================================================================="
 echo "Finished: $(date)"
 echo ""

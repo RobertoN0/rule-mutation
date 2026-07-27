@@ -4,7 +4,7 @@ rule_retrieval_mapping_anthropic.py — Discover which CodeGuard rules a Claude
 agent retrieves for each CyberSecEval prompt.
 
 Anthropic-API variant of the retrieval step. The companion file
-`rule_retrieval_mapping_local.py` is the DelftBlue-local variant; both produce
+`rule_retrieval_mapping.py` is the DelftBlue-local variant; both produce
 mappings in the same JSON shape that `scripts/experiments/run_experiment.py`
 can consume.
 
