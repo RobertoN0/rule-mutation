@@ -1,8 +1,8 @@
 """
 Anthropic Claude LLM backend implementation.
 
-Uses the official `anthropic` Python SDK. Unlike the OpenAI-compatible
-backends (Groq, OpenRouter), Anthropic's API has a few shape differences:
+Uses the official `anthropic` Python SDK. Compared with the OpenAI and local
+transformer backends, Anthropic's API has a few shape differences:
 
 - The system prompt is a top-level `system=` kwarg, NOT a `{"role": "system"}`
   message.
