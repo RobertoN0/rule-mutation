@@ -47,6 +47,23 @@ derived map. The completed funnel is 351 Python/229 Java source tasks, 322/227
 eligible tasks, 206/128 tasks with an observed finding, and 203/126 final
 cross-model-valid search tasks.
 
+Steps 1–5 above are the single admission rule recorded in every qualified map
+and in `final_search_population_manifest.json` as
+
+```
+"policy": "observed_finding_cross_model_temp0_intersection"
+```
+
+Read it as: *observed finding* — the task produced at least one Semgrep finding
+somewhere in the temperature-0.6 screening block, so it can actually be improved
+or degraded; *cross model* — it qualified for **both** Qwen and Llama, so the
+two models search the identical task set; *temp0 intersection* — qualification
+was judged at temperature 0, the same setting the search runs at. The string is
+the only accepted value in `src/evaluation/population_screening.py`, and
+`scripts/analyze/validate_qualified_maps.py` rejects any map that declares
+something else, so a map built under a different rule cannot silently enter a
+final run.
+
 Before Phase 2, run exactly four complete temperature-zero search-population
 qualification jobs. These jobs test whether the original mapped rules produce a
 valid implementation for every task; they do not perform search. Qualification
@@ -195,7 +212,6 @@ for SEED in $APPROVED_SEEDS; do
         MAIN_LOOP_BUDGET=$EVALUATION_CEILING \
         INITIALIZATION_BUNDLE="experiments/initialization/qwen_${LANG}_s${SEED}" \
         TIME_BUDGET_SECONDS=$APPROVED_WALL_TIME_SECONDS \
-        PRETIMEOUT_LEAD_SECONDS=300 \
         sbatch --time="$APPROVED_SLURM_TIME" \
                --job-name="${OPT}_${LANG}_s${SEED}" \
                scripts/slurm/slurm_ea_qwen32b.sh
@@ -204,9 +220,91 @@ for SEED in $APPROVED_SEEDS; do
 done
 ```
 
-GPU environment setup (CUDA torch, the offline HF model cache, the local Semgrep
-rule directory) is host-specific and outside this guide; the wrapper's header
-documents the env vars it reads.
+### Stopping condition on DelftBlue: wall time, not iterations
+
+A final GPU run is bounded by **`sbatch --time`**, not by an evaluation count.
+`MAIN_LOOP_BUDGET` is deliberately set to a ceiling high enough never to bind,
+so both arms spend the same allocation and are compared on what they achieved
+within it. Four settings look like budgets; only the first two affect when a
+run actually stops.
+
+| Setting | What it actually does |
+|---|---|
+| `sbatch --time=HH:MM:SS` | **The real budget.** SLURM kills the job here. |
+| `#SBATCH --signal=B:USR1@<lead>` | **The real stop trigger.** SLURM sends SIGUSR1 `<lead>` seconds before that kill. |
+| `MAIN_LOOP_BUDGET` / `--main-loop-budget B` | Safety ceiling on evaluations (`E = 5 + B`). Set high; if it binds, the run ended early and the pair is not time-matched. |
+| `TIME_BUDGET_SECONDS` / `--wall-time-budget-seconds S` | **Declares the allocation; stops nothing.** No code in `src/` reads it. It is recorded in `run_config.json` so the analyzer can refuse to pool runs that declared different allocations, and so the validator can check the lead is below it. Set it to the same number of seconds as `--time`. |
+
+**`TIME_BUDGET_SECONDS` is not optional on a final run.** It stops nothing, but
+`validate_search_run.py` marks a run `final_search_eligible` only when *all* of
+these hold, and a missing or zero budget fails the fourth:
+
+- the validator found no issues, and the map is not a diagnostic override;
+- `termination_reason == "wall_time_limit"`;
+- completion state is `partial` — a run that *finished* its evaluation ceiling
+  did not spend its allocation and is not time-comparable;
+- `wall_time_budget_seconds` is a positive integer;
+- exactly five initialization evaluations are present;
+- `n_cases` equals the full map population (`N_CASES=all`).
+
+The stop path is: SLURM raises SIGUSR1 → the batch shell's `trap` forwards it to
+Python → `install_pretimeout_handler` flips a flag → the optimizer tests that
+flag at the top of each main-loop iteration and before each prompt's generation
+→ `WallTimeStop` aborts the in-flight evaluation → Python writes its final
+archive snapshot and `search_summary.json` → the wrapper then filters
+`semgrep_debug` and runs the validator. There is no internal timer anywhere in
+the search; nothing is checked against the clock until the
+signal arrives. Every final arm run therefore ends with
+`"termination_reason": "wall_time_limit"`, and the discarded in-flight
+evaluation is why the validator tolerates a small code-generation-call surplus
+on aborted runs.
+
+**Sizing the lead.** SLURM may deliver the signal up to 60 s *earlier* than
+asked but never later, so `<lead>` is the guaranteed floor on the shutdown
+budget. Measured end-to-end on job `10526272`, which stopped gracefully and
+validated cleanly:
+
+| stage | measured | bound |
+|---|---|---|
+| abort the in-flight evaluation + write artifacts | 294 s | see below |
+| `semgrep_debug` filter | 1 s (17–18 s at full population) | `timeout 250` |
+| in-job validator | 231 s (≈190–230 s, roughly independent of run length) | `timeout 600` |
+| **total** | **526 s** | |
+
+The first row is the one to watch, and it is *not* the discarded generation —
+that aborts within one prompt. It is the **candidate proposal**: mutating rules
+through the mutation LLM and scoring them with SBERT happens *before* the
+generation loop and has no stop check, so a signal landing there runs to
+completion. `10526272` was caught during an injection proposal that mutated 9
+rules. The worst case is `K = 10` LLM mutations; it does not grow with
+population size.
+
+The wrappers therefore default to **1800 s** — about 3.4× the measured total,
+2% of a 24 h allocation, and identical in both arms so it cancels in the paired
+comparison. Note also that only the *first* row is irreplaceable: once Python
+exits, the run is safe on disk and both the filter and the validator can be
+re-run on a login node, which is why the validator is capped rather than allowed
+to run the job into its SIGKILL. Every run that receives the signal prints its
+own measurement:
+
+```bash
+grep -r PRETIMEOUT_FINALIZE_SECONDS "$OUTPUT_BASE/slurm_logs/"
+# ⏱️  PRETIMEOUT_FINALIZE_SECONDS(total)=526 search_stop_and_write=294 \
+#     semgrep_debug_filter=1 validator=231 lead=1800
+```
+
+Re-derive the lead from those numbers rather than guessing it. If any run's
+`total` approaches the lead, raise the lead before the next batch.
+
+> Log locations: the wrappers `exec`-redirect after the GPU check, so `logs/`
+> holds only each job's header and `<OUTPUT_BASE>/slurm_logs/<jobid>_<name>.{out,err}`
+> holds the rest. The run's own `run.log` inside the result directory is the
+> Python-side tee of the same stream.
+
+GPU environment setup for a **new** DelftBlue account (CUDA torch, the offline
+HF model cache, the local Semgrep rule directory) is in
+[REPLICATION.md → GPU host](REPLICATION.md#gpu-host-delftblue--cuda); the
+wrapper's header documents the env vars it reads.
 
 ---
 

@@ -282,7 +282,6 @@ for SEED in $APPROVED_SEEDS; do
         MAIN_LOOP_BUDGET=$ITERATION_BUDGET \
         INITIALIZATION_BUNDLE="experiments/initialization/qwen_${LANG}_s${SEED}" \
         TIME_BUDGET_SECONDS=$APPROVED_WALL_TIME_SECONDS \
-        PRETIMEOUT_LEAD_SECONDS=300 \
         sbatch --time="$APPROVED_SLURM_TIME" \
                --job-name="${OPT}_${LANG}_s${SEED}" \
                scripts/slurm/slurm_ea_qwen32b.sh
@@ -290,6 +289,12 @@ for SEED in $APPROVED_SEEDS; do
   done
 done
 ```
+
+On DelftBlue the run is stopped by `sbatch --time` plus the wrapper's
+pre-timeout signal, not by `MAIN_LOOP_BUDGET` — that is a safety ceiling set
+high enough never to bind, and `TIME_BUDGET_SECONDS` only *declares* the
+allocation for the analyzer. See
+[WORKFLOW.md → Stopping condition on DelftBlue](WORKFLOW.md#stopping-condition-on-delftblue-wall-time-not-iterations).
 
 Search and replicate entrypoints check the map metadata for the final
 observed-finding and cross-model temperature-zero-valid population policy. This
