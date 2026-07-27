@@ -7,6 +7,8 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --gpus-per-task=1
 #SBATCH --mem-per-cpu=8000M
+#SBATCH --output=/home/rnegro/thesis/rule-mutation/logs/%j_%x.out
+#SBATCH --error=/home/rnegro/thesis/rule-mutation/logs/%j_%x.err
 #SBATCH --signal=B:USR1@300
 
 set -euo pipefail

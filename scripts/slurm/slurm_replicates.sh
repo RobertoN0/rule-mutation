@@ -7,6 +7,8 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --gpus-per-task=1
 #SBATCH --mem-per-cpu=8000M
+#SBATCH --output=/home/rnegro/thesis/rule-mutation/logs/%j_%x.out
+#SBATCH --error=/home/rnegro/thesis/rule-mutation/logs/%j_%x.err
 
 #############################################################################
 # Replicate runner: load the model ONCE, run temp>0 replicates of a SINGLE
