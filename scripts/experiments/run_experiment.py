@@ -533,12 +533,18 @@ def install_pretimeout_handler():
     The optimizer checks the returned predicate at controlled checkpoints and
     breaks cleanly, so the run still writes its final archive snapshot, summary,
     and run_config.json instead of being killed mid-iteration.
+
+    The returned predicate carries `.received_at` (a `time.monotonic()` reading,
+    or `None`) so the caller can report how long the graceful shutdown took —
+    that measurement is what sizes `--signal=B:USR1@<lead>`.
     """
     import signal
-    stop_requested = {"flag": False}
+    import time
+    stop_requested = {"flag": False, "at": None}
 
     def _on_sigusr1(_signum, _frame):
         if not stop_requested["flag"]:
+            stop_requested["at"] = time.monotonic()
             stop_requested["flag"] = True
             print("\n⏱️  SIGUSR1 received (SLURM pre-timeout) — aborting the in-flight "
                   "iteration and saving final results from the last completed one.",
@@ -548,7 +554,12 @@ def install_pretimeout_handler():
         signal.signal(signal.SIGUSR1, _on_sigusr1)
     except (ValueError, OSError):
         pass  # not on main thread / unsupported platform — degrade silently
-    return lambda: stop_requested["flag"]
+
+    def should_stop() -> bool:
+        return stop_requested["flag"]
+
+    should_stop.received_at = lambda: stop_requested["at"]
+    return should_stop
 
 
 def seed_everything(seed: int) -> None:
@@ -1255,6 +1266,15 @@ def main():
         sys.exit(130)
 
     print_results_summary(result, len(prompts_with_rules))
+
+    # Graceful-shutdown cost. Everything after the signal is dead allocation, so
+    # this number is what `--signal=B:USR1@<lead>` has to cover on the Python
+    # side; the SLURM wrapper reports its own post-run stages separately.
+    received_at = getattr(should_stop, "received_at", lambda: None)()
+    if received_at is not None:
+        import time as _time
+        print(f"⏱️  PRETIMEOUT_FINALIZE_SECONDS(python)="
+              f"{_time.monotonic() - received_at:.1f}", flush=True)
 
     print("\n✅ Experiment complete!")
     return 0
