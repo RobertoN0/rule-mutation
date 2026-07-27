@@ -76,6 +76,47 @@ def _completion_state(requested: Any, completed: int) -> str:
     return "overrun"
 
 
+ABORTING_TERMINATIONS = frozenset({"wall_time_limit", "rate_limit"})
+
+
+def _code_call_accounting(
+    code_calls: int,
+    fresh_prompt_rows: int,
+    termination_reason: Any,
+    population_size: int,
+) -> tuple[str | None, str | None]:
+    """Reconcile issued code-generation calls against consumed per-task rows.
+
+    A run stopped mid-evaluation (pre-timeout signal, rate limit) discards the
+    in-flight candidate, so its per-task rows never reach the consumed set —
+    but the generation calls it already issued are real and stay counted in the
+    summary. At most one candidate is ever in flight, so the surplus is bounded
+    by one evaluation over the population. Returns ``(issue, warning)``.
+    """
+    surplus = code_calls - fresh_prompt_rows
+    if termination_reason not in ABORTING_TERMINATIONS:
+        if surplus != 0:
+            return (
+                "actual code-generation call count differs from fresh "
+                "per-task evaluations",
+                None,
+            )
+        return (None, None)
+    if not 0 <= surplus <= population_size:
+        return (
+            "actual code-generation call count differs from fresh per-task "
+            "evaluations by more than the discarded in-flight evaluation",
+            None,
+        )
+    if surplus > 0:
+        return (
+            None,
+            f"{surplus} code-generation call(s) belong to the discarded "
+            "in-flight evaluation",
+        )
+    return (None, None)
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -743,11 +784,17 @@ def validate_run(
                     or value < 0
                 ):
                     issues.append(f"summary {key} is invalid")
-            if isinstance(code_calls, int) and code_calls != fresh_prompt_rows:
-                issues.append(
-                    "actual code-generation call count differs from fresh "
-                    "per-task evaluations"
+            if isinstance(code_calls, int) and not isinstance(code_calls, bool):
+                call_issue, call_warning = _code_call_accounting(
+                    code_calls,
+                    fresh_prompt_rows,
+                    termination_reason,
+                    len(baseline),
                 )
+                if call_issue:
+                    issues.append(call_issue)
+                if call_warning:
+                    warnings.append(call_warning)
             mutation_usage = summary.get("mutation_llm_usage_actual")
             if not isinstance(mutation_usage, dict):
                 issues.append("summary mutation-LLM usage is missing")
