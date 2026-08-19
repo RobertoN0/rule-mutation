@@ -4,6 +4,12 @@
 
 This MSc thesis framework studies how the **phrasing** of **[CodeGuard](https://github.com/cosai-oasis/project-codeguard) security coding guidelines** affects the security of LLM-generated code. CodeGuard rules (shipped as the `project-codeguard/` git submodule) are the natural-language security instructions given to a code-generating LLM. The framework applies **controlled mutations** to those rules — rewording, reordering, restructuring, or deliberately weakening them — and uses **Search-Based Software Testing** to find rule-set edits that lead the LLM to generate **fewer** vulnerabilities, as detected by [Semgrep](https://github.com/semgrep/semgrep). Rule fidelity is measured explicitly rather than assumed. The search direction is **repair** (minimise vulnerable generation); an adversarial direction (maximise) is retained only for secondary experiments.
 
+> **Looking for the thesis results?** [EVIDENCE_MAP.md](EVIDENCE_MAP.md) maps every
+> table and figure in the report to the artifact that produced it, names the exact
+> revision that ran each phase, and states which experiment data is archived outside
+> this repository. The results themselves are in [`analysis/results/`](analysis/results/)
+> and the selected rule sets in [`artifacts/phase3_selected/`](artifacts/phase3_selected/).
+
 ---
 
 ## Quick Start
@@ -326,11 +332,18 @@ Reproduce any run with `python scripts/experiments/rerun_from_config.py <run_dir
 │   ├── experiments/       # run_experiment.py, rerun_from_config.py, Semgrep-debug filter
 │   ├── slurm/             # Qwen/Llama search launchers + final retrieval launcher
 │   └── analyze/           # run validators and final search/replicate analysis
-├── tests/unit/            # unit and integration-contract tests
+├── tests/unit/            # unit and integration-contract tests (303 tests)
+├── analysis/
+│   ├── scripts/           # canonical read-only analyses + figure builder
+│   ├── results/           # every JSON/Markdown result the thesis cites
+│   └── figures/           # regenerated PDF + PNG figures
+├── artifacts/
+│   └── phase3_selected/   # the 20 selected rule sets, the 12 sanitized ones, and their maps
 ├── project-codeguard/     # CodeGuard security rule library (git submodule)
 ├── rule_maps/             # Source-population audit + final maps under qualified/
-├── experiments/results/   # Experiment outputs (gitignored)
+├── experiments/           # Experiment run trees (gitignored; see EVIDENCE_MAP.md §4)
 ├── Dockerfile             # API-only replication image
+├── EVIDENCE_MAP.md        # Thesis object -> artifact map, pinned resources, what is archived offline
 ├── ARCHITECTURE.md        # Technical reference (modules, schema, extension points)
 ├── WORKFLOW.md            # Running experiments + DelftBlue round-trip + result interpretation
 └── REPLICATION.md         # Reviewer-facing reproduction guide
@@ -348,6 +361,7 @@ Reproduce any run with `python scripts/experiments/rerun_from_config.py <run_dir
 
 | Document | Contents |
 |----------|----------|
+| [EVIDENCE_MAP.md](EVIDENCE_MAP.md) | **Start here for the thesis results.** Every table and figure mapped to the artifact that produced it, which revision produced what, the pinned resource identifiers, and what is archived outside this repository |
 | [REPLICATION.md](REPLICATION.md) | Reviewer reproduction (API-only): prerequisites → smoke → reproducibility guarantees |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | High-level design: the pipeline, the two search strategies, the fitness model, data flow |
 | [IMPLEMENTATION.md](IMPLEMENTATION.md) | Module-by-module reference, output schema, extension points, dependencies |
