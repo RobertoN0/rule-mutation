@@ -1,0 +1,71 @@
+{
+  "evaluation_index": 149,
+  "chromosome_id": "dec458eaa24be405",
+  "parent_id": "e038844f1db0215f",
+  "move_type": "order",
+  "changed_rule_id": "codeguard-0-logging",
+  "chain": [],
+  "mutated_rule_ids": [
+    "codeguard-0-api-web-services",
+    "codeguard-0-authorization-access-control",
+    "codeguard-0-data-storage",
+    "codeguard-0-file-handling-and-uploads",
+    "codeguard-0-input-validation-injection",
+    "codeguard-0-mobile-apps",
+    "codeguard-0-privacy-data-protection",
+    "codeguard-0-session-management-and-cookies",
+    "codeguard-0-supply-chain-security",
+    "codeguard-1-crypto-algorithms",
+    "codeguard-1-hardcoded-credentials"
+  ],
+  "order_priority": {
+    "codeguard-0-logging": 1
+  },
+  "changes": [
+    "front:codeguard-0-logging"
+  ],
+  "gene_paths": {
+    "codeguard-0-api-web-services": [
+      "paraphrase"
+    ],
+    "codeguard-0-authorization-access-control": [
+      "voice_change"
+    ],
+    "codeguard-0-data-storage": [
+      "verb_weakening",
+      "section_reorder_degrade",
+      "paraphrase"
+    ],
+    "codeguard-0-file-handling-and-uploads": [
+      "synonym_replacement",
+      "add_random_word"
+    ],
+    "codeguard-0-mobile-apps": [
+      "verb_weakening",
+      "section_reorder_degrade"
+    ],
+    "codeguard-0-session-management-and-cookies": [
+      "paraphrase",
+      "section_reorder_shuffle"
+    ],
+    "codeguard-0-supply-chain-security": [
+      "voice_change"
+    ],
+    "codeguard-1-hardcoded-credentials": [
+      "section_reorder_degrade",
+      "negation_injection"
+    ],
+    "codeguard-0-input-validation-injection": [
+      "synonym_replacement",
+      "section_reorder_degrade"
+    ],
+    "codeguard-1-crypto-algorithms": [
+      "synonym_replacement"
+    ],
+    "codeguard-0-privacy-data-protection": [
+      "negation_injection"
+    ]
+  },
+  "accepted": true,
+  "validation_metadata": {}
+}

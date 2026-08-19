@@ -1,0 +1,646 @@
+{
+  "artifact_type": "baseline_provenance_reconciliation",
+  "computed_at": "2026-08-07T16:33:45.994760+00:00",
+  "computed_by": "analysis-time derivation; NOT recorded at run time",
+  "statement": "Baseline screening runs predate the provenance-manifest contract. Their rule assignments were reconciled against the final qualified map by task-index and prompt-hash comparison. No run artifact was modified.",
+  "strata": {
+    "qwen_python": {
+      "consensus_map": {
+        "path": "/home/rnegro/thesis/rule-mutation/experiments/01_population_and_maps/phase2_consensus/maps/consensus_map_qwen_python.json",
+        "sha256": "df8c9ff488ae74a90bf919f45b45733a6e220f0b40ad056af8510ebac78c5c80",
+        "n_tasks": 322,
+        "metadata_keys": [
+          "avg_rules_per_prompt",
+          "canonical_carrier",
+          "consensus_min_selections",
+          "consensus_rule",
+          "duplicate_prompt_hashes",
+          "empty_prompts",
+          "evidence_status",
+          "kind",
+          "language",
+          "model",
+          "model_key",
+          "prompt_template_version"
+        ]
+      },
+      "final_map": {
+        "path": "/home/rnegro/thesis/rule-mutation/rule_maps/qualified/final_search_map_qwen_python.json",
+        "sha256": "7c5ef1047b4dc997c278bd99758a04f0bc778898053ec361906935a885b05916",
+        "n_tasks": 203,
+        "metadata_keys": [
+          "avg_rules_per_prompt",
+          "canonical_carrier",
+          "consensus_min_selections",
+          "consensus_rule",
+          "duplicate_prompt_hashes",
+          "empty_prompts",
+          "evidence_status",
+          "kind",
+          "language",
+          "model",
+          "model_key",
+          "population_eligibility"
+        ]
+      },
+      "coverage": {
+        "final_tasks": 203,
+        "overlap": 203,
+        "missing_from_consensus": 0,
+        "missing_indices": []
+      },
+      "rule_assignment": {
+        "identical_ordered": 203,
+        "identical_as_set": 203,
+        "identical_prompt_hash": 203,
+        "differing": 0,
+        "differing_indices": []
+      },
+      "usable_as_baseline": true
+    },
+    "qwen_java": {
+      "consensus_map": {
+        "path": "/home/rnegro/thesis/rule-mutation/experiments/01_population_and_maps/phase2_consensus/maps/consensus_map_qwen_java.json",
+        "sha256": "41b6270be57b4be97630cc693b3ec73bcd1dd03bc050a2c57b7a9ebc1a54374a",
+        "n_tasks": 227,
+        "metadata_keys": [
+          "avg_rules_per_prompt",
+          "canonical_carrier",
+          "consensus_min_selections",
+          "consensus_rule",
+          "duplicate_prompt_hashes",
+          "empty_prompts",
+          "evidence_status",
+          "kind",
+          "language",
+          "model",
+          "model_key",
+          "prompt_template_version"
+        ]
+      },
+      "final_map": {
+        "path": "/home/rnegro/thesis/rule-mutation/rule_maps/qualified/final_search_map_qwen_java.json",
+        "sha256": "32978066b0d6441dba761d130324ce7bd56a4f0513a0ed2f82eff85718e7a7df",
+        "n_tasks": 126,
+        "metadata_keys": [
+          "avg_rules_per_prompt",
+          "canonical_carrier",
+          "consensus_min_selections",
+          "consensus_rule",
+          "duplicate_prompt_hashes",
+          "empty_prompts",
+          "evidence_status",
+          "kind",
+          "language",
+          "model",
+          "model_key",
+          "population_eligibility"
+        ]
+      },
+      "coverage": {
+        "final_tasks": 126,
+        "overlap": 126,
+        "missing_from_consensus": 0,
+        "missing_indices": []
+      },
+      "rule_assignment": {
+        "identical_ordered": 126,
+        "identical_as_set": 126,
+        "identical_prompt_hash": 126,
+        "differing": 0,
+        "differing_indices": []
+      },
+      "usable_as_baseline": true
+    },
+    "llama_python": {
+      "consensus_map": {
+        "path": "/home/rnegro/thesis/rule-mutation/experiments/01_population_and_maps/phase2_consensus/maps/consensus_map_llama_python.json",
+        "sha256": "e13a37563d288cc4e1eb8307dc2ad547f6e5cbb90a3e3cc002e2959729b9ef40",
+        "n_tasks": 322,
+        "metadata_keys": [
+          "avg_rules_per_prompt",
+          "canonical_carrier",
+          "consensus_min_selections",
+          "consensus_rule",
+          "duplicate_prompt_hashes",
+          "empty_prompts",
+          "evidence_status",
+          "kind",
+          "language",
+          "model",
+          "model_key",
+          "prompt_template_version"
+        ]
+      },
+      "final_map": {
+        "path": "/home/rnegro/thesis/rule-mutation/rule_maps/qualified/final_search_map_llama_python.json",
+        "sha256": "72acf582db6bcab8dd21da131e6b75ec4efc77d5b2442dd658f206bced6b18ec",
+        "n_tasks": 203,
+        "metadata_keys": [
+          "avg_rules_per_prompt",
+          "canonical_carrier",
+          "consensus_min_selections",
+          "consensus_rule",
+          "duplicate_prompt_hashes",
+          "empty_prompts",
+          "evidence_status",
+          "kind",
+          "language",
+          "model",
+          "model_key",
+          "population_eligibility"
+        ]
+      },
+      "coverage": {
+        "final_tasks": 203,
+        "overlap": 203,
+        "missing_from_consensus": 0,
+        "missing_indices": []
+      },
+      "rule_assignment": {
+        "identical_ordered": 203,
+        "identical_as_set": 203,
+        "identical_prompt_hash": 203,
+        "differing": 0,
+        "differing_indices": []
+      },
+      "usable_as_baseline": true
+    },
+    "llama_java": {
+      "consensus_map": {
+        "path": "/home/rnegro/thesis/rule-mutation/experiments/01_population_and_maps/phase2_consensus/maps/consensus_map_llama_java.json",
+        "sha256": "b6de02b4d5ff8041d8580ff9da5990c0ca6bed803e7a6a5217862a949d2f2f64",
+        "n_tasks": 227,
+        "metadata_keys": [
+          "avg_rules_per_prompt",
+          "canonical_carrier",
+          "consensus_min_selections",
+          "consensus_rule",
+          "duplicate_prompt_hashes",
+          "empty_prompts",
+          "evidence_status",
+          "kind",
+          "language",
+          "model",
+          "model_key",
+          "prompt_template_version"
+        ]
+      },
+      "final_map": {
+        "path": "/home/rnegro/thesis/rule-mutation/rule_maps/qualified/final_search_map_llama_java.json",
+        "sha256": "00720b0cf165114c53c1bacc521ea5949a7ab5c1ee2304e2e900de2a375e08e3",
+        "n_tasks": 126,
+        "metadata_keys": [
+          "avg_rules_per_prompt",
+          "canonical_carrier",
+          "consensus_min_selections",
+          "consensus_rule",
+          "duplicate_prompt_hashes",
+          "empty_prompts",
+          "evidence_status",
+          "kind",
+          "language",
+          "model",
+          "model_key",
+          "population_eligibility"
+        ]
+      },
+      "coverage": {
+        "final_tasks": 126,
+        "overlap": 126,
+        "missing_from_consensus": 0,
+        "missing_indices": []
+      },
+      "rule_assignment": {
+        "identical_ordered": 126,
+        "identical_as_set": 126,
+        "identical_prompt_hash": 126,
+        "differing": 0,
+        "differing_indices": []
+      },
+      "usable_as_baseline": true
+    }
+  },
+  "baseline_runs": {
+    "llama_java_norules": {
+      "dir": "/home/rnegro/thesis/rule-mutation/experiments/01_population_and_maps/phase3_screening/block1/llama_java_norules",
+      "git_commit_sha": "20cba85b61c029a3665a03af16417299662b9b77",
+      "model": "meta-llama/Llama-3.3-70B-Instruct",
+      "languages": [
+        "java"
+      ],
+      "n_cases": 227,
+      "temperature": 0.6,
+      "seeds": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20
+      ],
+      "n_seeds": 20,
+      "rules_map_path": "/home/rnegro/thesis/rule-mutation/experiments/final_map_pipeline_20260724/phase2_consensus/maps/norules_map_java.json",
+      "rules_map_sha256_derived": null,
+      "replicate_files": 20
+    },
+    "llama_java_norules_resume": {
+      "dir": "/home/rnegro/thesis/rule-mutation/experiments/01_population_and_maps/phase3_screening/block1/llama_java_norules_resume",
+      "git_commit_sha": "20cba85b61c029a3665a03af16417299662b9b77",
+      "model": "meta-llama/Llama-3.3-70B-Instruct",
+      "languages": [
+        "java"
+      ],
+      "n_cases": 227,
+      "temperature": 0.6,
+      "seeds": [
+        19,
+        20
+      ],
+      "n_seeds": 2,
+      "rules_map_path": "/home/rnegro/thesis/rule-mutation/experiments/final_map_pipeline_20260724/phase2_consensus/maps/norules_map_java.json",
+      "rules_map_sha256_derived": null,
+      "replicate_files": 2
+    },
+    "llama_java_withrules": {
+      "dir": "/home/rnegro/thesis/rule-mutation/experiments/01_population_and_maps/phase3_screening/block1/llama_java_withrules",
+      "git_commit_sha": "20cba85b61c029a3665a03af16417299662b9b77",
+      "model": "meta-llama/Llama-3.3-70B-Instruct",
+      "languages": [
+        "java"
+      ],
+      "n_cases": 227,
+      "temperature": 0.6,
+      "seeds": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20
+      ],
+      "n_seeds": 20,
+      "rules_map_path": "/home/rnegro/thesis/rule-mutation/experiments/final_map_pipeline_20260724/phase2_consensus/maps/consensus_map_llama_java.json",
+      "rules_map_sha256_derived": null,
+      "replicate_files": 20
+    },
+    "llama_java_withrules_tail": {
+      "dir": "/home/rnegro/thesis/rule-mutation/experiments/01_population_and_maps/phase3_screening/block1/llama_java_withrules_tail",
+      "git_commit_sha": "20cba85b61c029a3665a03af16417299662b9b77",
+      "model": "meta-llama/Llama-3.3-70B-Instruct",
+      "languages": [
+        "java"
+      ],
+      "n_cases": 227,
+      "temperature": 0.6,
+      "seeds": [
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20
+      ],
+      "n_seeds": 7,
+      "rules_map_path": "/home/rnegro/thesis/rule-mutation/experiments/final_map_pipeline_20260724/phase2_consensus/maps/consensus_map_llama_java.json",
+      "rules_map_sha256_derived": null,
+      "replicate_files": 4
+    },
+    "llama_python_norules": {
+      "dir": "/home/rnegro/thesis/rule-mutation/experiments/01_population_and_maps/phase3_screening/block1/llama_python_norules",
+      "git_commit_sha": "20cba85b61c029a3665a03af16417299662b9b77",
+      "model": "meta-llama/Llama-3.3-70B-Instruct",
+      "languages": [
+        "python"
+      ],
+      "n_cases": 322,
+      "temperature": 0.6,
+      "seeds": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20
+      ],
+      "n_seeds": 20,
+      "rules_map_path": "/home/rnegro/thesis/rule-mutation/experiments/final_map_pipeline_20260724/phase2_consensus/maps/norules_map_python.json",
+      "rules_map_sha256_derived": null,
+      "replicate_files": 20
+    },
+    "llama_python_norules_tail": {
+      "dir": "/home/rnegro/thesis/rule-mutation/experiments/01_population_and_maps/phase3_screening/block1/llama_python_norules_tail",
+      "git_commit_sha": "20cba85b61c029a3665a03af16417299662b9b77",
+      "model": "meta-llama/Llama-3.3-70B-Instruct",
+      "languages": [
+        "python"
+      ],
+      "n_cases": 322,
+      "temperature": 0.6,
+      "seeds": [
+        16,
+        17,
+        18,
+        19,
+        20
+      ],
+      "n_seeds": 5,
+      "rules_map_path": "/home/rnegro/thesis/rule-mutation/experiments/final_map_pipeline_20260724/phase2_consensus/maps/norules_map_python.json",
+      "rules_map_sha256_derived": null,
+      "replicate_files": 4
+    },
+    "llama_python_withrules": {
+      "dir": "/home/rnegro/thesis/rule-mutation/experiments/01_population_and_maps/phase3_screening/block1/llama_python_withrules",
+      "git_commit_sha": "20cba85b61c029a3665a03af16417299662b9b77",
+      "model": "meta-llama/Llama-3.3-70B-Instruct",
+      "languages": [
+        "python"
+      ],
+      "n_cases": 322,
+      "temperature": 0.6,
+      "seeds": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20
+      ],
+      "n_seeds": 20,
+      "rules_map_path": "/home/rnegro/thesis/rule-mutation/experiments/final_map_pipeline_20260724/phase2_consensus/maps/consensus_map_llama_python.json",
+      "rules_map_sha256_derived": null,
+      "replicate_files": 20
+    },
+    "llama_python_withrules_tail": {
+      "dir": "/home/rnegro/thesis/rule-mutation/experiments/01_population_and_maps/phase3_screening/block1/llama_python_withrules_tail",
+      "git_commit_sha": "20cba85b61c029a3665a03af16417299662b9b77",
+      "model": "meta-llama/Llama-3.3-70B-Instruct",
+      "languages": [
+        "python"
+      ],
+      "n_cases": 322,
+      "temperature": 0.6,
+      "seeds": [
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20
+      ],
+      "n_seeds": 10,
+      "rules_map_path": "/home/rnegro/thesis/rule-mutation/experiments/final_map_pipeline_20260724/phase2_consensus/maps/consensus_map_llama_python.json",
+      "rules_map_sha256_derived": null,
+      "replicate_files": 0
+    },
+    "llama_python_withrules_tailhi": {
+      "dir": "/home/rnegro/thesis/rule-mutation/experiments/01_population_and_maps/phase3_screening/block1/llama_python_withrules_tailhi",
+      "git_commit_sha": "20cba85b61c029a3665a03af16417299662b9b77",
+      "model": "meta-llama/Llama-3.3-70B-Instruct",
+      "languages": [
+        "python"
+      ],
+      "n_cases": 322,
+      "temperature": 0.6,
+      "seeds": [
+        17,
+        18,
+        19,
+        20
+      ],
+      "n_seeds": 4,
+      "rules_map_path": "/home/rnegro/thesis/rule-mutation/experiments/final_map_pipeline_20260724/phase2_consensus/maps/consensus_map_llama_python.json",
+      "rules_map_sha256_derived": null,
+      "replicate_files": 4
+    },
+    "llama_python_withrules_tailmid": {
+      "dir": "/home/rnegro/thesis/rule-mutation/experiments/01_population_and_maps/phase3_screening/block1/llama_python_withrules_tailmid",
+      "git_commit_sha": "20cba85b61c029a3665a03af16417299662b9b77",
+      "model": "meta-llama/Llama-3.3-70B-Instruct",
+      "languages": [
+        "python"
+      ],
+      "n_cases": 322,
+      "temperature": 0.6,
+      "seeds": [
+        13,
+        14,
+        15,
+        16
+      ],
+      "n_seeds": 4,
+      "rules_map_path": "/home/rnegro/thesis/rule-mutation/experiments/final_map_pipeline_20260724/phase2_consensus/maps/consensus_map_llama_python.json",
+      "rules_map_sha256_derived": null,
+      "replicate_files": 4
+    },
+    "qwen_java_norules": {
+      "dir": "/home/rnegro/thesis/rule-mutation/experiments/01_population_and_maps/phase3_screening/block1/qwen_java_norules",
+      "git_commit_sha": "20cba85b61c029a3665a03af16417299662b9b77",
+      "model": "Qwen/Qwen2.5-Coder-32B-Instruct",
+      "languages": [
+        "java"
+      ],
+      "n_cases": 227,
+      "temperature": 0.6,
+      "seeds": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20
+      ],
+      "n_seeds": 20,
+      "rules_map_path": "/home/rnegro/thesis/rule-mutation/experiments/final_map_pipeline_20260724/phase2_consensus/maps/norules_map_java.json",
+      "rules_map_sha256_derived": null,
+      "replicate_files": 20
+    },
+    "qwen_java_withrules": {
+      "dir": "/home/rnegro/thesis/rule-mutation/experiments/01_population_and_maps/phase3_screening/block1/qwen_java_withrules",
+      "git_commit_sha": "20cba85b61c029a3665a03af16417299662b9b77",
+      "model": "Qwen/Qwen2.5-Coder-32B-Instruct",
+      "languages": [
+        "java"
+      ],
+      "n_cases": 227,
+      "temperature": 0.6,
+      "seeds": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20
+      ],
+      "n_seeds": 20,
+      "rules_map_path": "/home/rnegro/thesis/rule-mutation/experiments/final_map_pipeline_20260724/phase2_consensus/maps/consensus_map_qwen_java.json",
+      "rules_map_sha256_derived": null,
+      "replicate_files": 20
+    },
+    "qwen_python_norules": {
+      "dir": "/home/rnegro/thesis/rule-mutation/experiments/01_population_and_maps/phase3_screening/block1/qwen_python_norules",
+      "git_commit_sha": "20cba85b61c029a3665a03af16417299662b9b77",
+      "model": "Qwen/Qwen2.5-Coder-32B-Instruct",
+      "languages": [
+        "python"
+      ],
+      "n_cases": 322,
+      "temperature": 0.6,
+      "seeds": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20
+      ],
+      "n_seeds": 20,
+      "rules_map_path": "/home/rnegro/thesis/rule-mutation/experiments/final_map_pipeline_20260724/phase2_consensus/maps/norules_map_python.json",
+      "rules_map_sha256_derived": null,
+      "replicate_files": 20
+    },
+    "qwen_python_withrules": {
+      "dir": "/home/rnegro/thesis/rule-mutation/experiments/01_population_and_maps/phase3_screening/block1/qwen_python_withrules",
+      "git_commit_sha": "20cba85b61c029a3665a03af16417299662b9b77",
+      "model": "Qwen/Qwen2.5-Coder-32B-Instruct",
+      "languages": [
+        "python"
+      ],
+      "n_cases": 322,
+      "temperature": 0.6,
+      "seeds": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20
+      ],
+      "n_seeds": 20,
+      "rules_map_path": "/home/rnegro/thesis/rule-mutation/experiments/final_map_pipeline_20260724/phase2_consensus/maps/consensus_map_qwen_python.json",
+      "rules_map_sha256_derived": null,
+      "replicate_files": 20
+    }
+  },
+  "verdict": {
+    "all_strata_reconciled": true,
+    "conclusion": "Baselines may be subset to the final population and used directly."
+  }
+}

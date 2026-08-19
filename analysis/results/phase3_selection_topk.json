@@ -1,0 +1,2382 @@
+{
+  "artifact_type": "phase3_chromosome_selection_topk",
+  "k": 5,
+  "selection_rule": "pool all chromosomes from every eligible EA run's final archive; rank by f1 desc, f2 desc, f3 desc, cid asc; walk the ranking and keep a chromosome only if its seed is not already represented; stop at K. At most ONE chromosome per run.",
+  "strata": {
+    "llama_java": {
+      "n_seeds_available": 10,
+      "selected": [
+        {
+          "rank": 1,
+          "seed": 10,
+          "run_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s10_ea/job10568898_ea_java_s10_0804",
+          "cid": "561c0c2f1fe559bb",
+          "f1": 13.0,
+          "f2": 0.93795,
+          "f3": -6.0,
+          "evaluation_index": 89,
+          "order_priority": {
+            "codeguard-0-framework-and-languages": -1
+          },
+          "n_rules_mutated": 6,
+          "override_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s10_ea/job10568898_ea_java_s10_0804/mutated_rules/evaluation_0089",
+          "genes": {
+            "codeguard-0-authentication-mfa": {
+              "mutation_path": [
+                "section_reorder_degrade"
+              ],
+              "depth": 1,
+              "text_length": 6322,
+              "text_ref": "mutated_rules/evaluation_0089/cg-0-authentication-mfa.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s10_ea/job10568898_ea_java_s10_0804/mutated_rules/evaluation_0089/cg-0-authentication-mfa.md",
+              "text_exists": true
+            },
+            "codeguard-0-devops-ci-cd-containers": {
+              "mutation_path": [
+                "negation_injection"
+              ],
+              "depth": 1,
+              "text_length": 4609,
+              "text_ref": "mutated_rules/evaluation_0089/cg-0-devops-ci-cd-containers.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s10_ea/job10568898_ea_java_s10_0804/mutated_rules/evaluation_0089/cg-0-devops-ci-cd-containers.md",
+              "text_exists": true
+            },
+            "codeguard-0-file-handling-and-uploads": {
+              "mutation_path": [
+                "paraphrase"
+              ],
+              "depth": 1,
+              "text_length": 3995,
+              "text_ref": "mutated_rules/evaluation_0089/cg-0-file-handling-and-uploads.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s10_ea/job10568898_ea_java_s10_0804/mutated_rules/evaluation_0089/cg-0-file-handling-and-uploads.md",
+              "text_exists": true
+            },
+            "codeguard-0-input-validation-injection": {
+              "mutation_path": [
+                "verb_weakening",
+                "section_reorder_degrade"
+              ],
+              "depth": 2,
+              "text_length": 6049,
+              "text_ref": "mutated_rules/evaluation_0089/cg-0-input-validation-injection.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s10_ea/job10568898_ea_java_s10_0804/mutated_rules/evaluation_0089/cg-0-input-validation-injection.md",
+              "text_exists": true
+            },
+            "codeguard-0-xml-and-serialization": {
+              "mutation_path": [
+                "section_reorder_degrade"
+              ],
+              "depth": 1,
+              "text_length": 4020,
+              "text_ref": "mutated_rules/evaluation_0089/cg-0-xml-and-serialization.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s10_ea/job10568898_ea_java_s10_0804/mutated_rules/evaluation_0089/cg-0-xml-and-serialization.md",
+              "text_exists": true
+            },
+            "codeguard-1-crypto-algorithms": {
+              "mutation_path": [
+                "add_random_word"
+              ],
+              "depth": 1,
+              "text_length": 5453,
+              "text_ref": "mutated_rules/evaluation_0089/cg-1-crypto-algorithms.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s10_ea/job10568898_ea_java_s10_0804/mutated_rules/evaluation_0089/cg-1-crypto-algorithms.md",
+              "text_exists": true
+            }
+          }
+        },
+        {
+          "rank": 2,
+          "seed": 9,
+          "run_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s9_ea/job10560330_ea_java_s9_0803",
+          "cid": "fe7cf23a8e0f8bf8",
+          "f1": 12.0,
+          "f2": 0.9553,
+          "f3": -9.0,
+          "evaluation_index": 92,
+          "order_priority": {},
+          "n_rules_mutated": 9,
+          "override_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s9_ea/job10560330_ea_java_s9_0803/mutated_rules/evaluation_0092",
+          "genes": {
+            "codeguard-0-api-web-services": {
+              "mutation_path": [
+                "section_reorder_degrade"
+              ],
+              "depth": 1,
+              "text_length": 4316,
+              "text_ref": "mutated_rules/evaluation_0092/cg-0-api-web-services.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s9_ea/job10560330_ea_java_s9_0803/mutated_rules/evaluation_0092/cg-0-api-web-services.md",
+              "text_exists": true
+            },
+            "codeguard-0-authorization-access-control": {
+              "mutation_path": [
+                "voice_change"
+              ],
+              "depth": 1,
+              "text_length": 4086,
+              "text_ref": "mutated_rules/evaluation_0092/cg-0-authorization-access-control.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s9_ea/job10560330_ea_java_s9_0803/mutated_rules/evaluation_0092/cg-0-authorization-access-control.md",
+              "text_exists": true
+            },
+            "codeguard-0-devops-ci-cd-containers": {
+              "mutation_path": [
+                "section_reorder_degrade"
+              ],
+              "depth": 1,
+              "text_length": 3588,
+              "text_ref": "mutated_rules/evaluation_0092/cg-0-devops-ci-cd-containers.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s9_ea/job10560330_ea_java_s9_0803/mutated_rules/evaluation_0092/cg-0-devops-ci-cd-containers.md",
+              "text_exists": true
+            },
+            "codeguard-0-framework-and-languages": {
+              "mutation_path": [
+                "section_reorder_degrade"
+              ],
+              "depth": 1,
+              "text_length": 6142,
+              "text_ref": "mutated_rules/evaluation_0092/cg-0-framework-and-languages.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s9_ea/job10560330_ea_java_s9_0803/mutated_rules/evaluation_0092/cg-0-framework-and-languages.md",
+              "text_exists": true
+            },
+            "codeguard-0-safe-c-functions": {
+              "mutation_path": [
+                "verb_weakening"
+              ],
+              "depth": 1,
+              "text_length": 12107,
+              "text_ref": "mutated_rules/evaluation_0092/cg-0-safe-c-functions.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s9_ea/job10560330_ea_java_s9_0803/mutated_rules/evaluation_0092/cg-0-safe-c-functions.md",
+              "text_exists": true
+            },
+            "codeguard-0-supply-chain-security": {
+              "mutation_path": [
+                "negation_injection"
+              ],
+              "depth": 1,
+              "text_length": 3205,
+              "text_ref": "mutated_rules/evaluation_0092/cg-0-supply-chain-security.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s9_ea/job10560330_ea_java_s9_0803/mutated_rules/evaluation_0092/cg-0-supply-chain-security.md",
+              "text_exists": true
+            },
+            "codeguard-0-xml-and-serialization": {
+              "mutation_path": [
+                "negation_injection",
+                "section_reorder_shuffle"
+              ],
+              "depth": 2,
+              "text_length": 4723,
+              "text_ref": "mutated_rules/evaluation_0092/cg-0-xml-and-serialization.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s9_ea/job10560330_ea_java_s9_0803/mutated_rules/evaluation_0092/cg-0-xml-and-serialization.md",
+              "text_exists": true
+            },
+            "codeguard-1-crypto-algorithms": {
+              "mutation_path": [
+                "synonym_replacement"
+              ],
+              "depth": 1,
+              "text_length": 5266,
+              "text_ref": "mutated_rules/evaluation_0092/cg-1-crypto-algorithms.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s9_ea/job10560330_ea_java_s9_0803/mutated_rules/evaluation_0092/cg-1-crypto-algorithms.md",
+              "text_exists": true
+            },
+            "codeguard-1-digital-certificates": {
+              "mutation_path": [
+                "verb_weakening"
+              ],
+              "depth": 1,
+              "text_length": 6005,
+              "text_ref": "mutated_rules/evaluation_0092/cg-1-digital-certificates.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s9_ea/job10560330_ea_java_s9_0803/mutated_rules/evaluation_0092/cg-1-digital-certificates.md",
+              "text_exists": true
+            }
+          }
+        },
+        {
+          "rank": 3,
+          "seed": 5,
+          "run_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s5_ea/job10533388_ea_java_s5_0730",
+          "cid": "5b524d6c1e1cbcb2",
+          "f1": 12.0,
+          "f2": 0.950843,
+          "f3": -7.0,
+          "evaluation_index": 123,
+          "order_priority": {},
+          "n_rules_mutated": 7,
+          "override_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s5_ea/job10533388_ea_java_s5_0730/mutated_rules/evaluation_0123",
+          "genes": {
+            "codeguard-0-api-web-services": {
+              "mutation_path": [
+                "section_reorder_shuffle"
+              ],
+              "depth": 1,
+              "text_length": 4316,
+              "text_ref": "mutated_rules/evaluation_0123/cg-0-api-web-services.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s5_ea/job10533388_ea_java_s5_0730/mutated_rules/evaluation_0123/cg-0-api-web-services.md",
+              "text_exists": true
+            },
+            "codeguard-0-authentication-mfa": {
+              "mutation_path": [
+                "add_random_word"
+              ],
+              "depth": 1,
+              "text_length": 7219,
+              "text_ref": "mutated_rules/evaluation_0123/cg-0-authentication-mfa.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s5_ea/job10533388_ea_java_s5_0730/mutated_rules/evaluation_0123/cg-0-authentication-mfa.md",
+              "text_exists": true
+            },
+            "codeguard-0-devops-ci-cd-containers": {
+              "mutation_path": [
+                "section_reorder_degrade"
+              ],
+              "depth": 1,
+              "text_length": 3588,
+              "text_ref": "mutated_rules/evaluation_0123/cg-0-devops-ci-cd-containers.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s5_ea/job10533388_ea_java_s5_0730/mutated_rules/evaluation_0123/cg-0-devops-ci-cd-containers.md",
+              "text_exists": true
+            },
+            "codeguard-0-safe-c-functions": {
+              "mutation_path": [
+                "synonym_replacement"
+              ],
+              "depth": 1,
+              "text_length": 12947,
+              "text_ref": "mutated_rules/evaluation_0123/cg-0-safe-c-functions.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s5_ea/job10533388_ea_java_s5_0730/mutated_rules/evaluation_0123/cg-0-safe-c-functions.md",
+              "text_exists": true
+            },
+            "codeguard-0-supply-chain-security": {
+              "mutation_path": [
+                "add_random_word",
+                "voice_change",
+                "synonym_replacement"
+              ],
+              "depth": 3,
+              "text_length": 3793,
+              "text_ref": "mutated_rules/evaluation_0123/cg-0-supply-chain-security.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s5_ea/job10533388_ea_java_s5_0730/mutated_rules/evaluation_0123/cg-0-supply-chain-security.md",
+              "text_exists": true
+            },
+            "codeguard-0-xml-and-serialization": {
+              "mutation_path": [
+                "negation_injection"
+              ],
+              "depth": 1,
+              "text_length": 4723,
+              "text_ref": "mutated_rules/evaluation_0123/cg-0-xml-and-serialization.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s5_ea/job10533388_ea_java_s5_0730/mutated_rules/evaluation_0123/cg-0-xml-and-serialization.md",
+              "text_exists": true
+            },
+            "codeguard-1-crypto-algorithms": {
+              "mutation_path": [
+                "section_reorder_degrade"
+              ],
+              "depth": 1,
+              "text_length": 4773,
+              "text_ref": "mutated_rules/evaluation_0123/cg-1-crypto-algorithms.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s5_ea/job10533388_ea_java_s5_0730/mutated_rules/evaluation_0123/cg-1-crypto-algorithms.md",
+              "text_exists": true
+            }
+          }
+        },
+        {
+          "rank": 4,
+          "seed": 4,
+          "run_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s4_ea/job10533384_ea_java_s4_0729",
+          "cid": "2309988fbe1ba1d8",
+          "f1": 12.0,
+          "f2": 0.912886,
+          "f3": -7.0,
+          "evaluation_index": 109,
+          "order_priority": {
+            "codeguard-0-authorization-access-control": 1
+          },
+          "n_rules_mutated": 7,
+          "override_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s4_ea/job10533384_ea_java_s4_0729/mutated_rules/evaluation_0109",
+          "genes": {
+            "codeguard-0-additional-cryptography": {
+              "mutation_path": [
+                "section_reorder_degrade"
+              ],
+              "depth": 1,
+              "text_length": 3223,
+              "text_ref": "mutated_rules/evaluation_0109/cg-0-additional-cryptography.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s4_ea/job10533384_ea_java_s4_0729/mutated_rules/evaluation_0109/cg-0-additional-cryptography.md",
+              "text_exists": true
+            },
+            "codeguard-0-data-storage": {
+              "mutation_path": [
+                "paraphrase"
+              ],
+              "depth": 1,
+              "text_length": 4683,
+              "text_ref": "mutated_rules/evaluation_0109/cg-0-data-storage.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s4_ea/job10533384_ea_java_s4_0729/mutated_rules/evaluation_0109/cg-0-data-storage.md",
+              "text_exists": true
+            },
+            "codeguard-0-file-handling-and-uploads": {
+              "mutation_path": [
+                "verb_weakening"
+              ],
+              "depth": 1,
+              "text_length": 3591,
+              "text_ref": "mutated_rules/evaluation_0109/cg-0-file-handling-and-uploads.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s4_ea/job10533384_ea_java_s4_0729/mutated_rules/evaluation_0109/cg-0-file-handling-and-uploads.md",
+              "text_exists": true
+            },
+            "codeguard-0-input-validation-injection": {
+              "mutation_path": [
+                "voice_change"
+              ],
+              "depth": 1,
+              "text_length": 6963,
+              "text_ref": "mutated_rules/evaluation_0109/cg-0-input-validation-injection.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s4_ea/job10533384_ea_java_s4_0729/mutated_rules/evaluation_0109/cg-0-input-validation-injection.md",
+              "text_exists": true
+            },
+            "codeguard-0-safe-c-functions": {
+              "mutation_path": [
+                "paraphrase",
+                "add_random_word"
+              ],
+              "depth": 2,
+              "text_length": 13311,
+              "text_ref": "mutated_rules/evaluation_0109/cg-0-safe-c-functions.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s4_ea/job10533384_ea_java_s4_0729/mutated_rules/evaluation_0109/cg-0-safe-c-functions.md",
+              "text_exists": true
+            },
+            "codeguard-1-crypto-algorithms": {
+              "mutation_path": [
+                "synonym_replacement"
+              ],
+              "depth": 1,
+              "text_length": 5233,
+              "text_ref": "mutated_rules/evaluation_0109/cg-1-crypto-algorithms.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s4_ea/job10533384_ea_java_s4_0729/mutated_rules/evaluation_0109/cg-1-crypto-algorithms.md",
+              "text_exists": true
+            },
+            "codeguard-1-digital-certificates": {
+              "mutation_path": [
+                "add_random_word"
+              ],
+              "depth": 1,
+              "text_length": 6780,
+              "text_ref": "mutated_rules/evaluation_0109/cg-1-digital-certificates.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s4_ea/job10533384_ea_java_s4_0729/mutated_rules/evaluation_0109/cg-1-digital-certificates.md",
+              "text_exists": true
+            }
+          }
+        },
+        {
+          "rank": 5,
+          "seed": 1,
+          "run_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s1_ea/job10533372_ea_java_s1_0728",
+          "cid": "43b2d3607d7c1f6b",
+          "f1": 11.0,
+          "f2": 0.936956,
+          "f3": -9.0,
+          "evaluation_index": 118,
+          "order_priority": {
+            "codeguard-0-authorization-access-control": 1,
+            "codeguard-0-safe-c-functions": 2
+          },
+          "n_rules_mutated": 9,
+          "override_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s1_ea/job10533372_ea_java_s1_0728/mutated_rules/evaluation_0118",
+          "genes": {
+            "codeguard-0-api-web-services": {
+              "mutation_path": [
+                "section_reorder_degrade"
+              ],
+              "depth": 1,
+              "text_length": 4316,
+              "text_ref": "mutated_rules/evaluation_0118/cg-0-api-web-services.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s1_ea/job10533372_ea_java_s1_0728/mutated_rules/evaluation_0118/cg-0-api-web-services.md",
+              "text_exists": true
+            },
+            "codeguard-0-authentication-mfa": {
+              "mutation_path": [
+                "verb_weakening"
+              ],
+              "depth": 1,
+              "text_length": 6356,
+              "text_ref": "mutated_rules/evaluation_0118/cg-0-authentication-mfa.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s1_ea/job10533372_ea_java_s1_0728/mutated_rules/evaluation_0118/cg-0-authentication-mfa.md",
+              "text_exists": true
+            },
+            "codeguard-0-data-storage": {
+              "mutation_path": [
+                "add_random_word"
+              ],
+              "depth": 1,
+              "text_length": 4426,
+              "text_ref": "mutated_rules/evaluation_0118/cg-0-data-storage.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s1_ea/job10533372_ea_java_s1_0728/mutated_rules/evaluation_0118/cg-0-data-storage.md",
+              "text_exists": true
+            },
+            "codeguard-0-devops-ci-cd-containers": {
+              "mutation_path": [
+                "negation_injection"
+              ],
+              "depth": 1,
+              "text_length": 4609,
+              "text_ref": "mutated_rules/evaluation_0118/cg-0-devops-ci-cd-containers.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s1_ea/job10533372_ea_java_s1_0728/mutated_rules/evaluation_0118/cg-0-devops-ci-cd-containers.md",
+              "text_exists": true
+            },
+            "codeguard-0-safe-c-functions": {
+              "mutation_path": [
+                "add_random_word"
+              ],
+              "depth": 1,
+              "text_length": 13316,
+              "text_ref": "mutated_rules/evaluation_0118/cg-0-safe-c-functions.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s1_ea/job10533372_ea_java_s1_0728/mutated_rules/evaluation_0118/cg-0-safe-c-functions.md",
+              "text_exists": true
+            },
+            "codeguard-0-session-management-and-cookies": {
+              "mutation_path": [
+                "paraphrase"
+              ],
+              "depth": 1,
+              "text_length": 4726,
+              "text_ref": "mutated_rules/evaluation_0118/cg-0-session-management-and-cookies.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s1_ea/job10533372_ea_java_s1_0728/mutated_rules/evaluation_0118/cg-0-session-management-and-cookies.md",
+              "text_exists": true
+            },
+            "codeguard-0-supply-chain-security": {
+              "mutation_path": [
+                "section_reorder_shuffle",
+                "section_reorder_degrade"
+              ],
+              "depth": 2,
+              "text_length": 2592,
+              "text_ref": "mutated_rules/evaluation_0118/cg-0-supply-chain-security.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s1_ea/job10533372_ea_java_s1_0728/mutated_rules/evaluation_0118/cg-0-supply-chain-security.md",
+              "text_exists": true
+            },
+            "codeguard-0-xml-and-serialization": {
+              "mutation_path": [
+                "add_random_word"
+              ],
+              "depth": 1,
+              "text_length": 4311,
+              "text_ref": "mutated_rules/evaluation_0118/cg-0-xml-and-serialization.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s1_ea/job10533372_ea_java_s1_0728/mutated_rules/evaluation_0118/cg-0-xml-and-serialization.md",
+              "text_exists": true
+            },
+            "codeguard-1-digital-certificates": {
+              "mutation_path": [
+                "section_reorder_shuffle"
+              ],
+              "depth": 1,
+              "text_length": 5991,
+              "text_ref": "mutated_rules/evaluation_0118/cg-1-digital-certificates.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s1_ea/job10533372_ea_java_s1_0728/mutated_rules/evaluation_0118/cg-1-digital-certificates.md",
+              "text_exists": true
+            }
+          }
+        }
+      ]
+    },
+    "llama_python": {
+      "n_seeds_available": 10,
+      "selected": [
+        {
+          "rank": 1,
+          "seed": 2,
+          "run_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s2_ea/job10533374_ea_python_s2_0728",
+          "cid": "5731e67389807eda",
+          "f1": 32.0,
+          "f2": 0.97352,
+          "f3": -5.0,
+          "evaluation_index": 70,
+          "order_priority": {},
+          "n_rules_mutated": 5,
+          "override_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s2_ea/job10533374_ea_python_s2_0728/mutated_rules/evaluation_0070",
+          "genes": {
+            "codeguard-0-additional-cryptography": {
+              "mutation_path": [
+                "synonym_replacement"
+              ],
+              "depth": 1,
+              "text_length": 3652,
+              "text_ref": "mutated_rules/evaluation_0070/cg-0-additional-cryptography.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s2_ea/job10533374_ea_python_s2_0728/mutated_rules/evaluation_0070/cg-0-additional-cryptography.md",
+              "text_exists": true
+            },
+            "codeguard-0-framework-and-languages": {
+              "mutation_path": [
+                "section_reorder_degrade"
+              ],
+              "depth": 1,
+              "text_length": 6142,
+              "text_ref": "mutated_rules/evaluation_0070/cg-0-framework-and-languages.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s2_ea/job10533374_ea_python_s2_0728/mutated_rules/evaluation_0070/cg-0-framework-and-languages.md",
+              "text_exists": true
+            },
+            "codeguard-0-iac-security": {
+              "mutation_path": [
+                "add_random_word"
+              ],
+              "depth": 1,
+              "text_length": 6991,
+              "text_ref": "mutated_rules/evaluation_0070/cg-0-iac-security.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s2_ea/job10533374_ea_python_s2_0728/mutated_rules/evaluation_0070/cg-0-iac-security.md",
+              "text_exists": true
+            },
+            "codeguard-0-input-validation-injection": {
+              "mutation_path": [
+                "synonym_replacement"
+              ],
+              "depth": 1,
+              "text_length": 6499,
+              "text_ref": "mutated_rules/evaluation_0070/cg-0-input-validation-injection.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s2_ea/job10533374_ea_python_s2_0728/mutated_rules/evaluation_0070/cg-0-input-validation-injection.md",
+              "text_exists": true
+            },
+            "codeguard-0-logging": {
+              "mutation_path": [
+                "verb_weakening"
+              ],
+              "depth": 1,
+              "text_length": 2367,
+              "text_ref": "mutated_rules/evaluation_0070/cg-0-logging.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s2_ea/job10533374_ea_python_s2_0728/mutated_rules/evaluation_0070/cg-0-logging.md",
+              "text_exists": true
+            }
+          }
+        },
+        {
+          "rank": 2,
+          "seed": 7,
+          "run_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s7_ea/job10560320_ea_python_s7_0802",
+          "cid": "b7a0e6568ce947e6",
+          "f1": 32.0,
+          "f2": 0.925217,
+          "f3": -12.0,
+          "evaluation_index": 96,
+          "order_priority": {
+            "codeguard-0-authorization-access-control": 1
+          },
+          "n_rules_mutated": 12,
+          "override_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s7_ea/job10560320_ea_python_s7_0802/mutated_rules/evaluation_0096",
+          "genes": {
+            "codeguard-0-authentication-mfa": {
+              "mutation_path": [
+                "paraphrase",
+                "synonym_replacement"
+              ],
+              "depth": 2,
+              "text_length": 8138,
+              "text_ref": "mutated_rules/evaluation_0096/cg-0-authentication-mfa.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s7_ea/job10560320_ea_python_s7_0802/mutated_rules/evaluation_0096/cg-0-authentication-mfa.md",
+              "text_exists": true
+            },
+            "codeguard-0-authorization-access-control": {
+              "mutation_path": [
+                "section_reorder_shuffle"
+              ],
+              "depth": 1,
+              "text_length": 3602,
+              "text_ref": "mutated_rules/evaluation_0096/cg-0-authorization-access-control.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s7_ea/job10560320_ea_python_s7_0802/mutated_rules/evaluation_0096/cg-0-authorization-access-control.md",
+              "text_exists": true
+            },
+            "codeguard-0-file-handling-and-uploads": {
+              "mutation_path": [
+                "section_reorder_degrade"
+              ],
+              "depth": 1,
+              "text_length": 3550,
+              "text_ref": "mutated_rules/evaluation_0096/cg-0-file-handling-and-uploads.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s7_ea/job10560320_ea_python_s7_0802/mutated_rules/evaluation_0096/cg-0-file-handling-and-uploads.md",
+              "text_exists": true
+            },
+            "codeguard-0-framework-and-languages": {
+              "mutation_path": [
+                "section_reorder_degrade"
+              ],
+              "depth": 1,
+              "text_length": 6142,
+              "text_ref": "mutated_rules/evaluation_0096/cg-0-framework-and-languages.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s7_ea/job10560320_ea_python_s7_0802/mutated_rules/evaluation_0096/cg-0-framework-and-languages.md",
+              "text_exists": true
+            },
+            "codeguard-0-iac-security": {
+              "mutation_path": [
+                "section_reorder_degrade"
+              ],
+              "depth": 1,
+              "text_length": 6015,
+              "text_ref": "mutated_rules/evaluation_0096/cg-0-iac-security.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s7_ea/job10560320_ea_python_s7_0802/mutated_rules/evaluation_0096/cg-0-iac-security.md",
+              "text_exists": true
+            },
+            "codeguard-0-input-validation-injection": {
+              "mutation_path": [
+                "verb_weakening",
+                "section_reorder_shuffle"
+              ],
+              "depth": 2,
+              "text_length": 6049,
+              "text_ref": "mutated_rules/evaluation_0096/cg-0-input-validation-injection.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s7_ea/job10560320_ea_python_s7_0802/mutated_rules/evaluation_0096/cg-0-input-validation-injection.md",
+              "text_exists": true
+            },
+            "codeguard-0-logging": {
+              "mutation_path": [
+                "section_reorder_degrade"
+              ],
+              "depth": 1,
+              "text_length": 2360,
+              "text_ref": "mutated_rules/evaluation_0096/cg-0-logging.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s7_ea/job10560320_ea_python_s7_0802/mutated_rules/evaluation_0096/cg-0-logging.md",
+              "text_exists": true
+            },
+            "codeguard-0-mobile-apps": {
+              "mutation_path": [
+                "paraphrase",
+                "voice_change"
+              ],
+              "depth": 2,
+              "text_length": 5754,
+              "text_ref": "mutated_rules/evaluation_0096/cg-0-mobile-apps.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s7_ea/job10560320_ea_python_s7_0802/mutated_rules/evaluation_0096/cg-0-mobile-apps.md",
+              "text_exists": true
+            },
+            "codeguard-0-privacy-data-protection": {
+              "mutation_path": [
+                "synonym_replacement"
+              ],
+              "depth": 1,
+              "text_length": 1225,
+              "text_ref": "mutated_rules/evaluation_0096/cg-0-privacy-data-protection.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s7_ea/job10560320_ea_python_s7_0802/mutated_rules/evaluation_0096/cg-0-privacy-data-protection.md",
+              "text_exists": true
+            },
+            "codeguard-0-safe-c-functions": {
+              "mutation_path": [
+                "add_random_word"
+              ],
+              "depth": 1,
+              "text_length": 13304,
+              "text_ref": "mutated_rules/evaluation_0096/cg-0-safe-c-functions.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s7_ea/job10560320_ea_python_s7_0802/mutated_rules/evaluation_0096/cg-0-safe-c-functions.md",
+              "text_exists": true
+            },
+            "codeguard-0-supply-chain-security": {
+              "mutation_path": [
+                "synonym_replacement"
+              ],
+              "depth": 1,
+              "text_length": 2824,
+              "text_ref": "mutated_rules/evaluation_0096/cg-0-supply-chain-security.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s7_ea/job10560320_ea_python_s7_0802/mutated_rules/evaluation_0096/cg-0-supply-chain-security.md",
+              "text_exists": true
+            },
+            "codeguard-1-digital-certificates": {
+              "mutation_path": [
+                "section_reorder_degrade"
+              ],
+              "depth": 1,
+              "text_length": 5991,
+              "text_ref": "mutated_rules/evaluation_0096/cg-1-digital-certificates.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s7_ea/job10560320_ea_python_s7_0802/mutated_rules/evaluation_0096/cg-1-digital-certificates.md",
+              "text_exists": true
+            }
+          }
+        },
+        {
+          "rank": 3,
+          "seed": 9,
+          "run_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s9_ea/job10560328_ea_python_s9_0803",
+          "cid": "3517cec12bac0d78",
+          "f1": 28.0,
+          "f2": 0.888617,
+          "f3": -6.0,
+          "evaluation_index": 71,
+          "order_priority": {
+            "codeguard-0-mobile-apps": -1
+          },
+          "n_rules_mutated": 6,
+          "override_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s9_ea/job10560328_ea_python_s9_0803/mutated_rules/evaluation_0071",
+          "genes": {
+            "codeguard-0-additional-cryptography": {
+              "mutation_path": [
+                "section_reorder_shuffle",
+                "section_reorder_degrade"
+              ],
+              "depth": 2,
+              "text_length": 3223,
+              "text_ref": "mutated_rules/evaluation_0071/cg-0-additional-cryptography.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s9_ea/job10560328_ea_python_s9_0803/mutated_rules/evaluation_0071/cg-0-additional-cryptography.md",
+              "text_exists": true
+            },
+            "codeguard-0-authentication-mfa": {
+              "mutation_path": [
+                "section_reorder_shuffle"
+              ],
+              "depth": 1,
+              "text_length": 6322,
+              "text_ref": "mutated_rules/evaluation_0071/cg-0-authentication-mfa.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s9_ea/job10560328_ea_python_s9_0803/mutated_rules/evaluation_0071/cg-0-authentication-mfa.md",
+              "text_exists": true
+            },
+            "codeguard-0-authorization-access-control": {
+              "mutation_path": [
+                "voice_change"
+              ],
+              "depth": 1,
+              "text_length": 4086,
+              "text_ref": "mutated_rules/evaluation_0071/cg-0-authorization-access-control.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s9_ea/job10560328_ea_python_s9_0803/mutated_rules/evaluation_0071/cg-0-authorization-access-control.md",
+              "text_exists": true
+            },
+            "codeguard-0-file-handling-and-uploads": {
+              "mutation_path": [
+                "section_reorder_shuffle",
+                "negation_injection"
+              ],
+              "depth": 2,
+              "text_length": 3839,
+              "text_ref": "mutated_rules/evaluation_0071/cg-0-file-handling-and-uploads.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s9_ea/job10560328_ea_python_s9_0803/mutated_rules/evaluation_0071/cg-0-file-handling-and-uploads.md",
+              "text_exists": true
+            },
+            "codeguard-0-framework-and-languages": {
+              "mutation_path": [
+                "negation_injection",
+                "verb_weakening"
+              ],
+              "depth": 2,
+              "text_length": 6548,
+              "text_ref": "mutated_rules/evaluation_0071/cg-0-framework-and-languages.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s9_ea/job10560328_ea_python_s9_0803/mutated_rules/evaluation_0071/cg-0-framework-and-languages.md",
+              "text_exists": true
+            },
+            "codeguard-0-input-validation-injection": {
+              "mutation_path": [
+                "synonym_replacement"
+              ],
+              "depth": 1,
+              "text_length": 6447,
+              "text_ref": "mutated_rules/evaluation_0071/cg-0-input-validation-injection.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s9_ea/job10560328_ea_python_s9_0803/mutated_rules/evaluation_0071/cg-0-input-validation-injection.md",
+              "text_exists": true
+            }
+          }
+        },
+        {
+          "rank": 4,
+          "seed": 10,
+          "run_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s10_ea/job10568896_ea_python_s10_0804",
+          "cid": "411b2a009c2a41ef",
+          "f1": 26.0,
+          "f2": 0.969125,
+          "f3": -8.0,
+          "evaluation_index": 79,
+          "order_priority": {
+            "codeguard-0-data-storage": -1,
+            "codeguard-0-additional-cryptography": -2
+          },
+          "n_rules_mutated": 8,
+          "override_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s10_ea/job10568896_ea_python_s10_0804/mutated_rules/evaluation_0079",
+          "genes": {
+            "codeguard-0-api-web-services": {
+              "mutation_path": [
+                "section_reorder_degrade"
+              ],
+              "depth": 1,
+              "text_length": 4316,
+              "text_ref": "mutated_rules/evaluation_0079/cg-0-api-web-services.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s10_ea/job10568896_ea_python_s10_0804/mutated_rules/evaluation_0079/cg-0-api-web-services.md",
+              "text_exists": true
+            },
+            "codeguard-0-client-side-web-security": {
+              "mutation_path": [
+                "verb_weakening"
+              ],
+              "depth": 1,
+              "text_length": 5662,
+              "text_ref": "mutated_rules/evaluation_0079/cg-0-client-side-web-security.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s10_ea/job10568896_ea_python_s10_0804/mutated_rules/evaluation_0079/cg-0-client-side-web-security.md",
+              "text_exists": true
+            },
+            "codeguard-0-file-handling-and-uploads": {
+              "mutation_path": [
+                "verb_weakening"
+              ],
+              "depth": 1,
+              "text_length": 3591,
+              "text_ref": "mutated_rules/evaluation_0079/cg-0-file-handling-and-uploads.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s10_ea/job10568896_ea_python_s10_0804/mutated_rules/evaluation_0079/cg-0-file-handling-and-uploads.md",
+              "text_exists": true
+            },
+            "codeguard-0-safe-c-functions": {
+              "mutation_path": [
+                "verb_weakening",
+                "add_random_word"
+              ],
+              "depth": 2,
+              "text_length": 13309,
+              "text_ref": "mutated_rules/evaluation_0079/cg-0-safe-c-functions.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s10_ea/job10568896_ea_python_s10_0804/mutated_rules/evaluation_0079/cg-0-safe-c-functions.md",
+              "text_exists": true
+            },
+            "codeguard-0-session-management-and-cookies": {
+              "mutation_path": [
+                "verb_weakening"
+              ],
+              "depth": 1,
+              "text_length": 3909,
+              "text_ref": "mutated_rules/evaluation_0079/cg-0-session-management-and-cookies.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s10_ea/job10568896_ea_python_s10_0804/mutated_rules/evaluation_0079/cg-0-session-management-and-cookies.md",
+              "text_exists": true
+            },
+            "codeguard-0-supply-chain-security": {
+              "mutation_path": [
+                "synonym_replacement",
+                "section_reorder_degrade"
+              ],
+              "depth": 2,
+              "text_length": 2783,
+              "text_ref": "mutated_rules/evaluation_0079/cg-0-supply-chain-security.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s10_ea/job10568896_ea_python_s10_0804/mutated_rules/evaluation_0079/cg-0-supply-chain-security.md",
+              "text_exists": true
+            },
+            "codeguard-1-crypto-algorithms": {
+              "mutation_path": [
+                "paraphrase",
+                "add_random_word"
+              ],
+              "depth": 2,
+              "text_length": 5863,
+              "text_ref": "mutated_rules/evaluation_0079/cg-1-crypto-algorithms.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s10_ea/job10568896_ea_python_s10_0804/mutated_rules/evaluation_0079/cg-1-crypto-algorithms.md",
+              "text_exists": true
+            },
+            "codeguard-1-hardcoded-credentials": {
+              "mutation_path": [
+                "negation_injection"
+              ],
+              "depth": 1,
+              "text_length": 1903,
+              "text_ref": "mutated_rules/evaluation_0079/cg-1-hardcoded-credentials.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s10_ea/job10568896_ea_python_s10_0804/mutated_rules/evaluation_0079/cg-1-hardcoded-credentials.md",
+              "text_exists": true
+            }
+          }
+        },
+        {
+          "rank": 5,
+          "seed": 4,
+          "run_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s4_ea/job10533382_ea_python_s4_0729",
+          "cid": "04c4685c91254df7",
+          "f1": 24.0,
+          "f2": 0.906837,
+          "f3": -8.0,
+          "evaluation_index": 76,
+          "order_priority": {
+            "codeguard-0-iac-security": -1
+          },
+          "n_rules_mutated": 8,
+          "override_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s4_ea/job10533382_ea_python_s4_0729/mutated_rules/evaluation_0076",
+          "genes": {
+            "codeguard-0-api-web-services": {
+              "mutation_path": [
+                "add_random_word",
+                "voice_change"
+              ],
+              "depth": 2,
+              "text_length": 5468,
+              "text_ref": "mutated_rules/evaluation_0076/cg-0-api-web-services.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s4_ea/job10533382_ea_python_s4_0729/mutated_rules/evaluation_0076/cg-0-api-web-services.md",
+              "text_exists": true
+            },
+            "codeguard-0-authentication-mfa": {
+              "mutation_path": [
+                "voice_change"
+              ],
+              "depth": 1,
+              "text_length": 7697,
+              "text_ref": "mutated_rules/evaluation_0076/cg-0-authentication-mfa.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s4_ea/job10533382_ea_python_s4_0729/mutated_rules/evaluation_0076/cg-0-authentication-mfa.md",
+              "text_exists": true
+            },
+            "codeguard-0-client-side-web-security": {
+              "mutation_path": [
+                "section_reorder_degrade"
+              ],
+              "depth": 1,
+              "text_length": 5628,
+              "text_ref": "mutated_rules/evaluation_0076/cg-0-client-side-web-security.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s4_ea/job10533382_ea_python_s4_0729/mutated_rules/evaluation_0076/cg-0-client-side-web-security.md",
+              "text_exists": true
+            },
+            "codeguard-0-data-storage": {
+              "mutation_path": [
+                "negation_injection",
+                "add_random_word"
+              ],
+              "depth": 2,
+              "text_length": 6573,
+              "text_ref": "mutated_rules/evaluation_0076/cg-0-data-storage.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s4_ea/job10533382_ea_python_s4_0729/mutated_rules/evaluation_0076/cg-0-data-storage.md",
+              "text_exists": true
+            },
+            "codeguard-0-input-validation-injection": {
+              "mutation_path": [
+                "synonym_replacement"
+              ],
+              "depth": 1,
+              "text_length": 6363,
+              "text_ref": "mutated_rules/evaluation_0076/cg-0-input-validation-injection.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s4_ea/job10533382_ea_python_s4_0729/mutated_rules/evaluation_0076/cg-0-input-validation-injection.md",
+              "text_exists": true
+            },
+            "codeguard-0-supply-chain-security": {
+              "mutation_path": [
+                "negation_injection"
+              ],
+              "depth": 1,
+              "text_length": 3205,
+              "text_ref": "mutated_rules/evaluation_0076/cg-0-supply-chain-security.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s4_ea/job10533382_ea_python_s4_0729/mutated_rules/evaluation_0076/cg-0-supply-chain-security.md",
+              "text_exists": true
+            },
+            "codeguard-1-crypto-algorithms": {
+              "mutation_path": [
+                "negation_injection"
+              ],
+              "depth": 1,
+              "text_length": 4933,
+              "text_ref": "mutated_rules/evaluation_0076/cg-1-crypto-algorithms.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s4_ea/job10533382_ea_python_s4_0729/mutated_rules/evaluation_0076/cg-1-crypto-algorithms.md",
+              "text_exists": true
+            },
+            "codeguard-1-digital-certificates": {
+              "mutation_path": [
+                "voice_change",
+                "paraphrase"
+              ],
+              "depth": 2,
+              "text_length": 6025,
+              "text_ref": "mutated_rules/evaluation_0076/cg-1-digital-certificates.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s4_ea/job10533382_ea_python_s4_0729/mutated_rules/evaluation_0076/cg-1-digital-certificates.md",
+              "text_exists": true
+            }
+          }
+        }
+      ]
+    },
+    "qwen_java": {
+      "n_seeds_available": 10,
+      "selected": [
+        {
+          "rank": 1,
+          "seed": 5,
+          "run_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s5_ea/job10528081_ea_java_s5_0730",
+          "cid": "b3e4754e40a57478",
+          "f1": 11.0,
+          "f2": 0.983327,
+          "f3": -11.0,
+          "evaluation_index": 344,
+          "order_priority": {
+            "codeguard-0-input-validation-injection": 1,
+            "codeguard-0-session-management-and-cookies": 2,
+            "codeguard-1-crypto-algorithms": 3,
+            "codeguard-0-cloud-orchestration-kubernetes": 4,
+            "codeguard-0-framework-and-languages": 5
+          },
+          "n_rules_mutated": 11,
+          "override_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s5_ea/job10528081_ea_java_s5_0730/mutated_rules/evaluation_0344",
+          "genes": {
+            "codeguard-0-additional-cryptography": {
+              "mutation_path": [
+                "voice_change"
+              ],
+              "depth": 1,
+              "text_length": 4359,
+              "text_ref": "mutated_rules/evaluation_0344/cg-0-additional-cryptography.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s5_ea/job10528081_ea_java_s5_0730/mutated_rules/evaluation_0344/cg-0-additional-cryptography.md",
+              "text_exists": true
+            },
+            "codeguard-0-authentication-mfa": {
+              "mutation_path": [
+                "add_random_word"
+              ],
+              "depth": 1,
+              "text_length": 7219,
+              "text_ref": "mutated_rules/evaluation_0344/cg-0-authentication-mfa.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s5_ea/job10528081_ea_java_s5_0730/mutated_rules/evaluation_0344/cg-0-authentication-mfa.md",
+              "text_exists": true
+            },
+            "codeguard-0-authorization-access-control": {
+              "mutation_path": [
+                "negation_injection"
+              ],
+              "depth": 1,
+              "text_length": 3776,
+              "text_ref": "mutated_rules/evaluation_0344/cg-0-authorization-access-control.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s5_ea/job10528081_ea_java_s5_0730/mutated_rules/evaluation_0344/cg-0-authorization-access-control.md",
+              "text_exists": true
+            },
+            "codeguard-0-client-side-web-security": {
+              "mutation_path": [
+                "add_random_word"
+              ],
+              "depth": 1,
+              "text_length": 6292,
+              "text_ref": "mutated_rules/evaluation_0344/cg-0-client-side-web-security.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s5_ea/job10528081_ea_java_s5_0730/mutated_rules/evaluation_0344/cg-0-client-side-web-security.md",
+              "text_exists": true
+            },
+            "codeguard-0-data-storage": {
+              "mutation_path": [
+                "section_reorder_degrade"
+              ],
+              "depth": 1,
+              "text_length": 3827,
+              "text_ref": "mutated_rules/evaluation_0344/cg-0-data-storage.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s5_ea/job10528081_ea_java_s5_0730/mutated_rules/evaluation_0344/cg-0-data-storage.md",
+              "text_exists": true
+            },
+            "codeguard-0-file-handling-and-uploads": {
+              "mutation_path": [
+                "negation_injection"
+              ],
+              "depth": 1,
+              "text_length": 3696,
+              "text_ref": "mutated_rules/evaluation_0344/cg-0-file-handling-and-uploads.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s5_ea/job10528081_ea_java_s5_0730/mutated_rules/evaluation_0344/cg-0-file-handling-and-uploads.md",
+              "text_exists": true
+            },
+            "codeguard-0-framework-and-languages": {
+              "mutation_path": [
+                "verb_weakening"
+              ],
+              "depth": 1,
+              "text_length": 6153,
+              "text_ref": "mutated_rules/evaluation_0344/cg-0-framework-and-languages.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s5_ea/job10528081_ea_java_s5_0730/mutated_rules/evaluation_0344/cg-0-framework-and-languages.md",
+              "text_exists": true
+            },
+            "codeguard-0-input-validation-injection": {
+              "mutation_path": [
+                "add_random_word",
+                "section_reorder_shuffle"
+              ],
+              "depth": 2,
+              "text_length": 6722,
+              "text_ref": "mutated_rules/evaluation_0344/cg-0-input-validation-injection.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s5_ea/job10528081_ea_java_s5_0730/mutated_rules/evaluation_0344/cg-0-input-validation-injection.md",
+              "text_exists": true
+            },
+            "codeguard-0-supply-chain-security": {
+              "mutation_path": [
+                "add_random_word"
+              ],
+              "depth": 1,
+              "text_length": 2913,
+              "text_ref": "mutated_rules/evaluation_0344/cg-0-supply-chain-security.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s5_ea/job10528081_ea_java_s5_0730/mutated_rules/evaluation_0344/cg-0-supply-chain-security.md",
+              "text_exists": true
+            },
+            "codeguard-0-xml-and-serialization": {
+              "mutation_path": [
+                "section_reorder_shuffle"
+              ],
+              "depth": 1,
+              "text_length": 4020,
+              "text_ref": "mutated_rules/evaluation_0344/cg-0-xml-and-serialization.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s5_ea/job10528081_ea_java_s5_0730/mutated_rules/evaluation_0344/cg-0-xml-and-serialization.md",
+              "text_exists": true
+            },
+            "codeguard-1-digital-certificates": {
+              "mutation_path": [
+                "verb_weakening",
+                "negation_injection"
+              ],
+              "depth": 2,
+              "text_length": 6040,
+              "text_ref": "mutated_rules/evaluation_0344/cg-1-digital-certificates.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s5_ea/job10528081_ea_java_s5_0730/mutated_rules/evaluation_0344/cg-1-digital-certificates.md",
+              "text_exists": true
+            }
+          }
+        },
+        {
+          "rank": 2,
+          "seed": 8,
+          "run_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s8_ea/job10552904_ea_java_s8_0801",
+          "cid": "2dbec79abbbcb98c",
+          "f1": 11.0,
+          "f2": 0.971622,
+          "f3": -9.0,
+          "evaluation_index": 388,
+          "order_priority": {
+            "codeguard-0-file-handling-and-uploads": -1,
+            "codeguard-0-safe-c-functions": -2,
+            "codeguard-0-data-storage": -5,
+            "codeguard-0-api-web-services": -4,
+            "codeguard-1-digital-certificates": -6,
+            "codeguard-0-xml-and-serialization": -7
+          },
+          "n_rules_mutated": 9,
+          "override_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s8_ea/job10552904_ea_java_s8_0801/mutated_rules/evaluation_0388",
+          "genes": {
+            "codeguard-0-additional-cryptography": {
+              "mutation_path": [
+                "voice_change",
+                "add_random_word"
+              ],
+              "depth": 2,
+              "text_length": 5046,
+              "text_ref": "mutated_rules/evaluation_0388/cg-0-additional-cryptography.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s8_ea/job10552904_ea_java_s8_0801/mutated_rules/evaluation_0388/cg-0-additional-cryptography.md",
+              "text_exists": true
+            },
+            "codeguard-0-authentication-mfa": {
+              "mutation_path": [
+                "section_reorder_shuffle",
+                "verb_weakening",
+                "paraphrase"
+              ],
+              "depth": 3,
+              "text_length": 7831,
+              "text_ref": "mutated_rules/evaluation_0388/cg-0-authentication-mfa.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s8_ea/job10552904_ea_java_s8_0801/mutated_rules/evaluation_0388/cg-0-authentication-mfa.md",
+              "text_exists": true
+            },
+            "codeguard-0-data-storage": {
+              "mutation_path": [
+                "section_reorder_degrade"
+              ],
+              "depth": 1,
+              "text_length": 3827,
+              "text_ref": "mutated_rules/evaluation_0388/cg-0-data-storage.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s8_ea/job10552904_ea_java_s8_0801/mutated_rules/evaluation_0388/cg-0-data-storage.md",
+              "text_exists": true
+            },
+            "codeguard-0-file-handling-and-uploads": {
+              "mutation_path": [
+                "add_random_word"
+              ],
+              "depth": 1,
+              "text_length": 4115,
+              "text_ref": "mutated_rules/evaluation_0388/cg-0-file-handling-and-uploads.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s8_ea/job10552904_ea_java_s8_0801/mutated_rules/evaluation_0388/cg-0-file-handling-and-uploads.md",
+              "text_exists": true
+            },
+            "codeguard-0-input-validation-injection": {
+              "mutation_path": [
+                "negation_injection"
+              ],
+              "depth": 1,
+              "text_length": 6093,
+              "text_ref": "mutated_rules/evaluation_0388/cg-0-input-validation-injection.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s8_ea/job10552904_ea_java_s8_0801/mutated_rules/evaluation_0388/cg-0-input-validation-injection.md",
+              "text_exists": true
+            },
+            "codeguard-0-supply-chain-security": {
+              "mutation_path": [
+                "negation_injection",
+                "verb_weakening"
+              ],
+              "depth": 2,
+              "text_length": 2846,
+              "text_ref": "mutated_rules/evaluation_0388/cg-0-supply-chain-security.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s8_ea/job10552904_ea_java_s8_0801/mutated_rules/evaluation_0388/cg-0-supply-chain-security.md",
+              "text_exists": true
+            },
+            "codeguard-0-xml-and-serialization": {
+              "mutation_path": [
+                "negation_injection",
+                "voice_change",
+                "section_reorder_degrade"
+              ],
+              "depth": 3,
+              "text_length": 4543,
+              "text_ref": "mutated_rules/evaluation_0388/cg-0-xml-and-serialization.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s8_ea/job10552904_ea_java_s8_0801/mutated_rules/evaluation_0388/cg-0-xml-and-serialization.md",
+              "text_exists": true
+            },
+            "codeguard-1-digital-certificates": {
+              "mutation_path": [
+                "verb_weakening",
+                "negation_injection"
+              ],
+              "depth": 2,
+              "text_length": 6040,
+              "text_ref": "mutated_rules/evaluation_0388/cg-1-digital-certificates.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s8_ea/job10552904_ea_java_s8_0801/mutated_rules/evaluation_0388/cg-1-digital-certificates.md",
+              "text_exists": true
+            },
+            "codeguard-1-hardcoded-credentials": {
+              "mutation_path": [
+                "negation_injection"
+              ],
+              "depth": 1,
+              "text_length": 1856,
+              "text_ref": "mutated_rules/evaluation_0388/cg-1-hardcoded-credentials.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s8_ea/job10552904_ea_java_s8_0801/mutated_rules/evaluation_0388/cg-1-hardcoded-credentials.md",
+              "text_exists": true
+            }
+          }
+        },
+        {
+          "rank": 3,
+          "seed": 9,
+          "run_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s9_ea/job10552908_ea_java_s9_0801",
+          "cid": "d3dd6fd8464d03ab",
+          "f1": 11.0,
+          "f2": 0.959893,
+          "f3": -14.0,
+          "evaluation_index": 327,
+          "order_priority": {
+            "codeguard-0-devops-ci-cd-containers": -1,
+            "codeguard-0-data-storage": -2,
+            "codeguard-0-logging": -3,
+            "codeguard-0-authorization-access-control": -4
+          },
+          "n_rules_mutated": 14,
+          "override_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s9_ea/job10552908_ea_java_s9_0801/mutated_rules/evaluation_0327",
+          "genes": {
+            "codeguard-0-additional-cryptography": {
+              "mutation_path": [
+                "paraphrase",
+                "section_reorder_shuffle",
+                "section_reorder_degrade"
+              ],
+              "depth": 3,
+              "text_length": 4399,
+              "text_ref": "mutated_rules/evaluation_0327/cg-0-additional-cryptography.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s9_ea/job10552908_ea_java_s9_0801/mutated_rules/evaluation_0327/cg-0-additional-cryptography.md",
+              "text_exists": true
+            },
+            "codeguard-0-api-web-services": {
+              "mutation_path": [
+                "section_reorder_shuffle"
+              ],
+              "depth": 1,
+              "text_length": 4316,
+              "text_ref": "mutated_rules/evaluation_0327/cg-0-api-web-services.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s9_ea/job10552908_ea_java_s9_0801/mutated_rules/evaluation_0327/cg-0-api-web-services.md",
+              "text_exists": true
+            },
+            "codeguard-0-authentication-mfa": {
+              "mutation_path": [
+                "paraphrase"
+              ],
+              "depth": 1,
+              "text_length": 6403,
+              "text_ref": "mutated_rules/evaluation_0327/cg-0-authentication-mfa.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s9_ea/job10552908_ea_java_s9_0801/mutated_rules/evaluation_0327/cg-0-authentication-mfa.md",
+              "text_exists": true
+            },
+            "codeguard-0-authorization-access-control": {
+              "mutation_path": [
+                "verb_weakening"
+              ],
+              "depth": 1,
+              "text_length": 3637,
+              "text_ref": "mutated_rules/evaluation_0327/cg-0-authorization-access-control.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s9_ea/job10552908_ea_java_s9_0801/mutated_rules/evaluation_0327/cg-0-authorization-access-control.md",
+              "text_exists": true
+            },
+            "codeguard-0-client-side-web-security": {
+              "mutation_path": [
+                "negation_injection"
+              ],
+              "depth": 1,
+              "text_length": 5774,
+              "text_ref": "mutated_rules/evaluation_0327/cg-0-client-side-web-security.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s9_ea/job10552908_ea_java_s9_0801/mutated_rules/evaluation_0327/cg-0-client-side-web-security.md",
+              "text_exists": true
+            },
+            "codeguard-0-devops-ci-cd-containers": {
+              "mutation_path": [
+                "synonym_replacement"
+              ],
+              "depth": 1,
+              "text_length": 3955,
+              "text_ref": "mutated_rules/evaluation_0327/cg-0-devops-ci-cd-containers.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s9_ea/job10552908_ea_java_s9_0801/mutated_rules/evaluation_0327/cg-0-devops-ci-cd-containers.md",
+              "text_exists": true
+            },
+            "codeguard-0-file-handling-and-uploads": {
+              "mutation_path": [
+                "verb_weakening"
+              ],
+              "depth": 1,
+              "text_length": 3591,
+              "text_ref": "mutated_rules/evaluation_0327/cg-0-file-handling-and-uploads.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s9_ea/job10552908_ea_java_s9_0801/mutated_rules/evaluation_0327/cg-0-file-handling-and-uploads.md",
+              "text_exists": true
+            },
+            "codeguard-0-framework-and-languages": {
+              "mutation_path": [
+                "section_reorder_shuffle",
+                "verb_weakening",
+                "negation_injection"
+              ],
+              "depth": 3,
+              "text_length": 6150,
+              "text_ref": "mutated_rules/evaluation_0327/cg-0-framework-and-languages.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s9_ea/job10552908_ea_java_s9_0801/mutated_rules/evaluation_0327/cg-0-framework-and-languages.md",
+              "text_exists": true
+            },
+            "codeguard-0-input-validation-injection": {
+              "mutation_path": [
+                "verb_weakening",
+                "paraphrase"
+              ],
+              "depth": 2,
+              "text_length": 6213,
+              "text_ref": "mutated_rules/evaluation_0327/cg-0-input-validation-injection.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s9_ea/job10552908_ea_java_s9_0801/mutated_rules/evaluation_0327/cg-0-input-validation-injection.md",
+              "text_exists": true
+            },
+            "codeguard-0-logging": {
+              "mutation_path": [
+                "section_reorder_shuffle"
+              ],
+              "depth": 1,
+              "text_length": 2360,
+              "text_ref": "mutated_rules/evaluation_0327/cg-0-logging.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s9_ea/job10552908_ea_java_s9_0801/mutated_rules/evaluation_0327/cg-0-logging.md",
+              "text_exists": true
+            },
+            "codeguard-0-safe-c-functions": {
+              "mutation_path": [
+                "add_random_word",
+                "paraphrase"
+              ],
+              "depth": 2,
+              "text_length": 12252,
+              "text_ref": "mutated_rules/evaluation_0327/cg-0-safe-c-functions.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s9_ea/job10552908_ea_java_s9_0801/mutated_rules/evaluation_0327/cg-0-safe-c-functions.md",
+              "text_exists": true
+            },
+            "codeguard-0-supply-chain-security": {
+              "mutation_path": [
+                "section_reorder_shuffle"
+              ],
+              "depth": 1,
+              "text_length": 2592,
+              "text_ref": "mutated_rules/evaluation_0327/cg-0-supply-chain-security.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s9_ea/job10552908_ea_java_s9_0801/mutated_rules/evaluation_0327/cg-0-supply-chain-security.md",
+              "text_exists": true
+            },
+            "codeguard-1-crypto-algorithms": {
+              "mutation_path": [
+                "add_random_word",
+                "section_reorder_shuffle",
+                "section_reorder_degrade"
+              ],
+              "depth": 3,
+              "text_length": 5458,
+              "text_ref": "mutated_rules/evaluation_0327/cg-1-crypto-algorithms.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s9_ea/job10552908_ea_java_s9_0801/mutated_rules/evaluation_0327/cg-1-crypto-algorithms.md",
+              "text_exists": true
+            },
+            "codeguard-1-digital-certificates": {
+              "mutation_path": [
+                "section_reorder_degrade"
+              ],
+              "depth": 1,
+              "text_length": 5991,
+              "text_ref": "mutated_rules/evaluation_0327/cg-1-digital-certificates.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s9_ea/job10552908_ea_java_s9_0801/mutated_rules/evaluation_0327/cg-1-digital-certificates.md",
+              "text_exists": true
+            }
+          }
+        },
+        {
+          "rank": 4,
+          "seed": 4,
+          "run_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s4_ea/job10527812_ea_java_s4_0729",
+          "cid": "37aa0e246f365696",
+          "f1": 11.0,
+          "f2": 0.928867,
+          "f3": -12.0,
+          "evaluation_index": 363,
+          "order_priority": {
+            "codeguard-0-cloud-orchestration-kubernetes": 1,
+            "codeguard-1-hardcoded-credentials": 2,
+            "codeguard-0-session-management-and-cookies": 3,
+            "codeguard-0-additional-cryptography": 4
+          },
+          "n_rules_mutated": 12,
+          "override_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s4_ea/job10527812_ea_java_s4_0729/mutated_rules/evaluation_0363",
+          "genes": {
+            "codeguard-0-additional-cryptography": {
+              "mutation_path": [
+                "voice_change",
+                "add_random_word",
+                "section_reorder_shuffle",
+                "synonym_replacement"
+              ],
+              "depth": 4,
+              "text_length": 5487,
+              "text_ref": "mutated_rules/evaluation_0363/cg-0-additional-cryptography.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s4_ea/job10527812_ea_java_s4_0729/mutated_rules/evaluation_0363/cg-0-additional-cryptography.md",
+              "text_exists": true
+            },
+            "codeguard-0-authentication-mfa": {
+              "mutation_path": [
+                "negation_injection",
+                "verb_weakening"
+              ],
+              "depth": 2,
+              "text_length": 6633,
+              "text_ref": "mutated_rules/evaluation_0363/cg-0-authentication-mfa.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s4_ea/job10527812_ea_java_s4_0729/mutated_rules/evaluation_0363/cg-0-authentication-mfa.md",
+              "text_exists": true
+            },
+            "codeguard-0-authorization-access-control": {
+              "mutation_path": [
+                "paraphrase"
+              ],
+              "depth": 1,
+              "text_length": 3759,
+              "text_ref": "mutated_rules/evaluation_0363/cg-0-authorization-access-control.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s4_ea/job10527812_ea_java_s4_0729/mutated_rules/evaluation_0363/cg-0-authorization-access-control.md",
+              "text_exists": true
+            },
+            "codeguard-0-client-side-web-security": {
+              "mutation_path": [
+                "add_random_word",
+                "voice_change"
+              ],
+              "depth": 2,
+              "text_length": 6891,
+              "text_ref": "mutated_rules/evaluation_0363/cg-0-client-side-web-security.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s4_ea/job10527812_ea_java_s4_0729/mutated_rules/evaluation_0363/cg-0-client-side-web-security.md",
+              "text_exists": true
+            },
+            "codeguard-0-data-storage": {
+              "mutation_path": [
+                "verb_weakening"
+              ],
+              "depth": 1,
+              "text_length": 3834,
+              "text_ref": "mutated_rules/evaluation_0363/cg-0-data-storage.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s4_ea/job10527812_ea_java_s4_0729/mutated_rules/evaluation_0363/cg-0-data-storage.md",
+              "text_exists": true
+            },
+            "codeguard-0-file-handling-and-uploads": {
+              "mutation_path": [
+                "section_reorder_shuffle"
+              ],
+              "depth": 1,
+              "text_length": 3550,
+              "text_ref": "mutated_rules/evaluation_0363/cg-0-file-handling-and-uploads.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s4_ea/job10527812_ea_java_s4_0729/mutated_rules/evaluation_0363/cg-0-file-handling-and-uploads.md",
+              "text_exists": true
+            },
+            "codeguard-0-framework-and-languages": {
+              "mutation_path": [
+                "section_reorder_shuffle",
+                "section_reorder_degrade",
+                "negation_injection"
+              ],
+              "depth": 3,
+              "text_length": 7055,
+              "text_ref": "mutated_rules/evaluation_0363/cg-0-framework-and-languages.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s4_ea/job10527812_ea_java_s4_0729/mutated_rules/evaluation_0363/cg-0-framework-and-languages.md",
+              "text_exists": true
+            },
+            "codeguard-0-input-validation-injection": {
+              "mutation_path": [
+                "add_random_word"
+              ],
+              "depth": 1,
+              "text_length": 6748,
+              "text_ref": "mutated_rules/evaluation_0363/cg-0-input-validation-injection.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s4_ea/job10527812_ea_java_s4_0729/mutated_rules/evaluation_0363/cg-0-input-validation-injection.md",
+              "text_exists": true
+            },
+            "codeguard-0-logging": {
+              "mutation_path": [
+                "add_random_word"
+              ],
+              "depth": 1,
+              "text_length": 2677,
+              "text_ref": "mutated_rules/evaluation_0363/cg-0-logging.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s4_ea/job10527812_ea_java_s4_0729/mutated_rules/evaluation_0363/cg-0-logging.md",
+              "text_exists": true
+            },
+            "codeguard-0-safe-c-functions": {
+              "mutation_path": [
+                "synonym_replacement"
+              ],
+              "depth": 1,
+              "text_length": 12962,
+              "text_ref": "mutated_rules/evaluation_0363/cg-0-safe-c-functions.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s4_ea/job10527812_ea_java_s4_0729/mutated_rules/evaluation_0363/cg-0-safe-c-functions.md",
+              "text_exists": true
+            },
+            "codeguard-0-supply-chain-security": {
+              "mutation_path": [
+                "negation_injection"
+              ],
+              "depth": 1,
+              "text_length": 2806,
+              "text_ref": "mutated_rules/evaluation_0363/cg-0-supply-chain-security.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s4_ea/job10527812_ea_java_s4_0729/mutated_rules/evaluation_0363/cg-0-supply-chain-security.md",
+              "text_exists": true
+            },
+            "codeguard-0-xml-and-serialization": {
+              "mutation_path": [
+                "negation_injection"
+              ],
+              "depth": 1,
+              "text_length": 4055,
+              "text_ref": "mutated_rules/evaluation_0363/cg-0-xml-and-serialization.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s4_ea/job10527812_ea_java_s4_0729/mutated_rules/evaluation_0363/cg-0-xml-and-serialization.md",
+              "text_exists": true
+            }
+          }
+        },
+        {
+          "rank": 5,
+          "seed": 7,
+          "run_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s7_ea/job10552900_ea_java_s7_0731",
+          "cid": "24af1719ec07ac4a",
+          "f1": 10.0,
+          "f2": 0.996587,
+          "f3": -8.0,
+          "evaluation_index": 372,
+          "order_priority": {
+            "codeguard-0-data-storage": -1,
+            "codeguard-0-file-handling-and-uploads": -2,
+            "codeguard-0-additional-cryptography": -3,
+            "codeguard-0-client-side-web-security": -4,
+            "codeguard-0-xml-and-serialization": -5
+          },
+          "n_rules_mutated": 8,
+          "override_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s7_ea/job10552900_ea_java_s7_0731/mutated_rules/evaluation_0372",
+          "genes": {
+            "codeguard-0-authentication-mfa": {
+              "mutation_path": [
+                "paraphrase"
+              ],
+              "depth": 1,
+              "text_length": 6409,
+              "text_ref": "mutated_rules/evaluation_0372/cg-0-authentication-mfa.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s7_ea/job10552900_ea_java_s7_0731/mutated_rules/evaluation_0372/cg-0-authentication-mfa.md",
+              "text_exists": true
+            },
+            "codeguard-0-client-side-web-security": {
+              "mutation_path": [
+                "section_reorder_degrade"
+              ],
+              "depth": 1,
+              "text_length": 5628,
+              "text_ref": "mutated_rules/evaluation_0372/cg-0-client-side-web-security.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s7_ea/job10552900_ea_java_s7_0731/mutated_rules/evaluation_0372/cg-0-client-side-web-security.md",
+              "text_exists": true
+            },
+            "codeguard-0-data-storage": {
+              "mutation_path": [
+                "verb_weakening"
+              ],
+              "depth": 1,
+              "text_length": 3834,
+              "text_ref": "mutated_rules/evaluation_0372/cg-0-data-storage.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s7_ea/job10552900_ea_java_s7_0731/mutated_rules/evaluation_0372/cg-0-data-storage.md",
+              "text_exists": true
+            },
+            "codeguard-0-input-validation-injection": {
+              "mutation_path": [
+                "verb_weakening",
+                "add_random_word"
+              ],
+              "depth": 2,
+              "text_length": 6800,
+              "text_ref": "mutated_rules/evaluation_0372/cg-0-input-validation-injection.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s7_ea/job10552900_ea_java_s7_0731/mutated_rules/evaluation_0372/cg-0-input-validation-injection.md",
+              "text_exists": true
+            },
+            "codeguard-0-logging": {
+              "mutation_path": [
+                "verb_weakening"
+              ],
+              "depth": 1,
+              "text_length": 2367,
+              "text_ref": "mutated_rules/evaluation_0372/cg-0-logging.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s7_ea/job10552900_ea_java_s7_0731/mutated_rules/evaluation_0372/cg-0-logging.md",
+              "text_exists": true
+            },
+            "codeguard-0-safe-c-functions": {
+              "mutation_path": [
+                "negation_injection"
+              ],
+              "depth": 1,
+              "text_length": 12148,
+              "text_ref": "mutated_rules/evaluation_0372/cg-0-safe-c-functions.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s7_ea/job10552900_ea_java_s7_0731/mutated_rules/evaluation_0372/cg-0-safe-c-functions.md",
+              "text_exists": true
+            },
+            "codeguard-1-crypto-algorithms": {
+              "mutation_path": [
+                "voice_change"
+              ],
+              "depth": 1,
+              "text_length": 5117,
+              "text_ref": "mutated_rules/evaluation_0372/cg-1-crypto-algorithms.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s7_ea/job10552900_ea_java_s7_0731/mutated_rules/evaluation_0372/cg-1-crypto-algorithms.md",
+              "text_exists": true
+            },
+            "codeguard-1-digital-certificates": {
+              "mutation_path": [
+                "negation_injection"
+              ],
+              "depth": 1,
+              "text_length": 6025,
+              "text_ref": "mutated_rules/evaluation_0372/cg-1-digital-certificates.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s7_ea/job10552900_ea_java_s7_0731/mutated_rules/evaluation_0372/cg-1-digital-certificates.md",
+              "text_exists": true
+            }
+          }
+        }
+      ]
+    },
+    "qwen_python": {
+      "n_seeds_available": 10,
+      "selected": [
+        {
+          "rank": 1,
+          "seed": 7,
+          "run_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s7_ea/job10552898_ea_python_s7_0731",
+          "cid": "f953f53a0b830443",
+          "f1": 28.0,
+          "f2": 0.919636,
+          "f3": -11.0,
+          "evaluation_index": 200,
+          "order_priority": {
+            "codeguard-0-xml-and-serialization": 1,
+            "codeguard-1-crypto-algorithms": 2,
+            "codeguard-0-authentication-mfa": 3
+          },
+          "n_rules_mutated": 11,
+          "override_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s7_ea/job10552898_ea_python_s7_0731/mutated_rules/evaluation_0200",
+          "genes": {
+            "codeguard-0-additional-cryptography": {
+              "mutation_path": [
+                "voice_change"
+              ],
+              "depth": 1,
+              "text_length": 4359,
+              "text_ref": "mutated_rules/evaluation_0200/cg-0-additional-cryptography.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s7_ea/job10552898_ea_python_s7_0731/mutated_rules/evaluation_0200/cg-0-additional-cryptography.md",
+              "text_exists": true
+            },
+            "codeguard-0-api-web-services": {
+              "mutation_path": [
+                "negation_injection"
+              ],
+              "depth": 1,
+              "text_length": 4490,
+              "text_ref": "mutated_rules/evaluation_0200/cg-0-api-web-services.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s7_ea/job10552898_ea_python_s7_0731/mutated_rules/evaluation_0200/cg-0-api-web-services.md",
+              "text_exists": true
+            },
+            "codeguard-0-authentication-mfa": {
+              "mutation_path": [
+                "voice_change",
+                "section_reorder_degrade"
+              ],
+              "depth": 2,
+              "text_length": 7661,
+              "text_ref": "mutated_rules/evaluation_0200/cg-0-authentication-mfa.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s7_ea/job10552898_ea_python_s7_0731/mutated_rules/evaluation_0200/cg-0-authentication-mfa.md",
+              "text_exists": true
+            },
+            "codeguard-0-client-side-web-security": {
+              "mutation_path": [
+                "add_random_word",
+                "voice_change"
+              ],
+              "depth": 2,
+              "text_length": 6941,
+              "text_ref": "mutated_rules/evaluation_0200/cg-0-client-side-web-security.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s7_ea/job10552898_ea_python_s7_0731/mutated_rules/evaluation_0200/cg-0-client-side-web-security.md",
+              "text_exists": true
+            },
+            "codeguard-0-devops-ci-cd-containers": {
+              "mutation_path": [
+                "section_reorder_shuffle",
+                "voice_change"
+              ],
+              "depth": 2,
+              "text_length": 4038,
+              "text_ref": "mutated_rules/evaluation_0200/cg-0-devops-ci-cd-containers.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s7_ea/job10552898_ea_python_s7_0731/mutated_rules/evaluation_0200/cg-0-devops-ci-cd-containers.md",
+              "text_exists": true
+            },
+            "codeguard-0-file-handling-and-uploads": {
+              "mutation_path": [
+                "synonym_replacement",
+                "section_reorder_shuffle"
+              ],
+              "depth": 2,
+              "text_length": 3705,
+              "text_ref": "mutated_rules/evaluation_0200/cg-0-file-handling-and-uploads.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s7_ea/job10552898_ea_python_s7_0731/mutated_rules/evaluation_0200/cg-0-file-handling-and-uploads.md",
+              "text_exists": true
+            },
+            "codeguard-0-framework-and-languages": {
+              "mutation_path": [
+                "synonym_replacement"
+              ],
+              "depth": 1,
+              "text_length": 6605,
+              "text_ref": "mutated_rules/evaluation_0200/cg-0-framework-and-languages.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s7_ea/job10552898_ea_python_s7_0731/mutated_rules/evaluation_0200/cg-0-framework-and-languages.md",
+              "text_exists": true
+            },
+            "codeguard-0-input-validation-injection": {
+              "mutation_path": [
+                "synonym_replacement",
+                "add_random_word"
+              ],
+              "depth": 2,
+              "text_length": 7420,
+              "text_ref": "mutated_rules/evaluation_0200/cg-0-input-validation-injection.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s7_ea/job10552898_ea_python_s7_0731/mutated_rules/evaluation_0200/cg-0-input-validation-injection.md",
+              "text_exists": true
+            },
+            "codeguard-0-mobile-apps": {
+              "mutation_path": [
+                "synonym_replacement",
+                "add_random_word",
+                "negation_injection"
+              ],
+              "depth": 3,
+              "text_length": 6299,
+              "text_ref": "mutated_rules/evaluation_0200/cg-0-mobile-apps.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s7_ea/job10552898_ea_python_s7_0731/mutated_rules/evaluation_0200/cg-0-mobile-apps.md",
+              "text_exists": true
+            },
+            "codeguard-1-crypto-algorithms": {
+              "mutation_path": [
+                "voice_change",
+                "section_reorder_degrade"
+              ],
+              "depth": 2,
+              "text_length": 5117,
+              "text_ref": "mutated_rules/evaluation_0200/cg-1-crypto-algorithms.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s7_ea/job10552898_ea_python_s7_0731/mutated_rules/evaluation_0200/cg-1-crypto-algorithms.md",
+              "text_exists": true
+            },
+            "codeguard-1-hardcoded-credentials": {
+              "mutation_path": [
+                "add_random_word"
+              ],
+              "depth": 1,
+              "text_length": 1987,
+              "text_ref": "mutated_rules/evaluation_0200/cg-1-hardcoded-credentials.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s7_ea/job10552898_ea_python_s7_0731/mutated_rules/evaluation_0200/cg-1-hardcoded-credentials.md",
+              "text_exists": true
+            }
+          }
+        },
+        {
+          "rank": 2,
+          "seed": 6,
+          "run_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s6_ea/job10552894_ea_python_s6_0731",
+          "cid": "2004e6c4cf882fd0",
+          "f1": 27.0,
+          "f2": 0.974123,
+          "f3": -13.0,
+          "evaluation_index": 191,
+          "order_priority": {
+            "codeguard-0-additional-cryptography": 1,
+            "codeguard-0-privacy-data-protection": 3,
+            "codeguard-0-input-validation-injection": 4,
+            "codeguard-0-logging": 5
+          },
+          "n_rules_mutated": 13,
+          "override_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s6_ea/job10552894_ea_python_s6_0731/mutated_rules/evaluation_0191",
+          "genes": {
+            "codeguard-0-additional-cryptography": {
+              "mutation_path": [
+                "section_reorder_degrade"
+              ],
+              "depth": 1,
+              "text_length": 3223,
+              "text_ref": "mutated_rules/evaluation_0191/cg-0-additional-cryptography.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s6_ea/job10552894_ea_python_s6_0731/mutated_rules/evaluation_0191/cg-0-additional-cryptography.md",
+              "text_exists": true
+            },
+            "codeguard-0-api-web-services": {
+              "mutation_path": [
+                "add_random_word",
+                "negation_injection"
+              ],
+              "depth": 2,
+              "text_length": 4918,
+              "text_ref": "mutated_rules/evaluation_0191/cg-0-api-web-services.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s6_ea/job10552894_ea_python_s6_0731/mutated_rules/evaluation_0191/cg-0-api-web-services.md",
+              "text_exists": true
+            },
+            "codeguard-0-authentication-mfa": {
+              "mutation_path": [
+                "verb_weakening"
+              ],
+              "depth": 1,
+              "text_length": 6356,
+              "text_ref": "mutated_rules/evaluation_0191/cg-0-authentication-mfa.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s6_ea/job10552894_ea_python_s6_0731/mutated_rules/evaluation_0191/cg-0-authentication-mfa.md",
+              "text_exists": true
+            },
+            "codeguard-0-authorization-access-control": {
+              "mutation_path": [
+                "add_random_word"
+              ],
+              "depth": 1,
+              "text_length": 4066,
+              "text_ref": "mutated_rules/evaluation_0191/cg-0-authorization-access-control.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s6_ea/job10552894_ea_python_s6_0731/mutated_rules/evaluation_0191/cg-0-authorization-access-control.md",
+              "text_exists": true
+            },
+            "codeguard-0-client-side-web-security": {
+              "mutation_path": [
+                "verb_weakening",
+                "voice_change"
+              ],
+              "depth": 2,
+              "text_length": 6803,
+              "text_ref": "mutated_rules/evaluation_0191/cg-0-client-side-web-security.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s6_ea/job10552894_ea_python_s6_0731/mutated_rules/evaluation_0191/cg-0-client-side-web-security.md",
+              "text_exists": true
+            },
+            "codeguard-0-data-storage": {
+              "mutation_path": [
+                "voice_change",
+                "negation_injection"
+              ],
+              "depth": 2,
+              "text_length": 5032,
+              "text_ref": "mutated_rules/evaluation_0191/cg-0-data-storage.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s6_ea/job10552894_ea_python_s6_0731/mutated_rules/evaluation_0191/cg-0-data-storage.md",
+              "text_exists": true
+            },
+            "codeguard-0-devops-ci-cd-containers": {
+              "mutation_path": [
+                "paraphrase"
+              ],
+              "depth": 1,
+              "text_length": 4695,
+              "text_ref": "mutated_rules/evaluation_0191/cg-0-devops-ci-cd-containers.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s6_ea/job10552894_ea_python_s6_0731/mutated_rules/evaluation_0191/cg-0-devops-ci-cd-containers.md",
+              "text_exists": true
+            },
+            "codeguard-0-framework-and-languages": {
+              "mutation_path": [
+                "voice_change"
+              ],
+              "depth": 1,
+              "text_length": 7882,
+              "text_ref": "mutated_rules/evaluation_0191/cg-0-framework-and-languages.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s6_ea/job10552894_ea_python_s6_0731/mutated_rules/evaluation_0191/cg-0-framework-and-languages.md",
+              "text_exists": true
+            },
+            "codeguard-0-input-validation-injection": {
+              "mutation_path": [
+                "synonym_replacement"
+              ],
+              "depth": 1,
+              "text_length": 6418,
+              "text_ref": "mutated_rules/evaluation_0191/cg-0-input-validation-injection.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s6_ea/job10552894_ea_python_s6_0731/mutated_rules/evaluation_0191/cg-0-input-validation-injection.md",
+              "text_exists": true
+            },
+            "codeguard-0-logging": {
+              "mutation_path": [
+                "synonym_replacement"
+              ],
+              "depth": 1,
+              "text_length": 2647,
+              "text_ref": "mutated_rules/evaluation_0191/cg-0-logging.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s6_ea/job10552894_ea_python_s6_0731/mutated_rules/evaluation_0191/cg-0-logging.md",
+              "text_exists": true
+            },
+            "codeguard-0-safe-c-functions": {
+              "mutation_path": [
+                "paraphrase"
+              ],
+              "depth": 1,
+              "text_length": 12301,
+              "text_ref": "mutated_rules/evaluation_0191/cg-0-safe-c-functions.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s6_ea/job10552894_ea_python_s6_0731/mutated_rules/evaluation_0191/cg-0-safe-c-functions.md",
+              "text_exists": true
+            },
+            "codeguard-0-session-management-and-cookies": {
+              "mutation_path": [
+                "add_random_word"
+              ],
+              "depth": 1,
+              "text_length": 4393,
+              "text_ref": "mutated_rules/evaluation_0191/cg-0-session-management-and-cookies.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s6_ea/job10552894_ea_python_s6_0731/mutated_rules/evaluation_0191/cg-0-session-management-and-cookies.md",
+              "text_exists": true
+            },
+            "codeguard-0-xml-and-serialization": {
+              "mutation_path": [
+                "add_random_word"
+              ],
+              "depth": 1,
+              "text_length": 4307,
+              "text_ref": "mutated_rules/evaluation_0191/cg-0-xml-and-serialization.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s6_ea/job10552894_ea_python_s6_0731/mutated_rules/evaluation_0191/cg-0-xml-and-serialization.md",
+              "text_exists": true
+            }
+          }
+        },
+        {
+          "rank": 3,
+          "seed": 10,
+          "run_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s10_ea/job10552926_ea_python_s10_0802",
+          "cid": "dec458eaa24be405",
+          "f1": 27.0,
+          "f2": 0.961909,
+          "f3": -11.0,
+          "evaluation_index": 149,
+          "order_priority": {
+            "codeguard-0-logging": 1
+          },
+          "n_rules_mutated": 11,
+          "override_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s10_ea/job10552926_ea_python_s10_0802/mutated_rules/evaluation_0149",
+          "genes": {
+            "codeguard-0-api-web-services": {
+              "mutation_path": [
+                "paraphrase"
+              ],
+              "depth": 1,
+              "text_length": 6142,
+              "text_ref": "mutated_rules/evaluation_0149/cg-0-api-web-services.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s10_ea/job10552926_ea_python_s10_0802/mutated_rules/evaluation_0149/cg-0-api-web-services.md",
+              "text_exists": true
+            },
+            "codeguard-0-authorization-access-control": {
+              "mutation_path": [
+                "voice_change"
+              ],
+              "depth": 1,
+              "text_length": 4077,
+              "text_ref": "mutated_rules/evaluation_0149/cg-0-authorization-access-control.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s10_ea/job10552926_ea_python_s10_0802/mutated_rules/evaluation_0149/cg-0-authorization-access-control.md",
+              "text_exists": true
+            },
+            "codeguard-0-data-storage": {
+              "mutation_path": [
+                "verb_weakening",
+                "section_reorder_degrade",
+                "paraphrase"
+              ],
+              "depth": 3,
+              "text_length": 4667,
+              "text_ref": "mutated_rules/evaluation_0149/cg-0-data-storage.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s10_ea/job10552926_ea_python_s10_0802/mutated_rules/evaluation_0149/cg-0-data-storage.md",
+              "text_exists": true
+            },
+            "codeguard-0-file-handling-and-uploads": {
+              "mutation_path": [
+                "synonym_replacement",
+                "add_random_word"
+              ],
+              "depth": 2,
+              "text_length": 4331,
+              "text_ref": "mutated_rules/evaluation_0149/cg-0-file-handling-and-uploads.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s10_ea/job10552926_ea_python_s10_0802/mutated_rules/evaluation_0149/cg-0-file-handling-and-uploads.md",
+              "text_exists": true
+            },
+            "codeguard-0-input-validation-injection": {
+              "mutation_path": [
+                "synonym_replacement",
+                "section_reorder_degrade"
+              ],
+              "depth": 2,
+              "text_length": 6565,
+              "text_ref": "mutated_rules/evaluation_0149/cg-0-input-validation-injection.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s10_ea/job10552926_ea_python_s10_0802/mutated_rules/evaluation_0149/cg-0-input-validation-injection.md",
+              "text_exists": true
+            },
+            "codeguard-0-mobile-apps": {
+              "mutation_path": [
+                "verb_weakening",
+                "section_reorder_degrade"
+              ],
+              "depth": 2,
+              "text_length": 4902,
+              "text_ref": "mutated_rules/evaluation_0149/cg-0-mobile-apps.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s10_ea/job10552926_ea_python_s10_0802/mutated_rules/evaluation_0149/cg-0-mobile-apps.md",
+              "text_exists": true
+            },
+            "codeguard-0-privacy-data-protection": {
+              "mutation_path": [
+                "negation_injection"
+              ],
+              "depth": 1,
+              "text_length": 1192,
+              "text_ref": "mutated_rules/evaluation_0149/cg-0-privacy-data-protection.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s10_ea/job10552926_ea_python_s10_0802/mutated_rules/evaluation_0149/cg-0-privacy-data-protection.md",
+              "text_exists": true
+            },
+            "codeguard-0-session-management-and-cookies": {
+              "mutation_path": [
+                "paraphrase",
+                "section_reorder_shuffle"
+              ],
+              "depth": 2,
+              "text_length": 4631,
+              "text_ref": "mutated_rules/evaluation_0149/cg-0-session-management-and-cookies.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s10_ea/job10552926_ea_python_s10_0802/mutated_rules/evaluation_0149/cg-0-session-management-and-cookies.md",
+              "text_exists": true
+            },
+            "codeguard-0-supply-chain-security": {
+              "mutation_path": [
+                "voice_change"
+              ],
+              "depth": 1,
+              "text_length": 3281,
+              "text_ref": "mutated_rules/evaluation_0149/cg-0-supply-chain-security.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s10_ea/job10552926_ea_python_s10_0802/mutated_rules/evaluation_0149/cg-0-supply-chain-security.md",
+              "text_exists": true
+            },
+            "codeguard-1-crypto-algorithms": {
+              "mutation_path": [
+                "synonym_replacement"
+              ],
+              "depth": 1,
+              "text_length": 5184,
+              "text_ref": "mutated_rules/evaluation_0149/cg-1-crypto-algorithms.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s10_ea/job10552926_ea_python_s10_0802/mutated_rules/evaluation_0149/cg-1-crypto-algorithms.md",
+              "text_exists": true
+            },
+            "codeguard-1-hardcoded-credentials": {
+              "mutation_path": [
+                "section_reorder_degrade",
+                "negation_injection"
+              ],
+              "depth": 2,
+              "text_length": 1857,
+              "text_ref": "mutated_rules/evaluation_0149/cg-1-hardcoded-credentials.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s10_ea/job10552926_ea_python_s10_0802/mutated_rules/evaluation_0149/cg-1-hardcoded-credentials.md",
+              "text_exists": true
+            }
+          }
+        },
+        {
+          "rank": 4,
+          "seed": 9,
+          "run_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s9_ea/job10552906_ea_python_s9_0801",
+          "cid": "9da1559918698f0d",
+          "f1": 27.0,
+          "f2": 0.928009,
+          "f3": -11.0,
+          "evaluation_index": 222,
+          "order_priority": {
+            "codeguard-0-mobile-apps": -1,
+            "codeguard-0-framework-and-languages": -2,
+            "codeguard-0-api-web-services": -3
+          },
+          "n_rules_mutated": 11,
+          "override_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s9_ea/job10552906_ea_python_s9_0801/mutated_rules/evaluation_0222",
+          "genes": {
+            "codeguard-0-additional-cryptography": {
+              "mutation_path": [
+                "section_reorder_shuffle"
+              ],
+              "depth": 1,
+              "text_length": 3223,
+              "text_ref": "mutated_rules/evaluation_0222/cg-0-additional-cryptography.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s9_ea/job10552906_ea_python_s9_0801/mutated_rules/evaluation_0222/cg-0-additional-cryptography.md",
+              "text_exists": true
+            },
+            "codeguard-0-authorization-access-control": {
+              "mutation_path": [
+                "voice_change"
+              ],
+              "depth": 1,
+              "text_length": 4077,
+              "text_ref": "mutated_rules/evaluation_0222/cg-0-authorization-access-control.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s9_ea/job10552906_ea_python_s9_0801/mutated_rules/evaluation_0222/cg-0-authorization-access-control.md",
+              "text_exists": true
+            },
+            "codeguard-0-devops-ci-cd-containers": {
+              "mutation_path": [
+                "paraphrase"
+              ],
+              "depth": 1,
+              "text_length": 4952,
+              "text_ref": "mutated_rules/evaluation_0222/cg-0-devops-ci-cd-containers.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s9_ea/job10552906_ea_python_s9_0801/mutated_rules/evaluation_0222/cg-0-devops-ci-cd-containers.md",
+              "text_exists": true
+            },
+            "codeguard-0-file-handling-and-uploads": {
+              "mutation_path": [
+                "section_reorder_shuffle",
+                "negation_injection",
+                "section_reorder_degrade"
+              ],
+              "depth": 3,
+              "text_length": 3673,
+              "text_ref": "mutated_rules/evaluation_0222/cg-0-file-handling-and-uploads.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s9_ea/job10552906_ea_python_s9_0801/mutated_rules/evaluation_0222/cg-0-file-handling-and-uploads.md",
+              "text_exists": true
+            },
+            "codeguard-0-framework-and-languages": {
+              "mutation_path": [
+                "negation_injection",
+                "synonym_replacement"
+              ],
+              "depth": 2,
+              "text_length": 7098,
+              "text_ref": "mutated_rules/evaluation_0222/cg-0-framework-and-languages.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s9_ea/job10552906_ea_python_s9_0801/mutated_rules/evaluation_0222/cg-0-framework-and-languages.md",
+              "text_exists": true
+            },
+            "codeguard-0-iac-security": {
+              "mutation_path": [
+                "negation_injection"
+              ],
+              "depth": 1,
+              "text_length": 7029,
+              "text_ref": "mutated_rules/evaluation_0222/cg-0-iac-security.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s9_ea/job10552906_ea_python_s9_0801/mutated_rules/evaluation_0222/cg-0-iac-security.md",
+              "text_exists": true
+            },
+            "codeguard-0-input-validation-injection": {
+              "mutation_path": [
+                "synonym_replacement"
+              ],
+              "depth": 1,
+              "text_length": 6447,
+              "text_ref": "mutated_rules/evaluation_0222/cg-0-input-validation-injection.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s9_ea/job10552906_ea_python_s9_0801/mutated_rules/evaluation_0222/cg-0-input-validation-injection.md",
+              "text_exists": true
+            },
+            "codeguard-0-logging": {
+              "mutation_path": [
+                "negation_injection",
+                "synonym_replacement"
+              ],
+              "depth": 2,
+              "text_length": 2943,
+              "text_ref": "mutated_rules/evaluation_0222/cg-0-logging.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s9_ea/job10552906_ea_python_s9_0801/mutated_rules/evaluation_0222/cg-0-logging.md",
+              "text_exists": true
+            },
+            "codeguard-0-session-management-and-cookies": {
+              "mutation_path": [
+                "voice_change"
+              ],
+              "depth": 1,
+              "text_length": 4568,
+              "text_ref": "mutated_rules/evaluation_0222/cg-0-session-management-and-cookies.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s9_ea/job10552906_ea_python_s9_0801/mutated_rules/evaluation_0222/cg-0-session-management-and-cookies.md",
+              "text_exists": true
+            },
+            "codeguard-0-supply-chain-security": {
+              "mutation_path": [
+                "synonym_replacement"
+              ],
+              "depth": 1,
+              "text_length": 2742,
+              "text_ref": "mutated_rules/evaluation_0222/cg-0-supply-chain-security.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s9_ea/job10552906_ea_python_s9_0801/mutated_rules/evaluation_0222/cg-0-supply-chain-security.md",
+              "text_exists": true
+            },
+            "codeguard-1-crypto-algorithms": {
+              "mutation_path": [
+                "negation_injection",
+                "add_random_word"
+              ],
+              "depth": 2,
+              "text_length": 5621,
+              "text_ref": "mutated_rules/evaluation_0222/cg-1-crypto-algorithms.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s9_ea/job10552906_ea_python_s9_0801/mutated_rules/evaluation_0222/cg-1-crypto-algorithms.md",
+              "text_exists": true
+            }
+          }
+        },
+        {
+          "rank": 5,
+          "seed": 8,
+          "run_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s8_ea/job10552902_ea_python_s8_0801",
+          "cid": "b7b79cc4bd6de2e5",
+          "f1": 26.0,
+          "f2": 0.979353,
+          "f3": -15.0,
+          "evaluation_index": 250,
+          "order_priority": {
+            "codeguard-0-input-validation-injection": 1,
+            "codeguard-0-logging": 2,
+            "codeguard-0-session-management-and-cookies": 3,
+            "codeguard-0-authorization-access-control": 4
+          },
+          "n_rules_mutated": 15,
+          "override_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s8_ea/job10552902_ea_python_s8_0801/mutated_rules/evaluation_0250",
+          "genes": {
+            "codeguard-0-additional-cryptography": {
+              "mutation_path": [
+                "section_reorder_degrade"
+              ],
+              "depth": 1,
+              "text_length": 3223,
+              "text_ref": "mutated_rules/evaluation_0250/cg-0-additional-cryptography.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s8_ea/job10552902_ea_python_s8_0801/mutated_rules/evaluation_0250/cg-0-additional-cryptography.md",
+              "text_exists": true
+            },
+            "codeguard-0-api-web-services": {
+              "mutation_path": [
+                "add_random_word",
+                "voice_change"
+              ],
+              "depth": 2,
+              "text_length": 5955,
+              "text_ref": "mutated_rules/evaluation_0250/cg-0-api-web-services.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s8_ea/job10552902_ea_python_s8_0801/mutated_rules/evaluation_0250/cg-0-api-web-services.md",
+              "text_exists": true
+            },
+            "codeguard-0-authentication-mfa": {
+              "mutation_path": [
+                "verb_weakening"
+              ],
+              "depth": 1,
+              "text_length": 6356,
+              "text_ref": "mutated_rules/evaluation_0250/cg-0-authentication-mfa.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s8_ea/job10552902_ea_python_s8_0801/mutated_rules/evaluation_0250/cg-0-authentication-mfa.md",
+              "text_exists": true
+            },
+            "codeguard-0-client-side-web-security": {
+              "mutation_path": [
+                "add_random_word"
+              ],
+              "depth": 1,
+              "text_length": 6290,
+              "text_ref": "mutated_rules/evaluation_0250/cg-0-client-side-web-security.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s8_ea/job10552902_ea_python_s8_0801/mutated_rules/evaluation_0250/cg-0-client-side-web-security.md",
+              "text_exists": true
+            },
+            "codeguard-0-data-storage": {
+              "mutation_path": [
+                "voice_change"
+              ],
+              "depth": 1,
+              "text_length": 4486,
+              "text_ref": "mutated_rules/evaluation_0250/cg-0-data-storage.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s8_ea/job10552902_ea_python_s8_0801/mutated_rules/evaluation_0250/cg-0-data-storage.md",
+              "text_exists": true
+            },
+            "codeguard-0-file-handling-and-uploads": {
+              "mutation_path": [
+                "add_random_word",
+                "section_reorder_degrade"
+              ],
+              "depth": 2,
+              "text_length": 4098,
+              "text_ref": "mutated_rules/evaluation_0250/cg-0-file-handling-and-uploads.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s8_ea/job10552902_ea_python_s8_0801/mutated_rules/evaluation_0250/cg-0-file-handling-and-uploads.md",
+              "text_exists": true
+            },
+            "codeguard-0-framework-and-languages": {
+              "mutation_path": [
+                "voice_change"
+              ],
+              "depth": 1,
+              "text_length": 7882,
+              "text_ref": "mutated_rules/evaluation_0250/cg-0-framework-and-languages.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s8_ea/job10552902_ea_python_s8_0801/mutated_rules/evaluation_0250/cg-0-framework-and-languages.md",
+              "text_exists": true
+            },
+            "codeguard-0-iac-security": {
+              "mutation_path": [
+                "voice_change"
+              ],
+              "depth": 1,
+              "text_length": 6498,
+              "text_ref": "mutated_rules/evaluation_0250/cg-0-iac-security.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s8_ea/job10552902_ea_python_s8_0801/mutated_rules/evaluation_0250/cg-0-iac-security.md",
+              "text_exists": true
+            },
+            "codeguard-0-input-validation-injection": {
+              "mutation_path": [
+                "synonym_replacement"
+              ],
+              "depth": 1,
+              "text_length": 6461,
+              "text_ref": "mutated_rules/evaluation_0250/cg-0-input-validation-injection.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s8_ea/job10552902_ea_python_s8_0801/mutated_rules/evaluation_0250/cg-0-input-validation-injection.md",
+              "text_exists": true
+            },
+            "codeguard-0-mobile-apps": {
+              "mutation_path": [
+                "verb_weakening"
+              ],
+              "depth": 1,
+              "text_length": 4902,
+              "text_ref": "mutated_rules/evaluation_0250/cg-0-mobile-apps.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s8_ea/job10552902_ea_python_s8_0801/mutated_rules/evaluation_0250/cg-0-mobile-apps.md",
+              "text_exists": true
+            },
+            "codeguard-0-safe-c-functions": {
+              "mutation_path": [
+                "paraphrase",
+                "section_reorder_shuffle"
+              ],
+              "depth": 2,
+              "text_length": 12232,
+              "text_ref": "mutated_rules/evaluation_0250/cg-0-safe-c-functions.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s8_ea/job10552902_ea_python_s8_0801/mutated_rules/evaluation_0250/cg-0-safe-c-functions.md",
+              "text_exists": true
+            },
+            "codeguard-0-session-management-and-cookies": {
+              "mutation_path": [
+                "add_random_word"
+              ],
+              "depth": 1,
+              "text_length": 4403,
+              "text_ref": "mutated_rules/evaluation_0250/cg-0-session-management-and-cookies.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s8_ea/job10552902_ea_python_s8_0801/mutated_rules/evaluation_0250/cg-0-session-management-and-cookies.md",
+              "text_exists": true
+            },
+            "codeguard-0-supply-chain-security": {
+              "mutation_path": [
+                "negation_injection"
+              ],
+              "depth": 1,
+              "text_length": 2806,
+              "text_ref": "mutated_rules/evaluation_0250/cg-0-supply-chain-security.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s8_ea/job10552902_ea_python_s8_0801/mutated_rules/evaluation_0250/cg-0-supply-chain-security.md",
+              "text_exists": true
+            },
+            "codeguard-1-crypto-algorithms": {
+              "mutation_path": [
+                "add_random_word"
+              ],
+              "depth": 1,
+              "text_length": 5489,
+              "text_ref": "mutated_rules/evaluation_0250/cg-1-crypto-algorithms.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s8_ea/job10552902_ea_python_s8_0801/mutated_rules/evaluation_0250/cg-1-crypto-algorithms.md",
+              "text_exists": true
+            },
+            "codeguard-1-hardcoded-credentials": {
+              "mutation_path": [
+                "synonym_replacement"
+              ],
+              "depth": 1,
+              "text_length": 1855,
+              "text_ref": "mutated_rules/evaluation_0250/cg-1-hardcoded-credentials.md",
+              "text_abs": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s8_ea/job10552902_ea_python_s8_0801/mutated_rules/evaluation_0250/cg-1-hardcoded-credentials.md",
+              "text_exists": true
+            }
+          }
+        }
+      ]
+    }
+  },
+  "problems": []
+}

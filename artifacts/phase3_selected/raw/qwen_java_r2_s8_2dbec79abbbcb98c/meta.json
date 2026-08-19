@@ -1,0 +1,82 @@
+{
+  "evaluation_index": 388,
+  "chromosome_id": "2dbec79abbbcb98c",
+  "parent_id": "10c187c2028b7934",
+  "move_type": "mutate",
+  "changed_rule_id": "codeguard-0-data-storage",
+  "chain": [
+    "section_reorder_degrade"
+  ],
+  "mutated_rule_ids": [
+    "codeguard-0-additional-cryptography",
+    "codeguard-0-authentication-mfa",
+    "codeguard-0-data-storage",
+    "codeguard-0-file-handling-and-uploads",
+    "codeguard-0-input-validation-injection",
+    "codeguard-0-supply-chain-security",
+    "codeguard-0-xml-and-serialization",
+    "codeguard-1-digital-certificates",
+    "codeguard-1-hardcoded-credentials"
+  ],
+  "order_priority": {
+    "codeguard-0-file-handling-and-uploads": -1,
+    "codeguard-0-safe-c-functions": -2,
+    "codeguard-0-data-storage": -5,
+    "codeguard-0-api-web-services": -4,
+    "codeguard-1-digital-certificates": -6,
+    "codeguard-0-xml-and-serialization": -7
+  },
+  "changes": [
+    "paragraph-fallback degrade: [' rule_id: codeguard-0-data-storage', 'This rule advises on securely configurin', '- Backend Database Protection   - Isolat', '- Transport Layer Security   - Configure', '- Secure Authentication Configuration   ', '- Database Credential Storage   - Never ', '- Secure Permission Management   - Apply', '- Database Configuration and Hardening  ', '- Platform-Specific Hardening   - SQL Se', 'Summary:   Isolate database systems, enf'] \u2192 [' rule_id: codeguard-0-data-storage', 'This rule advises on securely configurin', '- Backend Database Protection   - Isolat', '- Transport Layer Security   - Configure', '- Secure Authentication Configuration   ', '- Database Credential Storage   - Never ', '- Secure Permission Management   - Apply', '- Platform-Specific Hardening   - SQL Se', 'Summary:   Isolate database systems, enf', '- Database Configuration and Hardening  ']"
+  ],
+  "gene_paths": {
+    "codeguard-0-additional-cryptography": [
+      "voice_change",
+      "add_random_word"
+    ],
+    "codeguard-0-authentication-mfa": [
+      "section_reorder_shuffle",
+      "verb_weakening",
+      "paraphrase"
+    ],
+    "codeguard-0-file-handling-and-uploads": [
+      "add_random_word"
+    ],
+    "codeguard-0-input-validation-injection": [
+      "negation_injection"
+    ],
+    "codeguard-0-xml-and-serialization": [
+      "negation_injection",
+      "voice_change",
+      "section_reorder_degrade"
+    ],
+    "codeguard-0-supply-chain-security": [
+      "negation_injection",
+      "verb_weakening"
+    ],
+    "codeguard-1-digital-certificates": [
+      "verb_weakening",
+      "negation_injection"
+    ],
+    "codeguard-1-hardcoded-credentials": [
+      "negation_injection"
+    ],
+    "codeguard-0-data-storage": [
+      "section_reorder_degrade"
+    ]
+  },
+  "accepted": true,
+  "validation_metadata": {
+    "codeguard-0-data-storage": {
+      "instruction_adherent": true,
+      "sbert_step": 1.0,
+      "perplexity_ratio": null,
+      "inline_code_retention": 1.0,
+      "keyword_retention": 1.0,
+      "security_intent_preserved": true,
+      "passes_all": true,
+      "changed": true,
+      "sbert_cum": 1.0
+    }
+  }
+}

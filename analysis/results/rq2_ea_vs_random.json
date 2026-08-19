@@ -1,0 +1,663 @@
+{
+  "artifact_type": "rq2_posthoc_safe_zone_sensitivity",
+  "interpretation": "best structurally compliant candidates observed within raw searches; not equivalent to constrained-search reruns",
+  "excluded": [],
+  "strata": {
+    "llama_java": {
+      "n": 10,
+      "deltas_f1": [
+        1.0,
+        2.0,
+        -1.0,
+        2.0,
+        4.0,
+        0.0,
+        3.0,
+        0.0,
+        -3.0,
+        4.0
+      ],
+      "deltas_weighted": [
+        1.0,
+        4.0,
+        -1.0,
+        2.0,
+        4.0,
+        -2.0,
+        13.0,
+        2.0,
+        -3.0,
+        12.0
+      ],
+      "primary": {
+        "test": "exact two-sided sign test",
+        "p": 0.2890625,
+        "positive_pairs": 6,
+        "negative_pairs": 2,
+        "ties": 2,
+        "note": "ties excluded from the binomial test"
+      },
+      "sign_flip_sensitivity": {
+        "test": "exact paired sign-flip test on mean delta",
+        "p": 0.1640625,
+        "note": "exact, 1024 sign assignments; inferential interpretation assumes within-pair exchangeability under the null"
+      },
+      "median_delta": {
+        "value": 1.5,
+        "bootstrap_ci": [
+          -0.5,
+          3.0
+        ]
+      },
+      "paired_superiority": 0.7,
+      "mean_delta": 1.2,
+      "secondary_weighted_descriptive": {
+        "mean_delta": 3.2,
+        "median_delta": 2.0,
+        "median_bootstrap_ci": [
+          -1.0,
+          8.0
+        ],
+        "note": "weighted score attached to the raw-f1-selected compliant candidate"
+      },
+      "mean_E_ea": 113.1,
+      "mean_E_rand": 47.7,
+      "per_seed": [
+        {
+          "seed": 1,
+          "ea_f1": 11.0,
+          "rand_f1": 10.0,
+          "delta": 1.0,
+          "ea_E": 121,
+          "rand_E": 46,
+          "origin": 122
+        },
+        {
+          "seed": 2,
+          "ea_f1": 8.0,
+          "rand_f1": 6.0,
+          "delta": 2.0,
+          "ea_E": 121,
+          "rand_E": 51,
+          "origin": 122
+        },
+        {
+          "seed": 3,
+          "ea_f1": 6.0,
+          "rand_f1": 7.0,
+          "delta": -1.0,
+          "ea_E": 97,
+          "rand_E": 39,
+          "origin": 122
+        },
+        {
+          "seed": 4,
+          "ea_f1": 9.0,
+          "rand_f1": 7.0,
+          "delta": 2.0,
+          "ea_E": 124,
+          "rand_E": 50,
+          "origin": 122
+        },
+        {
+          "seed": 5,
+          "ea_f1": 12.0,
+          "rand_f1": 8.0,
+          "delta": 4.0,
+          "ea_E": 124,
+          "rand_E": 60,
+          "origin": 122
+        },
+        {
+          "seed": 6,
+          "ea_f1": 8.0,
+          "rand_f1": 8.0,
+          "delta": 0.0,
+          "ea_E": 119,
+          "rand_E": 45,
+          "origin": 122
+        },
+        {
+          "seed": 7,
+          "ea_f1": 8.0,
+          "rand_f1": 5.0,
+          "delta": 3.0,
+          "ea_E": 114,
+          "rand_E": 39,
+          "origin": 122
+        },
+        {
+          "seed": 8,
+          "ea_f1": 8.0,
+          "rand_f1": 8.0,
+          "delta": 0.0,
+          "ea_E": 94,
+          "rand_E": 49,
+          "origin": 122
+        },
+        {
+          "seed": 9,
+          "ea_f1": 3.0,
+          "rand_f1": 6.0,
+          "delta": -3.0,
+          "ea_E": 103,
+          "rand_E": 50,
+          "origin": 122
+        },
+        {
+          "seed": 10,
+          "ea_f1": 13.0,
+          "rand_f1": 9.0,
+          "delta": 4.0,
+          "ea_E": 114,
+          "rand_E": 48,
+          "origin": 122
+        }
+      ]
+    },
+    "llama_python": {
+      "n": 10,
+      "deltas_f1": [
+        6.0,
+        21.0,
+        -2.0,
+        -5.0,
+        3.0,
+        5.0,
+        -12.0,
+        3.0,
+        11.0,
+        -6.0
+      ],
+      "deltas_weighted": [
+        10.0,
+        43.0,
+        -2.0,
+        -15.0,
+        5.0,
+        13.0,
+        -24.0,
+        -1.0,
+        23.0,
+        -12.0
+      ],
+      "primary": {
+        "test": "exact two-sided sign test",
+        "p": 0.75390625,
+        "positive_pairs": 6,
+        "negative_pairs": 4,
+        "ties": 0,
+        "note": "ties excluded from the binomial test"
+      },
+      "sign_flip_sensitivity": {
+        "test": "exact paired sign-flip test on mean delta",
+        "p": 0.474609375,
+        "note": "exact, 1024 sign assignments; inferential interpretation assumes within-pair exchangeability under the null"
+      },
+      "median_delta": {
+        "value": 3.0,
+        "bootstrap_ci": [
+          -5.0,
+          8.0
+        ]
+      },
+      "paired_superiority": 0.6,
+      "mean_delta": 2.4,
+      "secondary_weighted_descriptive": {
+        "mean_delta": 4.0,
+        "median_delta": 2.0,
+        "median_bootstrap_ci": [
+          -12.0,
+          16.5
+        ],
+        "note": "weighted score attached to the raw-f1-selected compliant candidate"
+      },
+      "mean_E_ea": 88.2,
+      "mean_E_rand": 35.2,
+      "per_seed": [
+        {
+          "seed": 1,
+          "ea_f1": 23.0,
+          "rand_f1": 17.0,
+          "delta": 6.0,
+          "ea_E": 69,
+          "rand_E": 35,
+          "origin": 253
+        },
+        {
+          "seed": 2,
+          "ea_f1": 32.0,
+          "rand_f1": 11.0,
+          "delta": 21.0,
+          "ea_E": 104,
+          "rand_E": 30,
+          "origin": 253
+        },
+        {
+          "seed": 3,
+          "ea_f1": 18.0,
+          "rand_f1": 20.0,
+          "delta": -2.0,
+          "ea_E": 64,
+          "rand_E": 32,
+          "origin": 253
+        },
+        {
+          "seed": 4,
+          "ea_f1": 12.0,
+          "rand_f1": 17.0,
+          "delta": -5.0,
+          "ea_E": 97,
+          "rand_E": 32,
+          "origin": 253
+        },
+        {
+          "seed": 5,
+          "ea_f1": 12.0,
+          "rand_f1": 9.0,
+          "delta": 3.0,
+          "ea_E": 94,
+          "rand_E": 31,
+          "origin": 253
+        },
+        {
+          "seed": 6,
+          "ea_f1": 20.0,
+          "rand_f1": 15.0,
+          "delta": 5.0,
+          "ea_E": 94,
+          "rand_E": 40,
+          "origin": 253
+        },
+        {
+          "seed": 7,
+          "ea_f1": 6.0,
+          "rand_f1": 18.0,
+          "delta": -12.0,
+          "ea_E": 101,
+          "rand_E": 37,
+          "origin": 253
+        },
+        {
+          "seed": 8,
+          "ea_f1": 21.0,
+          "rand_f1": 18.0,
+          "delta": 3.0,
+          "ea_E": 93,
+          "rand_E": 37,
+          "origin": 253
+        },
+        {
+          "seed": 9,
+          "ea_f1": 28.0,
+          "rand_f1": 17.0,
+          "delta": 11.0,
+          "ea_E": 87,
+          "rand_E": 37,
+          "origin": 253
+        },
+        {
+          "seed": 10,
+          "ea_f1": 14.0,
+          "rand_f1": 20.0,
+          "delta": -6.0,
+          "ea_E": 79,
+          "rand_E": 41,
+          "origin": 253
+        }
+      ]
+    },
+    "qwen_java": {
+      "n": 10,
+      "deltas_f1": [
+        3.0,
+        1.0,
+        1.0,
+        5.0,
+        0.0,
+        -2.0,
+        0.0,
+        2.0,
+        5.0,
+        2.0
+      ],
+      "deltas_weighted": [
+        3.0,
+        5.0,
+        3.0,
+        5.0,
+        4.0,
+        0.0,
+        -2.0,
+        4.0,
+        7.0,
+        4.0
+      ],
+      "primary": {
+        "test": "exact two-sided sign test",
+        "p": 0.0703125,
+        "positive_pairs": 7,
+        "negative_pairs": 1,
+        "ties": 2,
+        "note": "ties excluded from the binomial test"
+      },
+      "sign_flip_sensitivity": {
+        "test": "exact paired sign-flip test on mean delta",
+        "p": 0.0546875,
+        "note": "exact, 1024 sign assignments; inferential interpretation assumes within-pair exchangeability under the null"
+      },
+      "median_delta": {
+        "value": 1.5,
+        "bootstrap_ci": [
+          0.0,
+          3.5
+        ]
+      },
+      "paired_superiority": 0.8,
+      "mean_delta": 1.7,
+      "secondary_weighted_descriptive": {
+        "mean_delta": 3.3,
+        "median_delta": 4.0,
+        "median_bootstrap_ci": [
+          1.5,
+          5.0
+        ],
+        "note": "weighted score attached to the raw-f1-selected compliant candidate"
+      },
+      "mean_E_ea": 357.4,
+      "mean_E_rand": 134.8,
+      "per_seed": [
+        {
+          "seed": 1,
+          "ea_f1": 8.0,
+          "rand_f1": 5.0,
+          "delta": 3.0,
+          "ea_E": 374,
+          "rand_E": 128,
+          "origin": 107
+        },
+        {
+          "seed": 2,
+          "ea_f1": 7.0,
+          "rand_f1": 6.0,
+          "delta": 1.0,
+          "ea_E": 353,
+          "rand_E": 137,
+          "origin": 107
+        },
+        {
+          "seed": 3,
+          "ea_f1": 9.0,
+          "rand_f1": 8.0,
+          "delta": 1.0,
+          "ea_E": 364,
+          "rand_E": 146,
+          "origin": 107
+        },
+        {
+          "seed": 4,
+          "ea_f1": 11.0,
+          "rand_f1": 6.0,
+          "delta": 5.0,
+          "ea_E": 364,
+          "rand_E": 124,
+          "origin": 107
+        },
+        {
+          "seed": 5,
+          "ea_f1": 5.0,
+          "rand_f1": 5.0,
+          "delta": 0.0,
+          "ea_E": 351,
+          "rand_E": 139,
+          "origin": 107
+        },
+        {
+          "seed": 6,
+          "ea_f1": 3.0,
+          "rand_f1": 5.0,
+          "delta": -2.0,
+          "ea_E": 297,
+          "rand_E": 142,
+          "origin": 107
+        },
+        {
+          "seed": 7,
+          "ea_f1": 5.0,
+          "rand_f1": 5.0,
+          "delta": 0.0,
+          "ea_E": 384,
+          "rand_E": 135,
+          "origin": 107
+        },
+        {
+          "seed": 8,
+          "ea_f1": 8.0,
+          "rand_f1": 6.0,
+          "delta": 2.0,
+          "ea_E": 388,
+          "rand_E": 128,
+          "origin": 107
+        },
+        {
+          "seed": 9,
+          "ea_f1": 11.0,
+          "rand_f1": 6.0,
+          "delta": 5.0,
+          "ea_E": 345,
+          "rand_E": 132,
+          "origin": 107
+        },
+        {
+          "seed": 10,
+          "ea_f1": 8.0,
+          "rand_f1": 6.0,
+          "delta": 2.0,
+          "ea_E": 354,
+          "rand_E": 137,
+          "origin": 107
+        }
+      ]
+    },
+    "qwen_python": {
+      "n": 10,
+      "deltas_f1": [
+        8.0,
+        10.0,
+        0.0,
+        15.0,
+        12.0,
+        -8.0,
+        15.0,
+        11.0,
+        -3.0,
+        15.0
+      ],
+      "deltas_weighted": [
+        12.0,
+        16.0,
+        -6.0,
+        39.0,
+        32.0,
+        -16.0,
+        29.0,
+        27.0,
+        -13.0,
+        27.0
+      ],
+      "primary": {
+        "test": "exact two-sided sign test",
+        "p": 0.1796875,
+        "positive_pairs": 7,
+        "negative_pairs": 2,
+        "ties": 1,
+        "note": "ties excluded from the binomial test"
+      },
+      "sign_flip_sensitivity": {
+        "test": "exact paired sign-flip test on mean delta",
+        "p": 0.03125,
+        "note": "exact, 1024 sign assignments; inferential interpretation assumes within-pair exchangeability under the null"
+      },
+      "median_delta": {
+        "value": 10.5,
+        "bootstrap_ci": [
+          0.0,
+          15.0
+        ]
+      },
+      "paired_superiority": 0.75,
+      "mean_delta": 7.5,
+      "secondary_weighted_descriptive": {
+        "mean_delta": 14.7,
+        "median_delta": 21.5,
+        "median_bootstrap_ci": [
+          -6.0,
+          29.5
+        ],
+        "note": "weighted score attached to the raw-f1-selected compliant candidate"
+      },
+      "mean_E_ea": 219.6,
+      "mean_E_rand": 82.9,
+      "per_seed": [
+        {
+          "seed": 1,
+          "ea_f1": 23.0,
+          "rand_f1": 15.0,
+          "delta": 8.0,
+          "ea_E": 243,
+          "rand_E": 79,
+          "origin": 216
+        },
+        {
+          "seed": 2,
+          "ea_f1": 21.0,
+          "rand_f1": 11.0,
+          "delta": 10.0,
+          "ea_E": 205,
+          "rand_E": 89,
+          "origin": 216
+        },
+        {
+          "seed": 3,
+          "ea_f1": 12.0,
+          "rand_f1": 12.0,
+          "delta": 0.0,
+          "ea_E": 241,
+          "rand_E": 92,
+          "origin": 216
+        },
+        {
+          "seed": 4,
+          "ea_f1": 25.0,
+          "rand_f1": 10.0,
+          "delta": 15.0,
+          "ea_E": 228,
+          "rand_E": 73,
+          "origin": 216
+        },
+        {
+          "seed": 5,
+          "ea_f1": 23.0,
+          "rand_f1": 11.0,
+          "delta": 12.0,
+          "ea_E": 205,
+          "rand_E": 93,
+          "origin": 216
+        },
+        {
+          "seed": 6,
+          "ea_f1": 5.0,
+          "rand_f1": 13.0,
+          "delta": -8.0,
+          "ea_E": 201,
+          "rand_E": 91,
+          "origin": 216
+        },
+        {
+          "seed": 7,
+          "ea_f1": 26.0,
+          "rand_f1": 11.0,
+          "delta": 15.0,
+          "ea_E": 234,
+          "rand_E": 82,
+          "origin": 216
+        },
+        {
+          "seed": 8,
+          "ea_f1": 26.0,
+          "rand_f1": 15.0,
+          "delta": 11.0,
+          "ea_E": 251,
+          "rand_E": 53,
+          "origin": 216
+        },
+        {
+          "seed": 9,
+          "ea_f1": 9.0,
+          "rand_f1": 12.0,
+          "delta": -3.0,
+          "ea_E": 224,
+          "rand_E": 86,
+          "origin": 216
+        },
+        {
+          "seed": 10,
+          "ea_f1": 27.0,
+          "rand_f1": 12.0,
+          "delta": 15.0,
+          "ea_E": 164,
+          "rand_E": 91,
+          "origin": 216
+        }
+      ]
+    }
+  },
+  "family": {
+    "declared": "4 strata x 1 primary outcome (best raw finding reduction)",
+    "rationale": "Four pre-specified (not pre-registered) model/language strata. Raw p-values are shown, while Holm controls the four-test family.",
+    "holm_primary": {
+      "qwen_java": {
+        "p": 0.0703125,
+        "threshold": 0.0125,
+        "reject": false
+      },
+      "qwen_python": {
+        "p": 0.1796875,
+        "threshold": 0.016666666666666666,
+        "reject": false
+      },
+      "llama_java": {
+        "p": 0.2890625,
+        "threshold": 0.025,
+        "reject": false
+      },
+      "llama_python": {
+        "p": 0.75390625,
+        "threshold": 0.05,
+        "reject": false
+      }
+    },
+    "holm_sign_flip_sensitivity": {
+      "qwen_python": {
+        "p": 0.03125,
+        "threshold": 0.0125,
+        "reject": false
+      },
+      "qwen_java": {
+        "p": 0.0546875,
+        "threshold": 0.016666666666666666,
+        "reject": false
+      },
+      "llama_java": {
+        "p": 0.1640625,
+        "threshold": 0.025,
+        "reject": false
+      },
+      "llama_python": {
+        "p": 0.474609375,
+        "threshold": 0.05,
+        "reject": false
+      }
+    }
+  }
+}

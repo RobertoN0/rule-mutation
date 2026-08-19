@@ -1,0 +1,87 @@
+{
+  "evaluation_index": 118,
+  "chromosome_id": "43b2d3607d7c1f6b",
+  "parent_id": "8fba1e86278b4a2b",
+  "move_type": "mutate",
+  "changed_rule_id": "codeguard-0-safe-c-functions",
+  "chain": [
+    "add_random_word"
+  ],
+  "mutated_rule_ids": [
+    "codeguard-0-api-web-services",
+    "codeguard-0-authentication-mfa",
+    "codeguard-0-data-storage",
+    "codeguard-0-devops-ci-cd-containers",
+    "codeguard-0-safe-c-functions",
+    "codeguard-0-session-management-and-cookies",
+    "codeguard-0-supply-chain-security",
+    "codeguard-0-xml-and-serialization",
+    "codeguard-1-digital-certificates"
+  ],
+  "order_priority": {
+    "codeguard-0-authorization-access-control": 1,
+    "codeguard-0-safe-c-functions": 2
+  },
+  "changes": [
+    "block 0: inserted 60 word(s)",
+    "block 2: inserted 1 word(s)",
+    "block 4: inserted 4 word(s)",
+    "block 6: inserted 1 word(s)",
+    "block 8: inserted 1 word(s)",
+    "block 10: inserted 1 word(s)",
+    "block 12: inserted 5 word(s)",
+    "block 14: inserted 5 word(s)",
+    "block 16: inserted 1 word(s)",
+    "block 18: inserted 1 word(s)",
+    "block 20: inserted 1 word(s)",
+    "block 22: inserted 1 word(s)",
+    "block 24: inserted 19 word(s)",
+    "block 26: inserted 1 word(s)",
+    "block 28: inserted 1 word(s)",
+    "block 30: inserted 1 word(s)"
+  ],
+  "gene_paths": {
+    "codeguard-0-api-web-services": [
+      "section_reorder_degrade"
+    ],
+    "codeguard-0-session-management-and-cookies": [
+      "paraphrase"
+    ],
+    "codeguard-0-supply-chain-security": [
+      "section_reorder_shuffle",
+      "section_reorder_degrade"
+    ],
+    "codeguard-1-digital-certificates": [
+      "section_reorder_shuffle"
+    ],
+    "codeguard-0-devops-ci-cd-containers": [
+      "negation_injection"
+    ],
+    "codeguard-0-xml-and-serialization": [
+      "add_random_word"
+    ],
+    "codeguard-0-authentication-mfa": [
+      "verb_weakening"
+    ],
+    "codeguard-0-data-storage": [
+      "add_random_word"
+    ],
+    "codeguard-0-safe-c-functions": [
+      "add_random_word"
+    ]
+  },
+  "accepted": true,
+  "validation_metadata": {
+    "codeguard-0-safe-c-functions": {
+      "instruction_adherent": true,
+      "sbert_step": 0.9919,
+      "perplexity_ratio": null,
+      "inline_code_retention": 1.0,
+      "keyword_retention": 1.0,
+      "security_intent_preserved": true,
+      "passes_all": true,
+      "changed": true,
+      "sbert_cum": 0.9919
+    }
+  }
+}
