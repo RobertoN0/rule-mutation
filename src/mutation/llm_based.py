@@ -8,7 +8,8 @@ no second model load, no extra VRAM pressure.
 
 Each mutator sends only the document body (frontmatter stripped) to the LLM.
 The original YAML frontmatter is always prepended unchanged to the output.
-Code blocks are visible to the LLM but the prompts instruct it not to modify them.
+Fenced code blocks and inline-code spans are replaced with opaque placeholders
+before the body is sent to the LLM and are restored byte-for-byte afterwards.
 
 Paper sources
 -------------
@@ -21,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import re as _re
+from collections import Counter
 from typing import TYPE_CHECKING
 
 from .base import Mutator, MutationResult
@@ -30,6 +32,84 @@ if TYPE_CHECKING:
     from ..llm_backends.base import LLMBackend
 
 logger = logging.getLogger(__name__)
+
+
+_SAFE_ZONE_PLACEHOLDER_RE = _re.compile(
+    r"__SAFE_ZONE_(?:FENCE|INLINE)_\d{4}__"
+)
+
+
+def _protected_signature(text: str) -> tuple[str, tuple[str, ...], Counter[str]]:
+    """Return the immutable content protected by the safe-zone contract.
+
+    Inline spans inside fenced blocks are covered by the whole-block comparison
+    and are deliberately not counted a second time.
+    """
+    parsed = ParsedRule.parse(text)
+    fences = tuple(
+        block.text for block in parsed.body_blocks if block.type == "code"
+    )
+    inline = Counter(
+        token
+        for block in parsed.body_blocks
+        if block.type == "prose"
+        for token in ParsedRule.get_inline_code_tokens(block.text)
+    )
+    return parsed.frontmatter_raw, fences, inline
+
+
+def _mask_safe_zones(parsed: ParsedRule) -> tuple[str, dict[str, str], list[str]]:
+    """Replace fenced blocks and prose inline spans with stable placeholders."""
+    restore: dict[str, str] = {}
+    ordered: list[str] = []
+    parts: list[str] = []
+    fence_index = 0
+    inline_index = 0
+
+    def placeholder(kind: str, index: int) -> str:
+        value = f"__SAFE_ZONE_{kind}_{index:04d}__"
+        if value in parsed.body_raw:
+            raise ValueError(f"safe-zone placeholder collision: {value}")
+        return value
+
+    for block in parsed.body_blocks:
+        if block.type == "code":
+            marker = placeholder("FENCE", fence_index)
+            fence_index += 1
+            restore[marker] = block.text
+            ordered.append(marker)
+            parts.append(marker)
+            continue
+
+        def mask_inline(match: _re.Match[str]) -> str:
+            nonlocal inline_index
+            marker = placeholder("INLINE", inline_index)
+            inline_index += 1
+            restore[marker] = match.group(0)
+            ordered.append(marker)
+            return marker
+
+        parts.append(_re.sub(r"`[^`\n]+`", mask_inline, block.text))
+
+    return "".join(parts), restore, ordered
+
+
+def _restore_safe_zones(
+    mutated_body: str,
+    restore: dict[str, str],
+    ordered: list[str],
+) -> str | None:
+    """Restore protected spans, rejecting dropped, duplicated, or moved markers."""
+    observed = _SAFE_ZONE_PLACEHOLDER_RE.findall(mutated_body)
+    if observed != ordered:
+        return None
+    if Counter(observed) != Counter(restore.keys()):
+        return None
+    for marker in ordered:
+        mutated_body = mutated_body.replace(marker, restore[marker], 1)
+    if _SAFE_ZONE_PLACEHOLDER_RE.search(mutated_body):
+        return None
+    return mutated_body
 
 
 # ---------------------------------------------------------------------------
@@ -161,10 +241,20 @@ class _LiveLLMMutator(Mutator):
             )
 
         try:
+            masked_body, restore, ordered = _mask_safe_zones(parsed)
+        except ValueError as exc:
+            logger.warning("%s: %s; returning identity.", self.name, exc)
+            return MutationResult(
+                original=text, mutated=text,
+                mutation_type=self.name,
+                changes=[str(exc)],
+            )
+
+        try:
             self.llm_call_attempts += 1
             response = self._backend.generate(
                 system=self._system_prompt,
-                messages=[{"role": "user", "content": body}],
+                messages=[{"role": "user", "content": masked_body}],
                 temperature=self._temperature,
                 max_tokens=8192,
             )
@@ -185,26 +275,42 @@ class _LiveLLMMutator(Mutator):
         self.llm_output_tokens += response.output_tokens
         self.llm_latency_ms += response.latency_ms
 
-        # Reassemble: original frontmatter (unchanged) + LLM-mutated body
-        full_doc = parsed.frontmatter_raw + mutated_body
-
-        # Structural sanity: re-parse to verify body is non-empty
-        if not ParsedRule.parse(full_doc).body_raw.strip():
+        restored_body = _restore_safe_zones(mutated_body, restore, ordered)
+        if restored_body is None:
             logger.warning(
-                "%s: LLM output has empty body after re-parse; returning identity.",
+                "%s: LLM output changed safe-zone placeholders; returning identity.",
                 self.name,
             )
             return MutationResult(
                 original=text, mutated=text,
                 mutation_type=self.name,
-                changes=["LLM output failed structural check; identity returned"],
+                changes=["LLM output violated safe-zone placeholders; identity returned"],
+            )
+
+        # Reassemble: original frontmatter + prose mutation + exact safe zones.
+        full_doc = parsed.frontmatter_raw + restored_body
+
+        # Fail closed if the LLM introduced a new inline span or otherwise
+        # altered protected structure after restoration.
+        if (
+            not ParsedRule.parse(full_doc).body_raw.strip()
+            or _protected_signature(full_doc) != _protected_signature(text)
+        ):
+            logger.warning(
+                "%s: LLM output failed safe-zone validation; returning identity.",
+                self.name,
+            )
+            return MutationResult(
+                original=text, mutated=text,
+                mutation_type=self.name,
+                changes=["LLM output failed safe-zone validation; identity returned"],
             )
 
         return MutationResult(
             original=text,
             mutated=full_doc,
             mutation_type=self.name,
-            changes=[],
+            changes=[f"safe_zone_spans_masked={len(ordered)}"],
             metadata={
                 "llm_latency_ms": response.latency_ms,
                 "llm_input_tokens": response.input_tokens,
@@ -269,101 +375,14 @@ class ParaphraseMutator(_LiveLLMMutator):
     Uses temperature=0.6 so that each call produces visible lexical variation,
     including for short rules with limited synonymisable vocabulary.
 
-    Inline code masking
-    -------------------
-    Before sending the body to the LLM, all single-backtick inline code spans
-    (`` `token` ``) are replaced with ``ICODE_N`` placeholders.  The originals
-    are restored verbatim after generation.  This guarantees
-    ``inline_code_retention == 1.0`` regardless of what the LLM produces,
-    without relying solely on prompt instructions.
+    Safe-zone masking is implemented by :class:`_LiveLLMMutator` for all three
+    live LLM operators. Fenced blocks and inline spans are never sent to the
+    mutation model and the mutation fails closed if a marker changes.
     """
 
     _system_prompt = _PARAPHRASE_SYSTEM
     _temperature = 0.6
 
-    # Matches single-backtick inline code: `...` (no newlines inside)
-    _INLINE_CODE_RE = _re.compile(r"`[^`\n]+`")
-
     @property
     def name(self) -> str:
         return "paraphrase"
-
-    def mutate(self, text: str) -> MutationResult:
-        """Mask inline code spans, call LLM, restore spans."""
-        parsed = ParsedRule.parse(text)
-        body = parsed.body_raw
-
-        if not body.strip():
-            return MutationResult(
-                original=text, mutated=text,
-                mutation_type=self.name,
-                changes=["empty body; no mutation possible"],
-            )
-
-        # ── Mask inline code ─────────────────────────────────────────────
-        originals: list[str] = []
-
-        def _mask(m: _re.Match) -> str:
-            idx = len(originals)
-            originals.append(m.group(0))
-            return f"ICODE_{idx}"
-
-        masked_body = self._INLINE_CODE_RE.sub(_mask, body)
-
-        # ── LLM call ─────────────────────────────────────────────────────
-        try:
-            self.llm_call_attempts += 1
-            response = self._backend.generate(
-                system=self._system_prompt,
-                messages=[{"role": "user", "content": masked_body}],
-                temperature=self._temperature,
-                max_tokens=8192,
-            )
-        except Exception as exc:
-            logger.warning(
-                "%s: backend.generate() failed: %s; returning identity.",
-                self.name, exc,
-            )
-            return MutationResult(
-                original=text, mutated=text,
-                mutation_type=self.name,
-                changes=[f"backend error: {exc}"],
-            )
-
-        mutated_body = response.content.strip()
-        self.llm_calls_completed += 1
-        self.llm_input_tokens += response.input_tokens
-        self.llm_output_tokens += response.output_tokens
-        self.llm_latency_ms += response.latency_ms
-
-        # ── Restore inline code ──────────────────────────────────────────
-        def _unmask(m: _re.Match) -> str:
-            idx = int(m.group(1))
-            return originals[idx] if idx < len(originals) else m.group(0)
-
-        restored_body = _re.sub(r"ICODE_(\d+)", _unmask, mutated_body)
-
-        full_doc = parsed.frontmatter_raw + restored_body
-
-        if not ParsedRule.parse(full_doc).body_raw.strip():
-            logger.warning(
-                "%s: LLM output has empty body after re-parse; returning identity.",
-                self.name,
-            )
-            return MutationResult(
-                original=text, mutated=text,
-                mutation_type=self.name,
-                changes=["LLM output failed structural check; identity returned"],
-            )
-
-        return MutationResult(
-            original=text,
-            mutated=full_doc,
-            mutation_type=self.name,
-            changes=[f"inline_code_spans_masked={len(originals)}"],
-            metadata={
-                "llm_latency_ms": response.latency_ms,
-                "llm_input_tokens": response.input_tokens,
-                "llm_output_tokens": response.output_tokens,
-            },
-        )
