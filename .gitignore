@@ -54,3 +54,6 @@ rule_maps/_smoke/
 rule_maps/temp_sweep/
 rule_maps/temp_sweep_reframed
 rule_maps/old_maps/
+
+# Published compact analysis outputs (exception to the bare results/ rule above)
+!analysis/results/

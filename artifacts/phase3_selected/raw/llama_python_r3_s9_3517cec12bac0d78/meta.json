@@ -1,0 +1,61 @@
+{
+  "evaluation_index": 71,
+  "chromosome_id": "3517cec12bac0d78",
+  "parent_id": "d74b5ca2ed94b560",
+  "move_type": "mutate",
+  "changed_rule_id": "codeguard-0-authentication-mfa",
+  "chain": [
+    "section_reorder_shuffle"
+  ],
+  "mutated_rule_ids": [
+    "codeguard-0-additional-cryptography",
+    "codeguard-0-authentication-mfa",
+    "codeguard-0-authorization-access-control",
+    "codeguard-0-file-handling-and-uploads",
+    "codeguard-0-framework-and-languages",
+    "codeguard-0-input-validation-injection"
+  ],
+  "order_priority": {
+    "codeguard-0-mobile-apps": -1
+  },
+  "changes": [
+    "reordered sections: ['### Account Identifiers and UX', '### Password Policy', '### Password Storage (Hashing)', '### Authentication Flow Hardening', '### Multi\u2011Factor Authentication (MFA)', '### Federation and Protocols (OAuth 2.0 / OIDC / SAML)', '### Tokens (JWT and Opaque)', '### Recovery and Reset', '### Administrative and Internal Accounts', '### Monitoring and Signals', '### Implementation Checklist', '### Test Plan'] \u2192 ['### Password Storage (Hashing)', '### Tokens (JWT and Opaque)', '### Federation and Protocols (OAuth 2.0 / OIDC / SAML)', '### Implementation Checklist', '### Authentication Flow Hardening', '### Monitoring and Signals', '### Multi\u2011Factor Authentication (MFA)', '### Recovery and Reset', '### Password Policy', '### Test Plan', '### Account Identifiers and UX', '### Administrative and Internal Accounts']"
+  ],
+  "gene_paths": {
+    "codeguard-0-additional-cryptography": [
+      "section_reorder_shuffle",
+      "section_reorder_degrade"
+    ],
+    "codeguard-0-authorization-access-control": [
+      "voice_change"
+    ],
+    "codeguard-0-file-handling-and-uploads": [
+      "section_reorder_shuffle",
+      "negation_injection"
+    ],
+    "codeguard-0-framework-and-languages": [
+      "negation_injection",
+      "verb_weakening"
+    ],
+    "codeguard-0-input-validation-injection": [
+      "synonym_replacement"
+    ],
+    "codeguard-0-authentication-mfa": [
+      "section_reorder_shuffle"
+    ]
+  },
+  "accepted": true,
+  "validation_metadata": {
+    "codeguard-0-authentication-mfa": {
+      "instruction_adherent": true,
+      "sbert_step": 0.9511,
+      "perplexity_ratio": null,
+      "inline_code_retention": 1.0,
+      "keyword_retention": 1.0,
+      "security_intent_preserved": true,
+      "passes_all": true,
+      "changed": true,
+      "sbert_cum": 0.9511
+    }
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "evaluation_index": 76,
+  "chromosome_id": "04c4685c91254df7",
+  "parent_id": "ca136ce7b0ce1bac",
+  "move_type": "mutate",
+  "changed_rule_id": "codeguard-0-client-side-web-security",
+  "chain": [
+    "section_reorder_degrade"
+  ],
+  "mutated_rule_ids": [
+    "codeguard-0-api-web-services",
+    "codeguard-0-authentication-mfa",
+    "codeguard-0-client-side-web-security",
+    "codeguard-0-data-storage",
+    "codeguard-0-input-validation-injection",
+    "codeguard-0-supply-chain-security",
+    "codeguard-1-crypto-algorithms",
+    "codeguard-1-digital-certificates"
+  ],
+  "order_priority": {
+    "codeguard-0-iac-security": -1
+  },
+  "changes": [
+    "reordered sections: ['### XSS Prevention (Context\u2011Aware)', '### DOM\u2011based XSS and Dangerous Sinks', '### Content Security Policy (CSP)', '### CSRF Defense', '### Clickjacking Defense', '### Cross\u2011Site Leaks (XS\u2011Leaks) Controls', '### Third\u2011Party JavaScript', '### HTML5, CORS, WebSockets, Storage', '### HTTP Security Headers (Client Impact)', '### AJAX and Safe DOM APIs', '### Implementation Checklist', '### Test Plan'] \u2192 ['### XSS Prevention (Context\u2011Aware)', '### DOM\u2011based XSS and Dangerous Sinks', '### Content Security Policy (CSP)', '### CSRF Defense', '### Clickjacking Defense', '### Cross\u2011Site Leaks (XS\u2011Leaks) Controls', '### Third\u2011Party JavaScript', '### HTTP Security Headers (Client Impact)', '### AJAX and Safe DOM APIs', '### Implementation Checklist', '### Test Plan', '### HTML5, CORS, WebSockets, Storage']",
+    "degrade: moved '### HTML5, CORS, WebSockets, Storage' (score=16) to last position"
+  ],
+  "gene_paths": {
+    "codeguard-0-api-web-services": [
+      "add_random_word",
+      "voice_change"
+    ],
+    "codeguard-0-authentication-mfa": [
+      "voice_change"
+    ],
+    "codeguard-0-data-storage": [
+      "negation_injection",
+      "add_random_word"
+    ],
+    "codeguard-0-supply-chain-security": [
+      "negation_injection"
+    ],
+    "codeguard-1-digital-certificates": [
+      "voice_change",
+      "paraphrase"
+    ],
+    "codeguard-1-crypto-algorithms": [
+      "negation_injection"
+    ],
+    "codeguard-0-input-validation-injection": [
+      "synonym_replacement"
+    ],
+    "codeguard-0-client-side-web-security": [
+      "section_reorder_degrade"
+    ]
+  },
+  "accepted": true,
+  "validation_metadata": {
+    "codeguard-0-client-side-web-security": {
+      "instruction_adherent": true,
+      "sbert_step": 1.0,
+      "perplexity_ratio": null,
+      "inline_code_retention": 1.0,
+      "keyword_retention": 1.0,
+      "security_intent_preserved": true,
+      "passes_all": true,
+      "changed": true,
+      "sbert_cum": 1.0
+    }
+  }
+}

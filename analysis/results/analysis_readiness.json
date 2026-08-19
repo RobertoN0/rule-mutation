@@ -1,0 +1,70 @@
+{
+  "artifact_type": "analysis_readiness_audit",
+  "rq1_to_rq3_ready": true,
+  "rq4_complete": true,
+  "all_internal_artifact_gates_pass": true,
+  "final_report_numbers_ready": true,
+  "gates": [
+    {
+      "name": "search safe-zone audit",
+      "passed": true,
+      "required_for_report": true,
+      "detail": "80 runs; 10789 evaluations; 4598 full-invalid; 2297 core-invalid"
+    },
+    {
+      "name": "RQ1 compact result",
+      "passed": true,
+      "required_for_report": true,
+      "detail": "four strata x ten EA runs"
+    },
+    {
+      "name": "RQ2 three-lens result",
+      "passed": true,
+      "required_for_report": true,
+      "detail": "four strata x ten matched pairs; primary Holm rejections 4/3/0"
+    },
+    {
+      "name": "RQ3 nine-family result",
+      "passed": true,
+      "required_for_report": true,
+      "detail": "40 EA runs; eight text operators plus whole-rule reordering"
+    },
+    {
+      "name": "sanitized T=0 validation",
+      "passed": true,
+      "required_for_report": true,
+      "detail": "12/12 positive; repair delta range -4 to +1 findings"
+    },
+    {
+      "name": "RQ4 candidate selection",
+      "passed": true,
+      "required_for_report": true,
+      "detail": "20 selected candidates"
+    },
+    {
+      "name": "RQ4 artifact consistency",
+      "passed": true,
+      "required_for_report": true,
+      "detail": "20/20 complete; final global Holm family present"
+    },
+    {
+      "name": "RQ4 final publication gate",
+      "passed": true,
+      "required_for_report": true,
+      "detail": "20/20 complete; final global Holm family present"
+    },
+    {
+      "name": "frozen RQ1-RQ3 figures",
+      "passed": true,
+      "required_for_report": true,
+      "detail": "PNG/PDF pairs exist for the preferred RQ1, RQ2, and RQ3 figures"
+    }
+  ],
+  "external_checks_still_required": [
+    "compile canonical Python scripts",
+    "run safe-zone and sanitizer unit tests",
+    "run git diff --check",
+    "regenerate and visually inspect final RQ4 figure after 20/20",
+    "cross-check every main.tex number against canonical JSON"
+  ]
+}

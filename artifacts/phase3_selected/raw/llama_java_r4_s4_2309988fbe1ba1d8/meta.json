@@ -1,0 +1,63 @@
+{
+  "evaluation_index": 109,
+  "chromosome_id": "2309988fbe1ba1d8",
+  "parent_id": "22f245e451d55ada",
+  "move_type": "mutate",
+  "changed_rule_id": "codeguard-0-data-storage",
+  "chain": [
+    "paraphrase"
+  ],
+  "mutated_rule_ids": [
+    "codeguard-0-additional-cryptography",
+    "codeguard-0-data-storage",
+    "codeguard-0-file-handling-and-uploads",
+    "codeguard-0-input-validation-injection",
+    "codeguard-0-safe-c-functions",
+    "codeguard-1-crypto-algorithms",
+    "codeguard-1-digital-certificates"
+  ],
+  "order_priority": {
+    "codeguard-0-authorization-access-control": 1
+  },
+  "changes": [
+    "inline_code_spans_masked=0"
+  ],
+  "gene_paths": {
+    "codeguard-1-digital-certificates": [
+      "add_random_word"
+    ],
+    "codeguard-0-additional-cryptography": [
+      "section_reorder_degrade"
+    ],
+    "codeguard-0-file-handling-and-uploads": [
+      "verb_weakening"
+    ],
+    "codeguard-1-crypto-algorithms": [
+      "synonym_replacement"
+    ],
+    "codeguard-0-safe-c-functions": [
+      "paraphrase",
+      "add_random_word"
+    ],
+    "codeguard-0-input-validation-injection": [
+      "voice_change"
+    ],
+    "codeguard-0-data-storage": [
+      "paraphrase"
+    ]
+  },
+  "accepted": true,
+  "validation_metadata": {
+    "codeguard-0-data-storage": {
+      "instruction_adherent": true,
+      "sbert_step": 0.8039,
+      "perplexity_ratio": null,
+      "inline_code_retention": 1.0,
+      "keyword_retention": 0.8889,
+      "security_intent_preserved": true,
+      "passes_all": true,
+      "changed": true,
+      "sbert_cum": 0.8039
+    }
+  }
+}

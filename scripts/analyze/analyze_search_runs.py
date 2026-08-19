@@ -169,7 +169,6 @@ def _load_run(run_dir: Path, *, allow_diagnostic: bool) -> dict[str, Any]:
         "ea_injection_every": args.get("ea_injection_every"),
         "order_move_weight": args.get("order_move_weight"),
         "enable_validation": args.get("enable_validation"),
-        "enable_perplexity": args.get("enable_perplexity"),
         "enable_eval_cache": args.get("enable_eval_cache"),
         "semgrep_version": args.get("semgrep_version"),
         "semgrep_rule_config_kind": args.get("semgrep_rule_config_kind"),

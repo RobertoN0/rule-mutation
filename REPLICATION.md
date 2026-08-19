@@ -16,6 +16,12 @@ generation → output validation → Semgrep → search. They write the same
 output schema. Only the
 code-generation backend differs. Everything below refers to **Path A**.
 
+This document shows you how to **run the framework yourself**. If instead you
+want to **check the thesis results**, go to [EVIDENCE_MAP.md](EVIDENCE_MAP.md):
+it maps every table and figure to the artifact that produced it, names the
+revision that ran each phase, and lists what is archived outside this
+repository. Section 10 below summarises the difference.
+
 ---
 
 ## Prerequisites
@@ -294,3 +300,58 @@ zero-finding result.
 | `FileNotFoundError: project-codeguard/...` | submodule not initialised | `git submodule update --init --recursive` |
 | Docker build fails on `COPY project-codeguard` | same — submodule empty | initialise the submodule before `docker build` |
 | Rate-limited (429 / 529) | provider throttling | wait and retry; the run saves all completed iterations and exits gracefully |
+
+---
+
+## 10. Reproducing the thesis results
+
+Running the framework and reproducing the reported numbers are two different
+things, and only the first is possible from this repository alone.
+
+**What you can do here.** Run the full Phase-2 workflow against an API backend
+on any machine (sections 1 to 5). This exercises the same search, mutation,
+validation, and Semgrep pipeline the study used, at whatever scale you choose.
+
+**What you cannot do here.** Regenerate the thesis numbers from scratch. Those
+came from 80 search arms on DelftBlue A100 nodes with two local models, and the
+resulting run trees total about 8.4 GB. They are retained in the research
+worktree rather than deposited publicly, so this repository ships the derived
+results instead of the raw evidence:
+
+- `analysis/results/` — every JSON and Markdown result the thesis cites.
+- `analysis/figures/` — the figures, regenerated from that JSON.
+- `artifacts/phase3_selected/` — the 20 selected rule sets, the 12 sanitized
+  ones, and their retrieval maps.
+- `rule_maps/qualified/` — the frozen task population and final retrieval maps,
+  which are the inputs every run consumed.
+
+[EVIDENCE_MAP.md](EVIDENCE_MAP.md) §4 describes the archived tree in full, and
+§6 shows how to point the analysis suite at an unpacked copy of it.
+
+### The Phase-2 enforcement defect
+
+One point matters for anyone reading the results and is stated here as well as
+in the thesis and the evidence map.
+
+Phase 2 specified a structural contract over each rule: its YAML frontmatter,
+every fenced code block, and every backtick-delimited inline span must stay
+byte-identical to the authored CodeGuard original. The implementation masked
+protected content but did not reject every candidate whose restored content
+differed from the original, so non-compliant candidates were evaluated and
+archived. The defect was found after Phase 2.
+
+Three things follow, all of them visible in this repository:
+
+1. Every stored candidate was audited after the fact by
+   `scripts/analyze/audit_search_safe_zones.py`, whose output is
+   `analysis/results/search_safe_zone_audit.json`.
+2. Results are reported under three nested admissibility lenses, so the executed
+   system and the intended contract are never conflated. Filtering a stored
+   trajectory identifies admissible candidates a run visited; it does not
+   reconstruct the trajectory a fail-closed search would have taken.
+3. The live mutators were subsequently made fail-closed. That fix, the audit,
+   and the Phase-3 sanitizer are **post-hoc** and were not part of the executed
+   system, which is revision `09b6b963d47abbf1348f8dab10b5dbc97813c5ce`.
+
+A confirmatory rerun with admission checked fail-closed is the first item of
+future work named in the thesis.

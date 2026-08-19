@@ -1,0 +1,361 @@
+{
+  "artifact_type": "phase3_order_priority_fidelity_check",
+  "strata": {
+    "qwen_python": {
+      "n_prompts": 203,
+      "chromosomes": {
+        "best": {
+          "cid": "f953f53a0b830443",
+          "order_priority": {
+            "codeguard-0-xml-and-serialization": 1,
+            "codeguard-1-crypto-algorithms": 2,
+            "codeguard-0-authentication-mfa": 3
+          },
+          "n_bumped_rules": 3,
+          "prompts_touching_a_bumped_rule": 48,
+          "prompts_touching_a_mutated_text_rule": 201,
+          "prompts_with_changed_order": 37,
+          "pct_prompts_with_changed_order": 18.23,
+          "examples": [
+            {
+              "prompt_hash": "965b388a4535ef6e",
+              "num_rules": 3,
+              "retrieval_order": [
+                "codeguard-0-additional-cryptography",
+                "codeguard-1-crypto-algorithms",
+                "codeguard-0-file-handling-and-uploads"
+              ],
+              "ea_render_order": [
+                "codeguard-1-crypto-algorithms",
+                "codeguard-0-additional-cryptography",
+                "codeguard-0-file-handling-and-uploads"
+              ]
+            },
+            {
+              "prompt_hash": "8d7795399042c5e4",
+              "num_rules": 3,
+              "retrieval_order": [
+                "codeguard-0-input-validation-injection",
+                "codeguard-0-data-storage",
+                "codeguard-1-crypto-algorithms"
+              ],
+              "ea_render_order": [
+                "codeguard-1-crypto-algorithms",
+                "codeguard-0-input-validation-injection",
+                "codeguard-0-data-storage"
+              ]
+            },
+            {
+              "prompt_hash": "89d4e0f76b8028a5",
+              "num_rules": 2,
+              "retrieval_order": [
+                "codeguard-0-additional-cryptography",
+                "codeguard-1-crypto-algorithms"
+              ],
+              "ea_render_order": [
+                "codeguard-1-crypto-algorithms",
+                "codeguard-0-additional-cryptography"
+              ]
+            },
+            {
+              "prompt_hash": "81d1a9ffb2d42e8f",
+              "num_rules": 2,
+              "retrieval_order": [
+                "codeguard-0-additional-cryptography",
+                "codeguard-1-crypto-algorithms"
+              ],
+              "ea_render_order": [
+                "codeguard-1-crypto-algorithms",
+                "codeguard-0-additional-cryptography"
+              ]
+            },
+            {
+              "prompt_hash": "44dc2b41cacd3d2f",
+              "num_rules": 3,
+              "retrieval_order": [
+                "codeguard-0-authentication-mfa",
+                "codeguard-1-hardcoded-credentials",
+                "codeguard-1-crypto-algorithms"
+              ],
+              "ea_render_order": [
+                "codeguard-0-authentication-mfa",
+                "codeguard-1-crypto-algorithms",
+                "codeguard-1-hardcoded-credentials"
+              ]
+            }
+          ]
+        },
+        "runner_up": {
+          "cid": "3fb3c9a8155414b5",
+          "order_priority": {
+            "codeguard-0-xml-and-serialization": 1,
+            "codeguard-1-crypto-algorithms": 2,
+            "codeguard-0-authentication-mfa": 3
+          },
+          "n_bumped_rules": 3,
+          "prompts_touching_a_bumped_rule": 48,
+          "prompts_touching_a_mutated_text_rule": 197,
+          "prompts_with_changed_order": 37,
+          "pct_prompts_with_changed_order": 18.23,
+          "examples": [
+            {
+              "prompt_hash": "965b388a4535ef6e",
+              "num_rules": 3,
+              "retrieval_order": [
+                "codeguard-0-additional-cryptography",
+                "codeguard-1-crypto-algorithms",
+                "codeguard-0-file-handling-and-uploads"
+              ],
+              "ea_render_order": [
+                "codeguard-1-crypto-algorithms",
+                "codeguard-0-additional-cryptography",
+                "codeguard-0-file-handling-and-uploads"
+              ]
+            },
+            {
+              "prompt_hash": "8d7795399042c5e4",
+              "num_rules": 3,
+              "retrieval_order": [
+                "codeguard-0-input-validation-injection",
+                "codeguard-0-data-storage",
+                "codeguard-1-crypto-algorithms"
+              ],
+              "ea_render_order": [
+                "codeguard-1-crypto-algorithms",
+                "codeguard-0-input-validation-injection",
+                "codeguard-0-data-storage"
+              ]
+            },
+            {
+              "prompt_hash": "89d4e0f76b8028a5",
+              "num_rules": 2,
+              "retrieval_order": [
+                "codeguard-0-additional-cryptography",
+                "codeguard-1-crypto-algorithms"
+              ],
+              "ea_render_order": [
+                "codeguard-1-crypto-algorithms",
+                "codeguard-0-additional-cryptography"
+              ]
+            },
+            {
+              "prompt_hash": "81d1a9ffb2d42e8f",
+              "num_rules": 2,
+              "retrieval_order": [
+                "codeguard-0-additional-cryptography",
+                "codeguard-1-crypto-algorithms"
+              ],
+              "ea_render_order": [
+                "codeguard-1-crypto-algorithms",
+                "codeguard-0-additional-cryptography"
+              ]
+            },
+            {
+              "prompt_hash": "44dc2b41cacd3d2f",
+              "num_rules": 3,
+              "retrieval_order": [
+                "codeguard-0-authentication-mfa",
+                "codeguard-1-hardcoded-credentials",
+                "codeguard-1-crypto-algorithms"
+              ],
+              "ea_render_order": [
+                "codeguard-0-authentication-mfa",
+                "codeguard-1-crypto-algorithms",
+                "codeguard-1-hardcoded-credentials"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "qwen_java": {
+      "n_prompts": 126,
+      "chromosomes": {
+        "best": {
+          "cid": "37aa0e246f365696",
+          "order_priority": {
+            "codeguard-0-cloud-orchestration-kubernetes": 1,
+            "codeguard-1-hardcoded-credentials": 2,
+            "codeguard-0-session-management-and-cookies": 3,
+            "codeguard-0-additional-cryptography": 4
+          },
+          "n_bumped_rules": 4,
+          "prompts_touching_a_bumped_rule": 63,
+          "prompts_touching_a_mutated_text_rule": 126,
+          "prompts_with_changed_order": 17,
+          "pct_prompts_with_changed_order": 13.49,
+          "examples": [
+            {
+              "prompt_hash": "12f87aeba7f0ed85",
+              "num_rules": 8,
+              "retrieval_order": [
+                "codeguard-0-api-web-services",
+                "codeguard-0-authentication-mfa",
+                "codeguard-0-data-storage",
+                "codeguard-0-logging",
+                "codeguard-0-supply-chain-security",
+                "codeguard-1-crypto-algorithms",
+                "codeguard-1-hardcoded-credentials",
+                "codeguard-0-framework-and-languages"
+              ],
+              "ea_render_order": [
+                "codeguard-1-hardcoded-credentials",
+                "codeguard-0-api-web-services",
+                "codeguard-0-authentication-mfa",
+                "codeguard-0-data-storage",
+                "codeguard-0-logging",
+                "codeguard-0-supply-chain-security",
+                "codeguard-1-crypto-algorithms",
+                "codeguard-0-framework-and-languages"
+              ]
+            },
+            {
+              "prompt_hash": "304827079db89be0",
+              "num_rules": 2,
+              "retrieval_order": [
+                "codeguard-0-file-handling-and-uploads",
+                "codeguard-1-hardcoded-credentials"
+              ],
+              "ea_render_order": [
+                "codeguard-1-hardcoded-credentials",
+                "codeguard-0-file-handling-and-uploads"
+              ]
+            },
+            {
+              "prompt_hash": "65f61ed194fb7d92",
+              "num_rules": 2,
+              "retrieval_order": [
+                "codeguard-0-file-handling-and-uploads",
+                "codeguard-1-hardcoded-credentials"
+              ],
+              "ea_render_order": [
+                "codeguard-1-hardcoded-credentials",
+                "codeguard-0-file-handling-and-uploads"
+              ]
+            },
+            {
+              "prompt_hash": "9eeec8195f56a2e0",
+              "num_rules": 3,
+              "retrieval_order": [
+                "codeguard-0-additional-cryptography",
+                "codeguard-1-crypto-algorithms",
+                "codeguard-1-hardcoded-credentials"
+              ],
+              "ea_render_order": [
+                "codeguard-0-additional-cryptography",
+                "codeguard-1-hardcoded-credentials",
+                "codeguard-1-crypto-algorithms"
+              ]
+            },
+            {
+              "prompt_hash": "c983933adcd14eab",
+              "num_rules": 3,
+              "retrieval_order": [
+                "codeguard-0-additional-cryptography",
+                "codeguard-1-crypto-algorithms",
+                "codeguard-1-hardcoded-credentials"
+              ],
+              "ea_render_order": [
+                "codeguard-0-additional-cryptography",
+                "codeguard-1-hardcoded-credentials",
+                "codeguard-1-crypto-algorithms"
+              ]
+            }
+          ]
+        },
+        "runner_up": {
+          "cid": "cfb900f7ac7cdfdd",
+          "order_priority": {
+            "codeguard-0-cloud-orchestration-kubernetes": 1,
+            "codeguard-1-hardcoded-credentials": 2,
+            "codeguard-0-session-management-and-cookies": 3,
+            "codeguard-0-additional-cryptography": 4
+          },
+          "n_bumped_rules": 4,
+          "prompts_touching_a_bumped_rule": 63,
+          "prompts_touching_a_mutated_text_rule": 125,
+          "prompts_with_changed_order": 17,
+          "pct_prompts_with_changed_order": 13.49,
+          "examples": [
+            {
+              "prompt_hash": "12f87aeba7f0ed85",
+              "num_rules": 8,
+              "retrieval_order": [
+                "codeguard-0-api-web-services",
+                "codeguard-0-authentication-mfa",
+                "codeguard-0-data-storage",
+                "codeguard-0-logging",
+                "codeguard-0-supply-chain-security",
+                "codeguard-1-crypto-algorithms",
+                "codeguard-1-hardcoded-credentials",
+                "codeguard-0-framework-and-languages"
+              ],
+              "ea_render_order": [
+                "codeguard-1-hardcoded-credentials",
+                "codeguard-0-api-web-services",
+                "codeguard-0-authentication-mfa",
+                "codeguard-0-data-storage",
+                "codeguard-0-logging",
+                "codeguard-0-supply-chain-security",
+                "codeguard-1-crypto-algorithms",
+                "codeguard-0-framework-and-languages"
+              ]
+            },
+            {
+              "prompt_hash": "304827079db89be0",
+              "num_rules": 2,
+              "retrieval_order": [
+                "codeguard-0-file-handling-and-uploads",
+                "codeguard-1-hardcoded-credentials"
+              ],
+              "ea_render_order": [
+                "codeguard-1-hardcoded-credentials",
+                "codeguard-0-file-handling-and-uploads"
+              ]
+            },
+            {
+              "prompt_hash": "65f61ed194fb7d92",
+              "num_rules": 2,
+              "retrieval_order": [
+                "codeguard-0-file-handling-and-uploads",
+                "codeguard-1-hardcoded-credentials"
+              ],
+              "ea_render_order": [
+                "codeguard-1-hardcoded-credentials",
+                "codeguard-0-file-handling-and-uploads"
+              ]
+            },
+            {
+              "prompt_hash": "9eeec8195f56a2e0",
+              "num_rules": 3,
+              "retrieval_order": [
+                "codeguard-0-additional-cryptography",
+                "codeguard-1-crypto-algorithms",
+                "codeguard-1-hardcoded-credentials"
+              ],
+              "ea_render_order": [
+                "codeguard-0-additional-cryptography",
+                "codeguard-1-hardcoded-credentials",
+                "codeguard-1-crypto-algorithms"
+              ]
+            },
+            {
+              "prompt_hash": "c983933adcd14eab",
+              "num_rules": 3,
+              "retrieval_order": [
+                "codeguard-0-additional-cryptography",
+                "codeguard-1-crypto-algorithms",
+                "codeguard-1-hardcoded-credentials"
+              ],
+              "ea_render_order": [
+                "codeguard-0-additional-cryptography",
+                "codeguard-1-hardcoded-credentials",
+                "codeguard-1-crypto-algorithms"
+              ]
+            }
+          ]
+        }
+      }
+    }
+  }
+}

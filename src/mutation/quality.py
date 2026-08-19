@@ -1,5 +1,5 @@
 """
-Mutation quality validation — AUGMENT three-criteria framework.
+Mutation quality validation for rule mutations.
 
 Implements the quality-checking pipeline from Chataigner et al. 2025 (AUGMENT),
 extended with a project-specific security-domain preservation criterion.
@@ -8,40 +8,32 @@ The validator is **informational only** — it never refuses a mutation and neve
 affects archive admission (which is Pareto dominance over f1/f2/f3).  When
 ``--enable-validation`` is set it runs once per mutation inside the loop (no
 retry; identity mutations are skipped before code-gen); otherwise it is unused.
-It populates ``MutationResult.metadata['quality']`` for analysis/reporting, and
-is also used by ``select_best_candidate`` (ParaphraseMutator).
+It populates ``MutationResult.metadata['quality']`` for analysis/reporting.
 
-Four criteria
--------------
+Three recorded signals
+----------------------
 1. Instruction adherence  — did the mutation actually perform its intended
    transformation?  (difflib, stdlib only)
 2. Semantic similarity    — is the meaning preserved?  (sentence-transformers
-   ``all-mpnet-base-v2``, cosine similarity ≥ 0.75)
-3. Perplexity ratio — is the mutated text linguistically natural?
-   (perplexity ratio ≤ 2.5, computed with the caller-supplied LM handle)
-4. Security-domain preservation — are all inline code tokens and core security
-   vocabulary still present?  (ParsedRule + curated word list)
+   ``all-mpnet-base-v2``, continuous cosine similarity)
+3. Security-domain retention — what fraction of inline code tokens and security
+   vocabulary remains?  (ParsedRule + curated word list)
 
 Usage
 -----
 >>> from src.mutation.quality import MutationQualityValidator
->>> validator = MutationQualityValidator()                       # SBERT on, perplexity off
->>> validator = MutationQualityValidator(                        # perplexity on, shared model
-...     use_perplexity=True,
-...     ppl_model_handle=backend_model,
-...     ppl_tokenizer_handle=backend_tokenizer,
-... )
+>>> validator = MutationQualityValidator()
 >>> result = mutator.mutate(rule_text)
 >>> result = validator.validate(result)
->>> result.metadata["quality"]["passes_all"]        # bool
->>> result.metadata["quality"]["sbert_similarity"]  # float | None
+>>> result.metadata["quality"]["instruction_adherent"]  # bool
+>>> result.metadata["quality"]["sbert_step"]             # float | None
 """
 
 from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from .base import MutationResult
@@ -182,52 +174,18 @@ class MutationQualityValidator:
         Load and use ``sentence-transformers/all-mpnet-base-v2`` for semantic
         similarity.  Requires the model to be pre-downloaded to HF cache.
         Skipped gracefully if ``sentence-transformers`` is not installed.
-    use_perplexity:
-        Enable the perplexity ratio gate.  Requires ``ppl_model_handle`` and
-        ``ppl_tokenizer_handle`` to be set; if they are ``None`` a warning is
-        logged and the gate is skipped.  Disabled by default.
     sbert_model:
         HuggingFace model name for the sentence encoder.
-    ppl_model_handle:
-        A pre-loaded ``transformers`` causal-LM model used to compute
-        perplexity.  Pass the generation model (e.g. the 32B instance from
-        ``DelftBlueLocalBackend``) so no second model is loaded.
-    ppl_tokenizer_handle:
-        The tokenizer paired with ``ppl_model_handle``.
-    sbert_threshold:
-        Minimum cosine similarity for the semantic-similarity criterion.
-        0.75 is AUGMENT's global SBERT threshold (Chataigner et al. 2025,
-        App C.2 / Fig 5).  NOTE: AUGMENT calibrated 0.75 on stsb-distilroberta;
-        this validator uses all-mpnet-base-v2, so the cutoff is transferred,
-        not re-calibrated.  Informational/post-hoc — not a hard gate.
-    perplexity_threshold:
-        Maximum perplexity ratio for the realism criterion (2.5 — AUGMENT's
-        value, App C.2 / Fig 8).  Off by default.
-        (An earlier comment attributed a perplexity<->SBERT calibration to
-        LAP / Paper 6 — that claim is NOT in LAP and has been removed.)
-    keyword_threshold:
-        Minimum security-keyword retention fraction (0.70; thesis-original
-        criterion, not in AUGMENT).
     """
 
     use_sbert: bool = True
-    use_perplexity: bool = False
     sbert_model: str = "sentence-transformers/all-mpnet-base-v2"
-    ppl_model_handle: Any = field(default=None, repr=False, compare=False)
-    ppl_tokenizer_handle: Any = field(default=None, repr=False, compare=False)
-    sbert_threshold: float = 0.75
-    perplexity_threshold: float = 2.5
-    keyword_threshold: float = 0.70
 
-    # Lazy-loaded SBERT handle; ppl handles are seeded from constructor args
+    # Lazy-loaded SBERT handle.
     _sbert: Any = None
-    _ppl_model: Any = None
-    _ppl_tokenizer: Any = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "_sbert", None)
-        object.__setattr__(self, "_ppl_model", self.ppl_model_handle)
-        object.__setattr__(self, "_ppl_tokenizer", self.ppl_tokenizer_handle)
 
     # ------------------------------------------------------------------
     # Lazy model loaders
@@ -251,22 +209,6 @@ class MutationQualityValidator:
         except Exception as exc:
             log.warning("Failed to load SBERT model %s: %s", self.sbert_model, exc)
             return None
-
-    def _get_ppl_model(self):
-        """Return (model, tokenizer) for perplexity scoring, or (None, None).
-
-        No model loading is performed here.  The handles must be supplied at
-        construction via ``ppl_model_handle`` / ``ppl_tokenizer_handle``
-        (typically the generation model shared from the code-generation backend).
-        If ``use_perplexity=True`` but no handle was provided, a warning is
-        emitted and perplexity scoring is skipped for this run.
-        """
-        if self._ppl_model is None:
-            log.warning(
-                "use_perplexity=True but no ppl_model_handle was supplied; "
-                "perplexity gate disabled for this run."
-            )
-        return self._ppl_model, self._ppl_tokenizer
 
     # ------------------------------------------------------------------
     # Metric helpers
@@ -318,37 +260,6 @@ class MutationQualityValidator:
             return round(sim, 4)
         except Exception as exc:
             log.warning("SBERT similarity computation failed: %s", exc)
-            return None
-
-    def _compute_perplexity_ratio(
-        self, orig_prose: str, mut_prose: str
-    ) -> float | None:
-        """perplexity(mutated) / perplexity(original) using Qwen2.5-7B."""
-        model, tokenizer = self._get_ppl_model()
-        if model is None:
-            return None
-        try:
-            import math
-            import torch  # type: ignore
-
-            def _ppl(text: str) -> float:
-                inputs = tokenizer(
-                    text,
-                    return_tensors="pt",
-                    truncation=True,
-                    max_length=1024,
-                ).to(model.device) # type: ignore
-                with torch.no_grad():
-                    loss = model(**inputs, labels=inputs["input_ids"]).loss
-                return math.exp(float(loss))
-
-            orig_ppl = _ppl(orig_prose)
-            mut_ppl = _ppl(mut_prose)
-            if orig_ppl == 0:
-                return None
-            return round(mut_ppl / orig_ppl, 4)
-        except Exception as exc:
-            log.warning("Perplexity computation failed: %s", exc)
             return None
 
     # ------------------------------------------------------------------
@@ -404,43 +315,19 @@ class MutationQualityValidator:
         if self.use_sbert and result.changed:
             sbert_similarity = self._compute_sbert_similarity(orig_prose, mut_prose)
 
-        # 3. Perplexity ratio
-        perplexity_ratio: float | None = None
-        if self.use_perplexity and result.changed:
-            perplexity_ratio = self._compute_perplexity_ratio(orig_prose, mut_prose)
-
-        # 4. Security-domain preservation
+        # 3. Security-domain preservation
         inline_code_retention = self._compute_inline_code_retention(
             result.original, result.mutated
         )
         keyword_retention = self._compute_keyword_retention(orig_prose, mut_prose)
-        security_intent_preserved = (
-            inline_code_retention == 1.0
-            and keyword_retention >= self.keyword_threshold
-        )
-
-        # Combined gate
-        passes_all = (
-            instruction_adherent
-            and (sbert_similarity is None or sbert_similarity >= self.sbert_threshold)
-            and (perplexity_ratio is None or perplexity_ratio <= self.perplexity_threshold)
-            and inline_code_retention == 1.0
-            and keyword_retention >= self.keyword_threshold
-        )
-
         result.metadata["quality"] = {
             # Criterion 1
             "instruction_adherent": instruction_adherent,
             # Criterion 2: sbert_step = sim vs parent (single-step drift)
             "sbert_step": sbert_similarity,
             # Criterion 3
-            "perplexity_ratio": perplexity_ratio,
-            # Criterion 4
             "inline_code_retention": round(inline_code_retention, 4),
             "keyword_retention": round(keyword_retention, 4),
-            "security_intent_preserved": security_intent_preserved,
-            # Summary
-            "passes_all": passes_all,
             "changed": result.changed,
         }
 
@@ -452,31 +339,6 @@ class MutationQualityValidator:
         """Validate a list of MutationResults (loads models once, reuses)."""
         return [self.validate(r) for r in results]
 
-    def select_best_candidate(
-        self, candidates: list[MutationResult]
-    ) -> MutationResult:
-        """Return the first candidate that passes all quality criteria.
-
-        Used by ParaphraseMutator when multiple candidates are available.
-        Falls back to the first candidate if none pass.
-
-        Parameters
-        ----------
-        candidates:
-            List of MutationResult objects.  They are validated in-place if
-            not already validated.
-        """
-        for c in candidates:
-            if "quality" not in c.metadata:
-                self.validate(c)
-            if c.metadata["quality"].get("passes_all", False):
-                return c
-        log.warning(
-            "select_best_candidate: no candidate passed all criteria; "
-            "returning first candidate."
-        )
-        return candidates[0]
-
     def to_csv_row(self, result: MutationResult) -> dict[str, Any]:
         """Flatten quality metrics to a dict suitable for CSV export."""
         q = result.metadata.get("quality", {})
@@ -485,10 +347,7 @@ class MutationQualityValidator:
             "changed": result.changed,
             "change_ratio": round(result.change_ratio, 4),
             "instruction_adherent": q.get("instruction_adherent"),
-            "sbert_similarity": q.get("sbert_similarity"),
-            "perplexity_ratio": q.get("perplexity_ratio"),
+            "sbert_step": q.get("sbert_step"),
             "inline_code_retention": q.get("inline_code_retention"),
             "keyword_retention": q.get("keyword_retention"),
-            "security_intent_preserved": q.get("security_intent_preserved"),
-            "passes_all": q.get("passes_all"),
         }

@@ -1,0 +1,1369 @@
+{
+  "artifact_type": "rq2_safe_zone_tier_sensitivity",
+  "generated_from": "/home/rnegro/analysis/report/search_safe_zone_audit.json",
+  "unit_of_analysis": "EA/random search pair matched by seed and initialization bundle",
+  "outcome": "best raw Semgrep-finding reduction observed in 24 hours",
+  "primary_test": "exact two-sided paired sign test within tier",
+  "multiplicity": "Holm correction across four model-language strata separately within each tier; cross-tier comparisons are a nested specification sensitivity, not three independent confirmatory families",
+  "guardrails": [
+    "core and full tiers are post-hoc filters over historical trajectories",
+    "core tier is exploratory and was defined after discovering the issue",
+    "full-tier non-rejection is not evidence of equivalence",
+    "no tier establishes semantic equivalence of mutated rules"
+  ],
+  "excluded": [],
+  "tier_definitions": {
+    "raw_executed": {
+      "label": "Raw executed system",
+      "audit_field": "reported_best_f1",
+      "status": "system-level result",
+      "description": "Best result reported by the mutation/search implementation that was actually executed."
+    },
+    "core_structural": {
+      "label": "Core structural sensitivity",
+      "audit_field": "core_structural_best_f1",
+      "status": "post-hoc exploratory sensitivity",
+      "description": "Best observed candidate preserving frontmatter and fenced-code structure; inline-code changes are allowed."
+    },
+    "full_contract": {
+      "label": "Full safe-zone sensitivity",
+      "audit_field": "strict_best_f1",
+      "status": "post-hoc conservative sensitivity",
+      "description": "Best observed candidate preserving frontmatter, fenced-code blocks, and inline-code spans exactly."
+    }
+  },
+  "safe_zone_component_counts": {
+    "completed_evaluations": 10789,
+    "full_contract_invalid_evaluations": 4598,
+    "core_structural_invalid_evaluations": 2297,
+    "issue_evaluation_counts": {
+      "fences": 2297,
+      "inline": 3065,
+      "triple_ticks": 19
+    },
+    "issue_combinations": {
+      "fences": 1532,
+      "fences+inline": 746,
+      "fences+inline+triple_ticks": 18,
+      "fences+triple_ticks": 1,
+      "inline": 2301
+    },
+    "full_contract_invalid_fraction": 0.4261748076744833,
+    "core_structural_invalid_fraction": 0.21290202984521273,
+    "inline_only_rescued_evaluations": 2301,
+    "inline_only_rescued_fraction": 0.21327277782927057
+  },
+  "tiers": {
+    "raw_executed": {
+      "strata": {
+        "llama_java": {
+          "n_pairs": 10,
+          "deltas_f1": [
+            0.0,
+            4.0,
+            3.0,
+            5.0,
+            4.0,
+            0.0,
+            1.0,
+            2.0,
+            5.0,
+            4.0
+          ],
+          "median_delta": 3.5,
+          "median_percentile_bootstrap_ci": [
+            1.0,
+            4.5
+          ],
+          "mean_delta": 2.8,
+          "paired_superiority": 0.9,
+          "sign_test": {
+            "p": 0.0078125,
+            "positive_pairs": 8,
+            "negative_pairs": 0,
+            "ties": 2,
+            "note": "ties excluded from the exact binomial test"
+          },
+          "sign_flip_sensitivity": {
+            "p": 0.0078125,
+            "note": "exact, 1024 sign assignments; inferential interpretation assumes within-pair exchangeability under the null"
+          },
+          "per_seed": [
+            {
+              "seed": 1,
+              "ea_f1": 11.0,
+              "random_f1": 11.0,
+              "delta": 0.0
+            },
+            {
+              "seed": 2,
+              "ea_f1": 10.0,
+              "random_f1": 6.0,
+              "delta": 4.0
+            },
+            {
+              "seed": 3,
+              "ea_f1": 11.0,
+              "random_f1": 8.0,
+              "delta": 3.0
+            },
+            {
+              "seed": 4,
+              "ea_f1": 12.0,
+              "random_f1": 7.0,
+              "delta": 5.0
+            },
+            {
+              "seed": 5,
+              "ea_f1": 12.0,
+              "random_f1": 8.0,
+              "delta": 4.0
+            },
+            {
+              "seed": 6,
+              "ea_f1": 8.0,
+              "random_f1": 8.0,
+              "delta": 0.0
+            },
+            {
+              "seed": 7,
+              "ea_f1": 8.0,
+              "random_f1": 7.0,
+              "delta": 1.0
+            },
+            {
+              "seed": 8,
+              "ea_f1": 10.0,
+              "random_f1": 8.0,
+              "delta": 2.0
+            },
+            {
+              "seed": 9,
+              "ea_f1": 12.0,
+              "random_f1": 7.0,
+              "delta": 5.0
+            },
+            {
+              "seed": 10,
+              "ea_f1": 13.0,
+              "random_f1": 9.0,
+              "delta": 4.0
+            }
+          ]
+        },
+        "llama_python": {
+          "n_pairs": 10,
+          "deltas_f1": [
+            6.0,
+            14.0,
+            -2.0,
+            3.0,
+            8.0,
+            5.0,
+            11.0,
+            3.0,
+            5.0,
+            6.0
+          ],
+          "median_delta": 5.5,
+          "median_percentile_bootstrap_ci": [
+            3.0,
+            8.5
+          ],
+          "mean_delta": 5.9,
+          "paired_superiority": 0.9,
+          "sign_test": {
+            "p": 0.021484375,
+            "positive_pairs": 9,
+            "negative_pairs": 1,
+            "ties": 0,
+            "note": "ties excluded from the exact binomial test"
+          },
+          "sign_flip_sensitivity": {
+            "p": 0.00390625,
+            "note": "exact, 1024 sign assignments; inferential interpretation assumes within-pair exchangeability under the null"
+          },
+          "per_seed": [
+            {
+              "seed": 1,
+              "ea_f1": 23.0,
+              "random_f1": 17.0,
+              "delta": 6.0
+            },
+            {
+              "seed": 2,
+              "ea_f1": 32.0,
+              "random_f1": 18.0,
+              "delta": 14.0
+            },
+            {
+              "seed": 3,
+              "ea_f1": 18.0,
+              "random_f1": 20.0,
+              "delta": -2.0
+            },
+            {
+              "seed": 4,
+              "ea_f1": 24.0,
+              "random_f1": 21.0,
+              "delta": 3.0
+            },
+            {
+              "seed": 5,
+              "ea_f1": 23.0,
+              "random_f1": 15.0,
+              "delta": 8.0
+            },
+            {
+              "seed": 6,
+              "ea_f1": 22.0,
+              "random_f1": 17.0,
+              "delta": 5.0
+            },
+            {
+              "seed": 7,
+              "ea_f1": 32.0,
+              "random_f1": 21.0,
+              "delta": 11.0
+            },
+            {
+              "seed": 8,
+              "ea_f1": 21.0,
+              "random_f1": 18.0,
+              "delta": 3.0
+            },
+            {
+              "seed": 9,
+              "ea_f1": 28.0,
+              "random_f1": 23.0,
+              "delta": 5.0
+            },
+            {
+              "seed": 10,
+              "ea_f1": 26.0,
+              "random_f1": 20.0,
+              "delta": 6.0
+            }
+          ]
+        },
+        "qwen_java": {
+          "n_pairs": 10,
+          "deltas_f1": [
+            3.0,
+            3.0,
+            2.0,
+            5.0,
+            5.0,
+            4.0,
+            4.0,
+            5.0,
+            5.0,
+            2.0
+          ],
+          "median_delta": 4.0,
+          "median_percentile_bootstrap_ci": [
+            3.0,
+            5.0
+          ],
+          "mean_delta": 3.8,
+          "paired_superiority": 1.0,
+          "sign_test": {
+            "p": 0.001953125,
+            "positive_pairs": 10,
+            "negative_pairs": 0,
+            "ties": 0,
+            "note": "ties excluded from the exact binomial test"
+          },
+          "sign_flip_sensitivity": {
+            "p": 0.001953125,
+            "note": "exact, 1024 sign assignments; inferential interpretation assumes within-pair exchangeability under the null"
+          },
+          "per_seed": [
+            {
+              "seed": 1,
+              "ea_f1": 9.0,
+              "random_f1": 6.0,
+              "delta": 3.0
+            },
+            {
+              "seed": 2,
+              "ea_f1": 9.0,
+              "random_f1": 6.0,
+              "delta": 3.0
+            },
+            {
+              "seed": 3,
+              "ea_f1": 10.0,
+              "random_f1": 8.0,
+              "delta": 2.0
+            },
+            {
+              "seed": 4,
+              "ea_f1": 11.0,
+              "random_f1": 6.0,
+              "delta": 5.0
+            },
+            {
+              "seed": 5,
+              "ea_f1": 11.0,
+              "random_f1": 6.0,
+              "delta": 5.0
+            },
+            {
+              "seed": 6,
+              "ea_f1": 9.0,
+              "random_f1": 5.0,
+              "delta": 4.0
+            },
+            {
+              "seed": 7,
+              "ea_f1": 10.0,
+              "random_f1": 6.0,
+              "delta": 4.0
+            },
+            {
+              "seed": 8,
+              "ea_f1": 11.0,
+              "random_f1": 6.0,
+              "delta": 5.0
+            },
+            {
+              "seed": 9,
+              "ea_f1": 11.0,
+              "random_f1": 6.0,
+              "delta": 5.0
+            },
+            {
+              "seed": 10,
+              "ea_f1": 8.0,
+              "random_f1": 6.0,
+              "delta": 2.0
+            }
+          ]
+        },
+        "qwen_python": {
+          "n_pairs": 10,
+          "deltas_f1": [
+            8.0,
+            10.0,
+            8.0,
+            15.0,
+            12.0,
+            14.0,
+            17.0,
+            11.0,
+            6.0,
+            14.0
+          ],
+          "median_delta": 11.5,
+          "median_percentile_bootstrap_ci": [
+            8.0,
+            14.5
+          ],
+          "mean_delta": 11.5,
+          "paired_superiority": 1.0,
+          "sign_test": {
+            "p": 0.001953125,
+            "positive_pairs": 10,
+            "negative_pairs": 0,
+            "ties": 0,
+            "note": "ties excluded from the exact binomial test"
+          },
+          "sign_flip_sensitivity": {
+            "p": 0.001953125,
+            "note": "exact, 1024 sign assignments; inferential interpretation assumes within-pair exchangeability under the null"
+          },
+          "per_seed": [
+            {
+              "seed": 1,
+              "ea_f1": 23.0,
+              "random_f1": 15.0,
+              "delta": 8.0
+            },
+            {
+              "seed": 2,
+              "ea_f1": 21.0,
+              "random_f1": 11.0,
+              "delta": 10.0
+            },
+            {
+              "seed": 3,
+              "ea_f1": 20.0,
+              "random_f1": 12.0,
+              "delta": 8.0
+            },
+            {
+              "seed": 4,
+              "ea_f1": 25.0,
+              "random_f1": 10.0,
+              "delta": 15.0
+            },
+            {
+              "seed": 5,
+              "ea_f1": 23.0,
+              "random_f1": 11.0,
+              "delta": 12.0
+            },
+            {
+              "seed": 6,
+              "ea_f1": 27.0,
+              "random_f1": 13.0,
+              "delta": 14.0
+            },
+            {
+              "seed": 7,
+              "ea_f1": 28.0,
+              "random_f1": 11.0,
+              "delta": 17.0
+            },
+            {
+              "seed": 8,
+              "ea_f1": 26.0,
+              "random_f1": 15.0,
+              "delta": 11.0
+            },
+            {
+              "seed": 9,
+              "ea_f1": 27.0,
+              "random_f1": 21.0,
+              "delta": 6.0
+            },
+            {
+              "seed": 10,
+              "ea_f1": 27.0,
+              "random_f1": 13.0,
+              "delta": 14.0
+            }
+          ]
+        }
+      },
+      "families": {
+        "primary_sign_test": {
+          "family": "four model-language strata within this tier",
+          "holm": {
+            "qwen_java": {
+              "p": 0.001953125,
+              "threshold": 0.0125,
+              "reject": true
+            },
+            "qwen_python": {
+              "p": 0.001953125,
+              "threshold": 0.016666666666666666,
+              "reject": true
+            },
+            "llama_java": {
+              "p": 0.0078125,
+              "threshold": 0.025,
+              "reject": true
+            },
+            "llama_python": {
+              "p": 0.021484375,
+              "threshold": 0.05,
+              "reject": true
+            }
+          }
+        },
+        "magnitude_sensitive_sign_flip": {
+          "family": "four model-language strata within this tier",
+          "holm": {
+            "qwen_java": {
+              "p": 0.001953125,
+              "threshold": 0.0125,
+              "reject": true
+            },
+            "qwen_python": {
+              "p": 0.001953125,
+              "threshold": 0.016666666666666666,
+              "reject": true
+            },
+            "llama_python": {
+              "p": 0.00390625,
+              "threshold": 0.025,
+              "reject": true
+            },
+            "llama_java": {
+              "p": 0.0078125,
+              "threshold": 0.05,
+              "reject": true
+            }
+          }
+        }
+      },
+      "n_holm_rejections_primary": 4
+    },
+    "core_structural": {
+      "strata": {
+        "llama_java": {
+          "n_pairs": 10,
+          "deltas_f1": [
+            1.0,
+            2.0,
+            1.0,
+            2.0,
+            4.0,
+            0.0,
+            3.0,
+            1.0,
+            5.0,
+            4.0
+          ],
+          "median_delta": 2.0,
+          "median_percentile_bootstrap_ci": [
+            1.0,
+            4.0
+          ],
+          "mean_delta": 2.3,
+          "paired_superiority": 0.95,
+          "sign_test": {
+            "p": 0.00390625,
+            "positive_pairs": 9,
+            "negative_pairs": 0,
+            "ties": 1,
+            "note": "ties excluded from the exact binomial test"
+          },
+          "sign_flip_sensitivity": {
+            "p": 0.00390625,
+            "note": "exact, 1024 sign assignments; inferential interpretation assumes within-pair exchangeability under the null"
+          },
+          "per_seed": [
+            {
+              "seed": 1,
+              "ea_f1": 11.0,
+              "random_f1": 10.0,
+              "delta": 1.0
+            },
+            {
+              "seed": 2,
+              "ea_f1": 8.0,
+              "random_f1": 6.0,
+              "delta": 2.0
+            },
+            {
+              "seed": 3,
+              "ea_f1": 8.0,
+              "random_f1": 7.0,
+              "delta": 1.0
+            },
+            {
+              "seed": 4,
+              "ea_f1": 9.0,
+              "random_f1": 7.0,
+              "delta": 2.0
+            },
+            {
+              "seed": 5,
+              "ea_f1": 12.0,
+              "random_f1": 8.0,
+              "delta": 4.0
+            },
+            {
+              "seed": 6,
+              "ea_f1": 8.0,
+              "random_f1": 8.0,
+              "delta": 0.0
+            },
+            {
+              "seed": 7,
+              "ea_f1": 8.0,
+              "random_f1": 5.0,
+              "delta": 3.0
+            },
+            {
+              "seed": 8,
+              "ea_f1": 9.0,
+              "random_f1": 8.0,
+              "delta": 1.0
+            },
+            {
+              "seed": 9,
+              "ea_f1": 12.0,
+              "random_f1": 7.0,
+              "delta": 5.0
+            },
+            {
+              "seed": 10,
+              "ea_f1": 13.0,
+              "random_f1": 9.0,
+              "delta": 4.0
+            }
+          ]
+        },
+        "llama_python": {
+          "n_pairs": 10,
+          "deltas_f1": [
+            6.0,
+            14.0,
+            -2.0,
+            0.0,
+            3.0,
+            7.0,
+            11.0,
+            3.0,
+            11.0,
+            -6.0
+          ],
+          "median_delta": 4.5,
+          "median_percentile_bootstrap_ci": [
+            0.0,
+            11.0
+          ],
+          "mean_delta": 4.7,
+          "paired_superiority": 0.75,
+          "sign_test": {
+            "p": 0.1796875,
+            "positive_pairs": 7,
+            "negative_pairs": 2,
+            "ties": 1,
+            "note": "ties excluded from the exact binomial test"
+          },
+          "sign_flip_sensitivity": {
+            "p": 0.05078125,
+            "note": "exact, 1024 sign assignments; inferential interpretation assumes within-pair exchangeability under the null"
+          },
+          "per_seed": [
+            {
+              "seed": 1,
+              "ea_f1": 23.0,
+              "random_f1": 17.0,
+              "delta": 6.0
+            },
+            {
+              "seed": 2,
+              "ea_f1": 32.0,
+              "random_f1": 18.0,
+              "delta": 14.0
+            },
+            {
+              "seed": 3,
+              "ea_f1": 18.0,
+              "random_f1": 20.0,
+              "delta": -2.0
+            },
+            {
+              "seed": 4,
+              "ea_f1": 17.0,
+              "random_f1": 17.0,
+              "delta": 0.0
+            },
+            {
+              "seed": 5,
+              "ea_f1": 12.0,
+              "random_f1": 9.0,
+              "delta": 3.0
+            },
+            {
+              "seed": 6,
+              "ea_f1": 22.0,
+              "random_f1": 15.0,
+              "delta": 7.0
+            },
+            {
+              "seed": 7,
+              "ea_f1": 32.0,
+              "random_f1": 21.0,
+              "delta": 11.0
+            },
+            {
+              "seed": 8,
+              "ea_f1": 21.0,
+              "random_f1": 18.0,
+              "delta": 3.0
+            },
+            {
+              "seed": 9,
+              "ea_f1": 28.0,
+              "random_f1": 17.0,
+              "delta": 11.0
+            },
+            {
+              "seed": 10,
+              "ea_f1": 14.0,
+              "random_f1": 20.0,
+              "delta": -6.0
+            }
+          ]
+        },
+        "qwen_java": {
+          "n_pairs": 10,
+          "deltas_f1": [
+            3.0,
+            1.0,
+            1.0,
+            5.0,
+            5.0,
+            4.0,
+            -1.0,
+            5.0,
+            5.0,
+            2.0
+          ],
+          "median_delta": 3.5,
+          "median_percentile_bootstrap_ci": [
+            1.0,
+            5.0
+          ],
+          "mean_delta": 3.0,
+          "paired_superiority": 0.9,
+          "sign_test": {
+            "p": 0.021484375,
+            "positive_pairs": 9,
+            "negative_pairs": 1,
+            "ties": 0,
+            "note": "ties excluded from the exact binomial test"
+          },
+          "sign_flip_sensitivity": {
+            "p": 0.0078125,
+            "note": "exact, 1024 sign assignments; inferential interpretation assumes within-pair exchangeability under the null"
+          },
+          "per_seed": [
+            {
+              "seed": 1,
+              "ea_f1": 8.0,
+              "random_f1": 5.0,
+              "delta": 3.0
+            },
+            {
+              "seed": 2,
+              "ea_f1": 7.0,
+              "random_f1": 6.0,
+              "delta": 1.0
+            },
+            {
+              "seed": 3,
+              "ea_f1": 9.0,
+              "random_f1": 8.0,
+              "delta": 1.0
+            },
+            {
+              "seed": 4,
+              "ea_f1": 11.0,
+              "random_f1": 6.0,
+              "delta": 5.0
+            },
+            {
+              "seed": 5,
+              "ea_f1": 11.0,
+              "random_f1": 6.0,
+              "delta": 5.0
+            },
+            {
+              "seed": 6,
+              "ea_f1": 9.0,
+              "random_f1": 5.0,
+              "delta": 4.0
+            },
+            {
+              "seed": 7,
+              "ea_f1": 5.0,
+              "random_f1": 6.0,
+              "delta": -1.0
+            },
+            {
+              "seed": 8,
+              "ea_f1": 11.0,
+              "random_f1": 6.0,
+              "delta": 5.0
+            },
+            {
+              "seed": 9,
+              "ea_f1": 11.0,
+              "random_f1": 6.0,
+              "delta": 5.0
+            },
+            {
+              "seed": 10,
+              "ea_f1": 8.0,
+              "random_f1": 6.0,
+              "delta": 2.0
+            }
+          ]
+        },
+        "qwen_python": {
+          "n_pairs": 10,
+          "deltas_f1": [
+            8.0,
+            10.0,
+            0.0,
+            15.0,
+            12.0,
+            14.0,
+            15.0,
+            11.0,
+            3.0,
+            15.0
+          ],
+          "median_delta": 11.5,
+          "median_percentile_bootstrap_ci": [
+            6.5,
+            15.0
+          ],
+          "mean_delta": 10.3,
+          "paired_superiority": 0.95,
+          "sign_test": {
+            "p": 0.00390625,
+            "positive_pairs": 9,
+            "negative_pairs": 0,
+            "ties": 1,
+            "note": "ties excluded from the exact binomial test"
+          },
+          "sign_flip_sensitivity": {
+            "p": 0.00390625,
+            "note": "exact, 1024 sign assignments; inferential interpretation assumes within-pair exchangeability under the null"
+          },
+          "per_seed": [
+            {
+              "seed": 1,
+              "ea_f1": 23.0,
+              "random_f1": 15.0,
+              "delta": 8.0
+            },
+            {
+              "seed": 2,
+              "ea_f1": 21.0,
+              "random_f1": 11.0,
+              "delta": 10.0
+            },
+            {
+              "seed": 3,
+              "ea_f1": 12.0,
+              "random_f1": 12.0,
+              "delta": 0.0
+            },
+            {
+              "seed": 4,
+              "ea_f1": 25.0,
+              "random_f1": 10.0,
+              "delta": 15.0
+            },
+            {
+              "seed": 5,
+              "ea_f1": 23.0,
+              "random_f1": 11.0,
+              "delta": 12.0
+            },
+            {
+              "seed": 6,
+              "ea_f1": 27.0,
+              "random_f1": 13.0,
+              "delta": 14.0
+            },
+            {
+              "seed": 7,
+              "ea_f1": 26.0,
+              "random_f1": 11.0,
+              "delta": 15.0
+            },
+            {
+              "seed": 8,
+              "ea_f1": 26.0,
+              "random_f1": 15.0,
+              "delta": 11.0
+            },
+            {
+              "seed": 9,
+              "ea_f1": 24.0,
+              "random_f1": 21.0,
+              "delta": 3.0
+            },
+            {
+              "seed": 10,
+              "ea_f1": 27.0,
+              "random_f1": 12.0,
+              "delta": 15.0
+            }
+          ]
+        }
+      },
+      "families": {
+        "primary_sign_test": {
+          "family": "four model-language strata within this tier",
+          "holm": {
+            "llama_java": {
+              "p": 0.00390625,
+              "threshold": 0.0125,
+              "reject": true
+            },
+            "qwen_python": {
+              "p": 0.00390625,
+              "threshold": 0.016666666666666666,
+              "reject": true
+            },
+            "qwen_java": {
+              "p": 0.021484375,
+              "threshold": 0.025,
+              "reject": true
+            },
+            "llama_python": {
+              "p": 0.1796875,
+              "threshold": 0.05,
+              "reject": false
+            }
+          }
+        },
+        "magnitude_sensitive_sign_flip": {
+          "family": "four model-language strata within this tier",
+          "holm": {
+            "llama_java": {
+              "p": 0.00390625,
+              "threshold": 0.0125,
+              "reject": true
+            },
+            "qwen_python": {
+              "p": 0.00390625,
+              "threshold": 0.016666666666666666,
+              "reject": true
+            },
+            "qwen_java": {
+              "p": 0.0078125,
+              "threshold": 0.025,
+              "reject": true
+            },
+            "llama_python": {
+              "p": 0.05078125,
+              "threshold": 0.05,
+              "reject": false
+            }
+          }
+        }
+      },
+      "n_holm_rejections_primary": 3
+    },
+    "full_contract": {
+      "strata": {
+        "llama_java": {
+          "n_pairs": 10,
+          "deltas_f1": [
+            1.0,
+            2.0,
+            -1.0,
+            2.0,
+            4.0,
+            0.0,
+            3.0,
+            0.0,
+            -3.0,
+            4.0
+          ],
+          "median_delta": 1.5,
+          "median_percentile_bootstrap_ci": [
+            -0.5,
+            3.0
+          ],
+          "mean_delta": 1.2,
+          "paired_superiority": 0.7,
+          "sign_test": {
+            "p": 0.2890625,
+            "positive_pairs": 6,
+            "negative_pairs": 2,
+            "ties": 2,
+            "note": "ties excluded from the exact binomial test"
+          },
+          "sign_flip_sensitivity": {
+            "p": 0.1640625,
+            "note": "exact, 1024 sign assignments; inferential interpretation assumes within-pair exchangeability under the null"
+          },
+          "per_seed": [
+            {
+              "seed": 1,
+              "ea_f1": 11.0,
+              "random_f1": 10.0,
+              "delta": 1.0
+            },
+            {
+              "seed": 2,
+              "ea_f1": 8.0,
+              "random_f1": 6.0,
+              "delta": 2.0
+            },
+            {
+              "seed": 3,
+              "ea_f1": 6.0,
+              "random_f1": 7.0,
+              "delta": -1.0
+            },
+            {
+              "seed": 4,
+              "ea_f1": 9.0,
+              "random_f1": 7.0,
+              "delta": 2.0
+            },
+            {
+              "seed": 5,
+              "ea_f1": 12.0,
+              "random_f1": 8.0,
+              "delta": 4.0
+            },
+            {
+              "seed": 6,
+              "ea_f1": 8.0,
+              "random_f1": 8.0,
+              "delta": 0.0
+            },
+            {
+              "seed": 7,
+              "ea_f1": 8.0,
+              "random_f1": 5.0,
+              "delta": 3.0
+            },
+            {
+              "seed": 8,
+              "ea_f1": 8.0,
+              "random_f1": 8.0,
+              "delta": 0.0
+            },
+            {
+              "seed": 9,
+              "ea_f1": 3.0,
+              "random_f1": 6.0,
+              "delta": -3.0
+            },
+            {
+              "seed": 10,
+              "ea_f1": 13.0,
+              "random_f1": 9.0,
+              "delta": 4.0
+            }
+          ]
+        },
+        "llama_python": {
+          "n_pairs": 10,
+          "deltas_f1": [
+            6.0,
+            21.0,
+            -2.0,
+            -5.0,
+            3.0,
+            5.0,
+            -12.0,
+            3.0,
+            11.0,
+            -6.0
+          ],
+          "median_delta": 3.0,
+          "median_percentile_bootstrap_ci": [
+            -5.0,
+            8.0
+          ],
+          "mean_delta": 2.4,
+          "paired_superiority": 0.6,
+          "sign_test": {
+            "p": 0.75390625,
+            "positive_pairs": 6,
+            "negative_pairs": 4,
+            "ties": 0,
+            "note": "ties excluded from the exact binomial test"
+          },
+          "sign_flip_sensitivity": {
+            "p": 0.474609375,
+            "note": "exact, 1024 sign assignments; inferential interpretation assumes within-pair exchangeability under the null"
+          },
+          "per_seed": [
+            {
+              "seed": 1,
+              "ea_f1": 23.0,
+              "random_f1": 17.0,
+              "delta": 6.0
+            },
+            {
+              "seed": 2,
+              "ea_f1": 32.0,
+              "random_f1": 11.0,
+              "delta": 21.0
+            },
+            {
+              "seed": 3,
+              "ea_f1": 18.0,
+              "random_f1": 20.0,
+              "delta": -2.0
+            },
+            {
+              "seed": 4,
+              "ea_f1": 12.0,
+              "random_f1": 17.0,
+              "delta": -5.0
+            },
+            {
+              "seed": 5,
+              "ea_f1": 12.0,
+              "random_f1": 9.0,
+              "delta": 3.0
+            },
+            {
+              "seed": 6,
+              "ea_f1": 20.0,
+              "random_f1": 15.0,
+              "delta": 5.0
+            },
+            {
+              "seed": 7,
+              "ea_f1": 6.0,
+              "random_f1": 18.0,
+              "delta": -12.0
+            },
+            {
+              "seed": 8,
+              "ea_f1": 21.0,
+              "random_f1": 18.0,
+              "delta": 3.0
+            },
+            {
+              "seed": 9,
+              "ea_f1": 28.0,
+              "random_f1": 17.0,
+              "delta": 11.0
+            },
+            {
+              "seed": 10,
+              "ea_f1": 14.0,
+              "random_f1": 20.0,
+              "delta": -6.0
+            }
+          ]
+        },
+        "qwen_java": {
+          "n_pairs": 10,
+          "deltas_f1": [
+            3.0,
+            1.0,
+            1.0,
+            5.0,
+            0.0,
+            -2.0,
+            0.0,
+            2.0,
+            5.0,
+            2.0
+          ],
+          "median_delta": 1.5,
+          "median_percentile_bootstrap_ci": [
+            0.0,
+            3.5
+          ],
+          "mean_delta": 1.7,
+          "paired_superiority": 0.8,
+          "sign_test": {
+            "p": 0.0703125,
+            "positive_pairs": 7,
+            "negative_pairs": 1,
+            "ties": 2,
+            "note": "ties excluded from the exact binomial test"
+          },
+          "sign_flip_sensitivity": {
+            "p": 0.0546875,
+            "note": "exact, 1024 sign assignments; inferential interpretation assumes within-pair exchangeability under the null"
+          },
+          "per_seed": [
+            {
+              "seed": 1,
+              "ea_f1": 8.0,
+              "random_f1": 5.0,
+              "delta": 3.0
+            },
+            {
+              "seed": 2,
+              "ea_f1": 7.0,
+              "random_f1": 6.0,
+              "delta": 1.0
+            },
+            {
+              "seed": 3,
+              "ea_f1": 9.0,
+              "random_f1": 8.0,
+              "delta": 1.0
+            },
+            {
+              "seed": 4,
+              "ea_f1": 11.0,
+              "random_f1": 6.0,
+              "delta": 5.0
+            },
+            {
+              "seed": 5,
+              "ea_f1": 5.0,
+              "random_f1": 5.0,
+              "delta": 0.0
+            },
+            {
+              "seed": 6,
+              "ea_f1": 3.0,
+              "random_f1": 5.0,
+              "delta": -2.0
+            },
+            {
+              "seed": 7,
+              "ea_f1": 5.0,
+              "random_f1": 5.0,
+              "delta": 0.0
+            },
+            {
+              "seed": 8,
+              "ea_f1": 8.0,
+              "random_f1": 6.0,
+              "delta": 2.0
+            },
+            {
+              "seed": 9,
+              "ea_f1": 11.0,
+              "random_f1": 6.0,
+              "delta": 5.0
+            },
+            {
+              "seed": 10,
+              "ea_f1": 8.0,
+              "random_f1": 6.0,
+              "delta": 2.0
+            }
+          ]
+        },
+        "qwen_python": {
+          "n_pairs": 10,
+          "deltas_f1": [
+            8.0,
+            10.0,
+            0.0,
+            15.0,
+            12.0,
+            -8.0,
+            15.0,
+            11.0,
+            -3.0,
+            15.0
+          ],
+          "median_delta": 10.5,
+          "median_percentile_bootstrap_ci": [
+            0.0,
+            15.0
+          ],
+          "mean_delta": 7.5,
+          "paired_superiority": 0.75,
+          "sign_test": {
+            "p": 0.1796875,
+            "positive_pairs": 7,
+            "negative_pairs": 2,
+            "ties": 1,
+            "note": "ties excluded from the exact binomial test"
+          },
+          "sign_flip_sensitivity": {
+            "p": 0.03125,
+            "note": "exact, 1024 sign assignments; inferential interpretation assumes within-pair exchangeability under the null"
+          },
+          "per_seed": [
+            {
+              "seed": 1,
+              "ea_f1": 23.0,
+              "random_f1": 15.0,
+              "delta": 8.0
+            },
+            {
+              "seed": 2,
+              "ea_f1": 21.0,
+              "random_f1": 11.0,
+              "delta": 10.0
+            },
+            {
+              "seed": 3,
+              "ea_f1": 12.0,
+              "random_f1": 12.0,
+              "delta": 0.0
+            },
+            {
+              "seed": 4,
+              "ea_f1": 25.0,
+              "random_f1": 10.0,
+              "delta": 15.0
+            },
+            {
+              "seed": 5,
+              "ea_f1": 23.0,
+              "random_f1": 11.0,
+              "delta": 12.0
+            },
+            {
+              "seed": 6,
+              "ea_f1": 5.0,
+              "random_f1": 13.0,
+              "delta": -8.0
+            },
+            {
+              "seed": 7,
+              "ea_f1": 26.0,
+              "random_f1": 11.0,
+              "delta": 15.0
+            },
+            {
+              "seed": 8,
+              "ea_f1": 26.0,
+              "random_f1": 15.0,
+              "delta": 11.0
+            },
+            {
+              "seed": 9,
+              "ea_f1": 9.0,
+              "random_f1": 12.0,
+              "delta": -3.0
+            },
+            {
+              "seed": 10,
+              "ea_f1": 27.0,
+              "random_f1": 12.0,
+              "delta": 15.0
+            }
+          ]
+        }
+      },
+      "families": {
+        "primary_sign_test": {
+          "family": "four model-language strata within this tier",
+          "holm": {
+            "qwen_java": {
+              "p": 0.0703125,
+              "threshold": 0.0125,
+              "reject": false
+            },
+            "qwen_python": {
+              "p": 0.1796875,
+              "threshold": 0.016666666666666666,
+              "reject": false
+            },
+            "llama_java": {
+              "p": 0.2890625,
+              "threshold": 0.025,
+              "reject": false
+            },
+            "llama_python": {
+              "p": 0.75390625,
+              "threshold": 0.05,
+              "reject": false
+            }
+          }
+        },
+        "magnitude_sensitive_sign_flip": {
+          "family": "four model-language strata within this tier",
+          "holm": {
+            "qwen_python": {
+              "p": 0.03125,
+              "threshold": 0.0125,
+              "reject": false
+            },
+            "qwen_java": {
+              "p": 0.0546875,
+              "threshold": 0.016666666666666666,
+              "reject": false
+            },
+            "llama_java": {
+              "p": 0.1640625,
+              "threshold": 0.025,
+              "reject": false
+            },
+            "llama_python": {
+              "p": 0.474609375,
+              "threshold": 0.05,
+              "reject": false
+            }
+          }
+        }
+      },
+      "n_holm_rejections_primary": 0
+    }
+  }
+}

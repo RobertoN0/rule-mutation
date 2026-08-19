@@ -1,0 +1,52 @@
+{
+  "evaluation_index": 70,
+  "chromosome_id": "5731e67389807eda",
+  "parent_id": "5da7d6ee19c3679e",
+  "move_type": "mutate",
+  "changed_rule_id": "codeguard-0-iac-security",
+  "chain": [
+    "add_random_word"
+  ],
+  "mutated_rule_ids": [
+    "codeguard-0-additional-cryptography",
+    "codeguard-0-framework-and-languages",
+    "codeguard-0-iac-security",
+    "codeguard-0-input-validation-injection",
+    "codeguard-0-logging"
+  ],
+  "order_priority": {},
+  "changes": [
+    "block 0: inserted 85 word(s)"
+  ],
+  "gene_paths": {
+    "codeguard-0-additional-cryptography": [
+      "synonym_replacement"
+    ],
+    "codeguard-0-framework-and-languages": [
+      "section_reorder_degrade"
+    ],
+    "codeguard-0-input-validation-injection": [
+      "synonym_replacement"
+    ],
+    "codeguard-0-logging": [
+      "verb_weakening"
+    ],
+    "codeguard-0-iac-security": [
+      "add_random_word"
+    ]
+  },
+  "accepted": true,
+  "validation_metadata": {
+    "codeguard-0-iac-security": {
+      "instruction_adherent": true,
+      "sbert_step": 0.9877,
+      "perplexity_ratio": null,
+      "inline_code_retention": 1.0,
+      "keyword_retention": 1.0,
+      "security_intent_preserved": true,
+      "passes_all": true,
+      "changed": true,
+      "sbert_cum": 0.9877
+    }
+  }
+}

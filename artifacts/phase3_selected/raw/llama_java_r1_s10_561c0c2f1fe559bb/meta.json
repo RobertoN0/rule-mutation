@@ -1,0 +1,60 @@
+{
+  "evaluation_index": 89,
+  "chromosome_id": "561c0c2f1fe559bb",
+  "parent_id": "92010e360060480e",
+  "move_type": "mutate",
+  "changed_rule_id": "codeguard-1-crypto-algorithms",
+  "chain": [
+    "add_random_word"
+  ],
+  "mutated_rule_ids": [
+    "codeguard-0-authentication-mfa",
+    "codeguard-0-devops-ci-cd-containers",
+    "codeguard-0-file-handling-and-uploads",
+    "codeguard-0-input-validation-injection",
+    "codeguard-0-xml-and-serialization",
+    "codeguard-1-crypto-algorithms"
+  ],
+  "order_priority": {
+    "codeguard-0-framework-and-languages": -1
+  },
+  "changes": [
+    "block 0: inserted 59 word(s)",
+    "block 2: inserted 1 word(s)"
+  ],
+  "gene_paths": {
+    "codeguard-0-file-handling-and-uploads": [
+      "paraphrase"
+    ],
+    "codeguard-0-input-validation-injection": [
+      "verb_weakening",
+      "section_reorder_degrade"
+    ],
+    "codeguard-0-xml-and-serialization": [
+      "section_reorder_degrade"
+    ],
+    "codeguard-0-devops-ci-cd-containers": [
+      "negation_injection"
+    ],
+    "codeguard-0-authentication-mfa": [
+      "section_reorder_degrade"
+    ],
+    "codeguard-1-crypto-algorithms": [
+      "add_random_word"
+    ]
+  },
+  "accepted": true,
+  "validation_metadata": {
+    "codeguard-1-crypto-algorithms": {
+      "instruction_adherent": true,
+      "sbert_step": 0.9929,
+      "perplexity_ratio": null,
+      "inline_code_retention": 1.0,
+      "keyword_retention": 1.0,
+      "security_intent_preserved": true,
+      "passes_all": true,
+      "changed": true,
+      "sbert_cum": 0.9929
+    }
+  }
+}

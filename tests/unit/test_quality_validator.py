@@ -1,7 +1,6 @@
 """Topic C — MutationQualityValidator unit tests (C-C1 to C-C10).
 
-Validates all 5 quality criteria, the passes_all gate, retry logic for
-deterministic vs stochastic mutators, and metadata flow.
+Validates the recorded, non-gating quality measurements and metadata flow.
 """
 
 from unittest.mock import MagicMock, patch
@@ -32,18 +31,16 @@ def _make_result(
     )
 
 
-def _validator(use_sbert: bool = False, use_perplexity: bool = False, **kw) -> MutationQualityValidator:
-    """Validator with SBERT and perplexity disabled by default (fast tests)."""
-    return MutationQualityValidator(use_sbert=use_sbert, use_perplexity=use_perplexity, **kw)
+def _validator(use_sbert: bool = False, **kw) -> MutationQualityValidator:
+    """Validator with SBERT disabled by default (fast tests)."""
+    return MutationQualityValidator(use_sbert=use_sbert, **kw)
 
 
 EXPECTED_QUALITY_KEYS = {
     "instruction_adherent",
     "sbert_step",
-    "perplexity_ratio",
     "inline_code_retention", "keyword_retention",
-    "security_intent_preserved",
-    "passes_all", "changed",
+    "changed",
 }
 
 
@@ -118,16 +115,14 @@ class TestInstructionAdherence:
 class TestSBERTSimilarity:
 
     def test_sbert_disabled(self):
-        """C-C3: with use_sbert=False, sbert_step is None and doesn't gate."""
+        """C-C3: with use_sbert=False, sbert_step is None."""
         v = _validator(use_sbert=False)
         result = v.validate(_make_result())
         quality = result.metadata["quality"]
         assert quality["sbert_step"] is None
-        # Should still pass (None doesn't gate)
-        assert quality["passes_all"] is True
 
     def test_sbert_pass(self):
-        """C-C3: mocked SBERT returning 0.90 → passes threshold (0.75)."""
+        """C-C3: mocked SBERT returning 0.90 is recorded unchanged."""
         v = _validator(use_sbert=True)
         mock_sbert = MagicMock()
         import numpy as np
@@ -140,10 +135,9 @@ class TestSBERTSimilarity:
 
         quality = result.metadata["quality"]
         assert quality["sbert_step"] == 0.90
-        assert quality["passes_all"] is True
 
     def test_sbert_fail(self):
-        """C-C3: mocked SBERT returning 0.70 → fails threshold (0.75)."""
+        """C-C3: mocked SBERT returning 0.70 is recorded without classification."""
         v = _validator(use_sbert=True)
 
         with patch.object(v, "_compute_sbert_similarity", return_value=0.70):
@@ -151,40 +145,6 @@ class TestSBERTSimilarity:
 
         quality = result.metadata["quality"]
         assert quality["sbert_step"] == 0.70
-        assert quality["passes_all"] is False
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# C-C4  Criterion 3 — Perplexity ratio
-# ═══════════════════════════════════════════════════════════════════════════════
-
-class TestPerplexity:
-
-    def test_perplexity_disabled(self):
-        """C-C4: with use_perplexity=False, perplexity_ratio is None."""
-        v = _validator(use_perplexity=False)
-        result = v.validate(_make_result())
-        assert result.metadata["quality"]["perplexity_ratio"] is None
-
-    def test_perplexity_pass(self):
-        """C-C4: mocked perplexity ratio 1.5 → passes threshold (2.0)."""
-        v = _validator(use_perplexity=True)
-
-        with patch.object(v, "_compute_perplexity_ratio", return_value=1.5):
-            result = v.validate(_make_result())
-
-        assert result.metadata["quality"]["perplexity_ratio"] == 1.5
-        assert result.metadata["quality"]["passes_all"] is True
-
-    def test_perplexity_fail(self):
-        """C-C4: mocked perplexity ratio 3.0 → fails threshold (2.0)."""
-        v = _validator(use_perplexity=True)
-
-        with patch.object(v, "_compute_perplexity_ratio", return_value=3.0):
-            result = v.validate(_make_result())
-
-        assert result.metadata["quality"]["perplexity_ratio"] == 3.0
-        assert result.metadata["quality"]["passes_all"] is False
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -201,22 +161,21 @@ class TestSecurityPreservation:
         assert result.metadata["quality"]["inline_code_retention"] == 1.0
 
     def test_inline_code_dropped(self):
-        """C-C5: removing inline code → retention < 1.0 → fails."""
+        """C-C5: removing inline code records retention below 1.0."""
         v = _validator()
         mutated = SAMPLE_RULE_TEXT.replace("`PreparedStatement`", "PreparedStatement")
         result = v.validate(_make_result(mutated=mutated))
         quality = result.metadata["quality"]
         assert quality["inline_code_retention"] < 1.0
-        assert quality["passes_all"] is False
 
     def test_keyword_retention_high(self):
-        """Keywords mostly preserved → retention ≥ 0.70."""
+        """Keywords mostly preserved produce a high retention fraction."""
         v = _validator()
         result = v.validate(_make_result())
         assert result.metadata["quality"]["keyword_retention"] >= 0.70
 
     def test_keyword_retention_low(self):
-        """C-C5: dropping security keywords below threshold → fails."""
+        """C-C5: dropping security keywords records a low retention fraction."""
         v = _validator()
         # Strip 8 words; 'side' is no longer in the hardcoded lexicon so only 7
         # of the 8 affect the score: 7/18 present → retention ≈ 0.61 < 0.70.
@@ -229,8 +188,6 @@ class TestSecurityPreservation:
         result = v.validate(_make_result(mutated=stripped))
         quality = result.metadata["quality"]
         assert quality["keyword_retention"] < 0.70
-        assert quality["security_intent_preserved"] is False
-        assert quality["passes_all"] is False
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -238,27 +195,6 @@ class TestSecurityPreservation:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # (No tests — the readability criterion was removed from the validator on 2026-06-11.)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# C-C7  passes_all gate aggregation
-# ═══════════════════════════════════════════════════════════════════════════════
-
-class TestPassesAll:
-
-    def test_all_criteria_pass(self):
-        """C-C7: all criteria green → passes_all True."""
-        v = _validator()
-        result = v.validate(_make_result())
-        assert result.metadata["quality"]["passes_all"] is True
-
-    def test_adherence_fails_blocks(self):
-        """Failing adherence alone → passes_all False."""
-        v = _validator()
-        # identity mutation → adherence fails
-        result = v.validate(_make_result(mutated=SAMPLE_RULE_TEXT, mutation_type="fluff"))
-        assert result.metadata["quality"]["instruction_adherent"] is False
-        assert result.metadata["quality"]["passes_all"] is False
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -277,6 +213,6 @@ class TestMetadataFlow:
         assert "quality" in result.metadata
         quality = result.metadata["quality"]
         assert isinstance(quality, dict)
-        assert "passes_all" in quality
+        assert "instruction_adherent" in quality
         assert "sbert_step" in quality
         assert "mutation_type" not in quality

@@ -36,7 +36,6 @@ IDENTITY_ARGUMENT_FIELDS = (
     "random_max_changes",
     "order_move_weight",
     "enable_validation",
-    "enable_perplexity",
     "semgrep_version",
     "semgrep_timeout_seconds",
     "semgrep_jobs",

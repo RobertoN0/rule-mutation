@@ -1,0 +1,225 @@
+{
+  "artifact_type": "phase3_ordered_maps_topk",
+  "maps": [
+    {
+      "stratum": "llama_java",
+      "rank": 1,
+      "seed": 10,
+      "cid": "561c0c2f1fe559bb",
+      "path": "/home/rnegro/analysis/phase3_maps_topk/map_llama_java_r1_s10_561c0c2f1fe559bb.json",
+      "n_prompts": 126,
+      "prompts_reordered": 80,
+      "override_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s10_ea/job10568898_ea_java_s10_0804/mutated_rules/evaluation_0089",
+      "f1": 13.0
+    },
+    {
+      "stratum": "llama_java",
+      "rank": 2,
+      "seed": 9,
+      "cid": "fe7cf23a8e0f8bf8",
+      "path": "/home/rnegro/analysis/phase3_maps_topk/map_llama_java_r2_s9_fe7cf23a8e0f8bf8.json",
+      "n_prompts": 126,
+      "prompts_reordered": 0,
+      "override_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s9_ea/job10560330_ea_java_s9_0803/mutated_rules/evaluation_0092",
+      "f1": 12.0
+    },
+    {
+      "stratum": "llama_java",
+      "rank": 3,
+      "seed": 5,
+      "cid": "5b524d6c1e1cbcb2",
+      "path": "/home/rnegro/analysis/phase3_maps_topk/map_llama_java_r3_s5_5b524d6c1e1cbcb2.json",
+      "n_prompts": 126,
+      "prompts_reordered": 0,
+      "override_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s5_ea/job10533388_ea_java_s5_0730/mutated_rules/evaluation_0123",
+      "f1": 12.0
+    },
+    {
+      "stratum": "llama_java",
+      "rank": 4,
+      "seed": 4,
+      "cid": "2309988fbe1ba1d8",
+      "path": "/home/rnegro/analysis/phase3_maps_topk/map_llama_java_r4_s4_2309988fbe1ba1d8.json",
+      "n_prompts": 126,
+      "prompts_reordered": 4,
+      "override_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s4_ea/job10533384_ea_java_s4_0729/mutated_rules/evaluation_0109",
+      "f1": 12.0
+    },
+    {
+      "stratum": "llama_java",
+      "rank": 5,
+      "seed": 1,
+      "cid": "43b2d3607d7c1f6b",
+      "path": "/home/rnegro/analysis/phase3_maps_topk/map_llama_java_r5_s1_43b2d3607d7c1f6b.json",
+      "n_prompts": 126,
+      "prompts_reordered": 20,
+      "override_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_java_s1_ea/job10533372_ea_java_s1_0728/mutated_rules/evaluation_0118",
+      "f1": 11.0
+    },
+    {
+      "stratum": "llama_python",
+      "rank": 1,
+      "seed": 2,
+      "cid": "5731e67389807eda",
+      "path": "/home/rnegro/analysis/phase3_maps_topk/map_llama_python_r1_s2_5731e67389807eda.json",
+      "n_prompts": 203,
+      "prompts_reordered": 0,
+      "override_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s2_ea/job10533374_ea_python_s2_0728/mutated_rules/evaluation_0070",
+      "f1": 32.0
+    },
+    {
+      "stratum": "llama_python",
+      "rank": 2,
+      "seed": 7,
+      "cid": "b7a0e6568ce947e6",
+      "path": "/home/rnegro/analysis/phase3_maps_topk/map_llama_python_r2_s7_b7a0e6568ce947e6.json",
+      "n_prompts": 203,
+      "prompts_reordered": 7,
+      "override_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s7_ea/job10560320_ea_python_s7_0802/mutated_rules/evaluation_0096",
+      "f1": 32.0
+    },
+    {
+      "stratum": "llama_python",
+      "rank": 3,
+      "seed": 9,
+      "cid": "3517cec12bac0d78",
+      "path": "/home/rnegro/analysis/phase3_maps_topk/map_llama_python_r3_s9_3517cec12bac0d78.json",
+      "n_prompts": 203,
+      "prompts_reordered": 1,
+      "override_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s9_ea/job10560328_ea_python_s9_0803/mutated_rules/evaluation_0071",
+      "f1": 28.0
+    },
+    {
+      "stratum": "llama_python",
+      "rank": 4,
+      "seed": 10,
+      "cid": "411b2a009c2a41ef",
+      "path": "/home/rnegro/analysis/phase3_maps_topk/map_llama_python_r4_s10_411b2a009c2a41ef.json",
+      "n_prompts": 203,
+      "prompts_reordered": 75,
+      "override_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s10_ea/job10568896_ea_python_s10_0804/mutated_rules/evaluation_0079",
+      "f1": 26.0
+    },
+    {
+      "stratum": "llama_python",
+      "rank": 5,
+      "seed": 4,
+      "cid": "04c4685c91254df7",
+      "path": "/home/rnegro/analysis/phase3_maps_topk/map_llama_python_r5_s4_04c4685c91254df7.json",
+      "n_prompts": 203,
+      "prompts_reordered": 1,
+      "override_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/llama/arms/llama_python_s4_ea/job10533382_ea_python_s4_0729/mutated_rules/evaluation_0076",
+      "f1": 24.0
+    },
+    {
+      "stratum": "qwen_java",
+      "rank": 1,
+      "seed": 5,
+      "cid": "b3e4754e40a57478",
+      "path": "/home/rnegro/analysis/phase3_maps_topk/map_qwen_java_r1_s5_b3e4754e40a57478.json",
+      "n_prompts": 126,
+      "prompts_reordered": 86,
+      "override_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s5_ea/job10528081_ea_java_s5_0730/mutated_rules/evaluation_0344",
+      "f1": 11.0
+    },
+    {
+      "stratum": "qwen_java",
+      "rank": 2,
+      "seed": 8,
+      "cid": "2dbec79abbbcb98c",
+      "path": "/home/rnegro/analysis/phase3_maps_topk/map_qwen_java_r2_s8_2dbec79abbbcb98c.json",
+      "n_prompts": 126,
+      "prompts_reordered": 33,
+      "override_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s8_ea/job10552904_ea_java_s8_0801/mutated_rules/evaluation_0388",
+      "f1": 11.0
+    },
+    {
+      "stratum": "qwen_java",
+      "rank": 3,
+      "seed": 9,
+      "cid": "d3dd6fd8464d03ab",
+      "path": "/home/rnegro/analysis/phase3_maps_topk/map_qwen_java_r3_s9_d3dd6fd8464d03ab.json",
+      "n_prompts": 126,
+      "prompts_reordered": 19,
+      "override_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s9_ea/job10552908_ea_java_s9_0801/mutated_rules/evaluation_0327",
+      "f1": 11.0
+    },
+    {
+      "stratum": "qwen_java",
+      "rank": 4,
+      "seed": 4,
+      "cid": "37aa0e246f365696",
+      "path": "/home/rnegro/analysis/phase3_maps_topk/map_qwen_java_r4_s4_37aa0e246f365696.json",
+      "n_prompts": 126,
+      "prompts_reordered": 17,
+      "override_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s4_ea/job10527812_ea_java_s4_0729/mutated_rules/evaluation_0363",
+      "f1": 11.0
+    },
+    {
+      "stratum": "qwen_java",
+      "rank": 5,
+      "seed": 7,
+      "cid": "24af1719ec07ac4a",
+      "path": "/home/rnegro/analysis/phase3_maps_topk/map_qwen_java_r5_s7_24af1719ec07ac4a.json",
+      "n_prompts": 126,
+      "prompts_reordered": 79,
+      "override_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_java_s7_ea/job10552900_ea_java_s7_0731/mutated_rules/evaluation_0372",
+      "f1": 10.0
+    },
+    {
+      "stratum": "qwen_python",
+      "rank": 1,
+      "seed": 7,
+      "cid": "f953f53a0b830443",
+      "path": "/home/rnegro/analysis/phase3_maps_topk/map_qwen_python_r1_s7_f953f53a0b830443.json",
+      "n_prompts": 203,
+      "prompts_reordered": 37,
+      "override_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s7_ea/job10552898_ea_python_s7_0731/mutated_rules/evaluation_0200",
+      "f1": 28.0
+    },
+    {
+      "stratum": "qwen_python",
+      "rank": 2,
+      "seed": 6,
+      "cid": "2004e6c4cf882fd0",
+      "path": "/home/rnegro/analysis/phase3_maps_topk/map_qwen_python_r2_s6_2004e6c4cf882fd0.json",
+      "n_prompts": 203,
+      "prompts_reordered": 95,
+      "override_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s6_ea/job10552894_ea_python_s6_0731/mutated_rules/evaluation_0191",
+      "f1": 27.0
+    },
+    {
+      "stratum": "qwen_python",
+      "rank": 3,
+      "seed": 10,
+      "cid": "dec458eaa24be405",
+      "path": "/home/rnegro/analysis/phase3_maps_topk/map_qwen_python_r3_s10_dec458eaa24be405.json",
+      "n_prompts": 203,
+      "prompts_reordered": 25,
+      "override_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s10_ea/job10552926_ea_python_s10_0802/mutated_rules/evaluation_0149",
+      "f1": 27.0
+    },
+    {
+      "stratum": "qwen_python",
+      "rank": 4,
+      "seed": 9,
+      "cid": "9da1559918698f0d",
+      "path": "/home/rnegro/analysis/phase3_maps_topk/map_qwen_python_r4_s9_9da1559918698f0d.json",
+      "n_prompts": 203,
+      "prompts_reordered": 74,
+      "override_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s9_ea/job10552906_ea_python_s9_0801/mutated_rules/evaluation_0222",
+      "f1": 27.0
+    },
+    {
+      "stratum": "qwen_python",
+      "rank": 5,
+      "seed": 8,
+      "cid": "b7b79cc4bd6de2e5",
+      "path": "/home/rnegro/analysis/phase3_maps_topk/map_qwen_python_r5_s8_b7b79cc4bd6de2e5.json",
+      "n_prompts": 203,
+      "prompts_reordered": 94,
+      "override_dir": "/home/rnegro/thesis/rule-mutation/experiments/03_search_runs/qwen/arms/qwen_python_s8_ea/job10552902_ea_python_s8_0801/mutated_rules/evaluation_0250",
+      "f1": 26.0
+    }
+  ]
+}

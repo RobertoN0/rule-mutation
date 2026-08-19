@@ -414,15 +414,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "objective is the validator's SBERT similarity."
         ),
     )
-    parser.add_argument(
-        "--enable-perplexity",
-        action="store_true",
-        help=(
-            "Add perplexity-ratio gate to the quality validator (ratio ≤ 2.5). "
-            "Requires --enable-validation. Reuses the already-loaded generation "
-            "model — no second model is loaded. No-op when --backend is not delftblue."
-        ),
-    )
     # ----- evaluation / Semgrep -------------------------------------------------
     parser.add_argument(
         "--no-eval-cache",
@@ -807,27 +798,10 @@ def create_validator(args: argparse.Namespace, backend) -> MutationQualityValida
     """Create the quality validator when enabled (SBERT + structural criteria)."""
     if not args.enable_validation:
         return None
-    use_ppl = args.enable_perplexity and args.backend == "delftblue" and not args.dry_run
-    ppl_model_handle = None
-    ppl_tokenizer_handle = None
-    if use_ppl:
-        print("\n🔬 Setting up MutationQualityValidator (perplexity gate ON)")
-        print("   Force-loading generation model for perplexity scoring …")
-        ppl_model_handle = backend._load_model()  # type: ignore[attr-defined]
-        ppl_tokenizer_handle = backend._load_tokenizer()  # type: ignore[attr-defined]
-        print(f"   Generation model loaded: {type(ppl_model_handle).__name__}")
-    else:
-        print("\n🔬 Setting up MutationQualityValidator")
+    print("\n🔬 Setting up MutationQualityValidator")
     print("   SBERT semantic similarity (all-mpnet-base-v2, threshold=0.75)")
     print("   Structural criteria: inline code retention + security keyword retention")
-    if use_ppl:
-        print("   Perplexity ratio (threshold=2.5, model=32B shared)")
-    return MutationQualityValidator(
-        use_sbert=True,
-        use_perplexity=use_ppl,
-        ppl_model_handle=ppl_model_handle,
-        ppl_tokenizer_handle=ppl_tokenizer_handle,
-    )
+    return MutationQualityValidator(use_sbert=True)
 
 
 def build_search_config(args: argparse.Namespace) -> SearchConfig:
@@ -1069,7 +1043,6 @@ def save_run_config(
             "ea_injection_every":     args.ea_injection_every,
             "order_move_weight":      args.order_move_weight,
             "enable_validation":      args.enable_validation,
-            "enable_perplexity":      args.enable_perplexity,
             "enable_eval_cache":      not args.no_eval_cache,
             "semgrep_config":         str(semgrep_config["rule_config"]),
             "semgrep_timeout_seconds": semgrep_config["subprocess_timeout_seconds"],

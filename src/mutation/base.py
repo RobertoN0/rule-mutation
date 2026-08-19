@@ -60,7 +60,8 @@ class Mutator(ABC):
     """Abstract base class for mutation operators.
     
     Mutation operators transform security rule text to test robustness.
-    They should preserve the semantic intent while varying the surface form.
+    Individual operators may preserve, perturb, or deliberately weaken security
+    intent. Their declared structural safe zones must always remain unchanged.
     
     Example:
         mutator = SynonymReplacementMutator(seed=42)

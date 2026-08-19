@@ -114,8 +114,6 @@ def _build_api_command(args: dict, output_dir: str) -> list[str]:
     ]
     if args.get("enable_validation"):
         cmd += ["--enable-validation"]
-        if args.get("enable_perplexity"):
-            cmd += ["--enable-perplexity"]
     if not args.get("enable_eval_cache", True):
         cmd += ["--no-eval-cache"]
     if args.get("allow_unqualified_map"):
@@ -178,7 +176,6 @@ def _build_slurm_env(args: dict) -> dict[str, str]:
         "ORDER_MOVE_WEIGHT": str(args.get("order_move_weight", 0.1)),
         "MUTATORS": " ".join(str(x) for x in args["mutators"]),
         "ENABLE_VALIDATION": "1" if args.get("enable_validation") else "0",
-        "ENABLE_PERPLEXITY": "1" if args.get("enable_perplexity") else "0",
         "ENABLE_EVAL_CACHE": "1" if args.get("enable_eval_cache", True) else "0",
         "SEMGREP_RULESET": str(args["semgrep_config"]),
         "SEMGREP_TIMEOUT_SECONDS": str(args["semgrep_timeout_seconds"]),

@@ -51,7 +51,6 @@ These counts are separated from code-generation usage in `search_summary.json`.
 
 - operator-specific instruction adherence;
 - SBERT similarity to the parent and to the original rule;
-- optional perplexity ratio;
 - inline-code and security-keyword retention.
 
 The measurements do not reject a candidate. SBERT similarity supplies f2, so

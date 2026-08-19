@@ -1,0 +1,85 @@
+{
+  "evaluation_index": 96,
+  "chromosome_id": "b7a0e6568ce947e6",
+  "parent_id": "e5a67340bbca2dda",
+  "move_type": "mutate",
+  "changed_rule_id": "codeguard-0-file-handling-and-uploads",
+  "chain": [
+    "section_reorder_degrade"
+  ],
+  "mutated_rule_ids": [
+    "codeguard-0-authentication-mfa",
+    "codeguard-0-authorization-access-control",
+    "codeguard-0-file-handling-and-uploads",
+    "codeguard-0-framework-and-languages",
+    "codeguard-0-iac-security",
+    "codeguard-0-input-validation-injection",
+    "codeguard-0-logging",
+    "codeguard-0-mobile-apps",
+    "codeguard-0-privacy-data-protection",
+    "codeguard-0-safe-c-functions",
+    "codeguard-0-supply-chain-security",
+    "codeguard-1-digital-certificates"
+  ],
+  "order_priority": {
+    "codeguard-0-authorization-access-control": 1
+  },
+  "changes": [
+    "paragraph-fallback degrade: [' rule_id: codeguard-0-file-handling-and-', 'This rule advises on secure file upload ', '- Extension Validation   - List allowed ', '- Content Type and File Signature Valida', '- Filename Security   - Generate random ', '- File Content Validation   - For images', '- Storage Security   - Store files on di', '- Access Control and Authentication   - ', '- Upload and Download Limits   - Set pro', '- Additional Security Measures   - Prote', 'Summary:   Implement defense-in-depth fo'] \u2192 [' rule_id: codeguard-0-file-handling-and-', 'This rule advises on secure file upload ', '- Extension Validation   - List allowed ', '- Content Type and File Signature Valida', '- File Content Validation   - For images', '- Storage Security   - Store files on di', '- Access Control and Authentication   - ', '- Upload and Download Limits   - Set pro', '- Additional Security Measures   - Prote', 'Summary:   Implement defense-in-depth fo', '- Filename Security   - Generate random ']"
+  ],
+  "gene_paths": {
+    "codeguard-0-authentication-mfa": [
+      "paraphrase",
+      "synonym_replacement"
+    ],
+    "codeguard-0-authorization-access-control": [
+      "section_reorder_shuffle"
+    ],
+    "codeguard-0-framework-and-languages": [
+      "section_reorder_degrade"
+    ],
+    "codeguard-0-iac-security": [
+      "section_reorder_degrade"
+    ],
+    "codeguard-0-input-validation-injection": [
+      "verb_weakening",
+      "section_reorder_shuffle"
+    ],
+    "codeguard-0-logging": [
+      "section_reorder_degrade"
+    ],
+    "codeguard-0-mobile-apps": [
+      "paraphrase",
+      "voice_change"
+    ],
+    "codeguard-0-privacy-data-protection": [
+      "synonym_replacement"
+    ],
+    "codeguard-0-safe-c-functions": [
+      "add_random_word"
+    ],
+    "codeguard-0-supply-chain-security": [
+      "synonym_replacement"
+    ],
+    "codeguard-1-digital-certificates": [
+      "section_reorder_degrade"
+    ],
+    "codeguard-0-file-handling-and-uploads": [
+      "section_reorder_degrade"
+    ]
+  },
+  "accepted": true,
+  "validation_metadata": {
+    "codeguard-0-file-handling-and-uploads": {
+      "instruction_adherent": true,
+      "sbert_step": 0.9876,
+      "perplexity_ratio": null,
+      "inline_code_retention": 1.0,
+      "keyword_retention": 1.0,
+      "security_intent_preserved": true,
+      "passes_all": true,
+      "changed": true,
+      "sbert_cum": 0.9876
+    }
+  }
+}
