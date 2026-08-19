@@ -30,7 +30,6 @@ def _recorded_args() -> dict:
         "order_move_weight": 0.1,
         "initialization_bundle": None,
         "enable_validation": True,
-        "enable_perplexity": False,
         "enable_eval_cache": True,
         "semgrep_config": "p/security-audit",
         "semgrep_timeout_seconds": 180,

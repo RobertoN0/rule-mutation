@@ -93,7 +93,6 @@ SEMGREP_JOBS=${SEMGREP_JOBS:-4}
 MUTATORS=${MUTATORS:-"synonym_replacement add_random_word verb_weakening negation_injection voice_change paraphrase section_reorder_shuffle section_reorder_degrade"}
 # Validation default ON: the f2 rule-fidelity objective is SBERT-based.
 ENABLE_VALIDATION=${ENABLE_VALIDATION:-1}
-ENABLE_PERPLEXITY=${ENABLE_PERPLEXITY:-0}
 ENABLE_EVAL_CACHE=${ENABLE_EVAL_CACHE:-1}
 # Optimization direction: "minimize" (REPAIR: fewer vulns, default) | "maximize".
 OBJECTIVE_DIRECTION=${OBJECTIVE_DIRECTION:-minimize}
@@ -155,7 +154,6 @@ echo "  Semgrep timeout: ${SEMGREP_TIMEOUT_SECONDS}s"
 echo "  Semgrep jobs:    $SEMGREP_JOBS"
 echo "  Mutators:        $MUTATORS"
 echo "  Validation:      $ENABLE_VALIDATION (1=enabled)"
-echo "  Perplexity gate: $ENABLE_PERPLEXITY (1=enabled; requires ENABLE_VALIDATION=1)"
 echo "  Eval cache:      $ENABLE_EVAL_CACHE (0=disabled)"
 echo "  Init bundle:     ${INITIALIZATION_BUNDLE:-none}"
 echo "  Time budget:     ${TIME_BUDGET_SECONDS:-not declared} seconds"
@@ -235,13 +233,10 @@ if [ "$N_CASES" != "all" ]; then
     CASE_ARG="--n-cases $N_CASES"
 fi
 
-# Build optional validation flag (and optional perplexity extension)
+# Build optional validation flag
 VALIDATION_FLAG=""
 if [ "$ENABLE_VALIDATION" = "1" ]; then
     VALIDATION_FLAG="--enable-validation"
-    if [ "$ENABLE_PERPLEXITY" = "1" ]; then
-        VALIDATION_FLAG="$VALIDATION_FLAG --enable-perplexity"
-    fi
 fi
 
 # Build optional no-eval-cache flag (cache is ON by default; set ENABLE_EVAL_CACHE=0 to disable)

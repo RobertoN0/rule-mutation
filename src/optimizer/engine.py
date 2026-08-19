@@ -492,37 +492,14 @@ class ExperimentEngine:
         )
 
     def _log_validation(self, rule_id: str | None, chain_names: list[str], meta: dict) -> None:
-        """Compact quality-validation log line (B3): passes_all + failure reason."""
+        """Log the non-gating quality measurements for one mutation."""
         if not self.config.verbose or not meta:
             return
-        v = self.validator
-        passes = meta.get("passes_all")
-        if passes is False:
-            sbert = meta.get("sbert_step")
-            ppl = meta.get("perplexity_ratio")
-            ic = meta.get("inline_code_retention", 1.0)
-            kw = meta.get("keyword_retention", 1.0)
-            if not meta.get("instruction_adherent", True):
-                reason = "instruction_adherent=False"
-            elif sbert is not None and v is not None and sbert < v.sbert_threshold:
-                reason = f"sbert_step<thr ({sbert:.2f}<{v.sbert_threshold:.2f})"
-            elif ppl is not None and v is not None and ppl > v.perplexity_threshold:
-                reason = f"perplexity>thr ({ppl:.2f}>{v.perplexity_threshold:.2f})"
-            elif ic < 1.0:
-                reason = f"inline_code_retention<1.0 ({ic:.2f})"
-            elif v is not None and kw < v.keyword_threshold:
-                reason = f"keyword_retention<thr ({kw:.2f}<{v.keyword_threshold:.2f})"
-            else:
-                reason = "unknown"
-        else:
-            reason = "passed"
         rule_short = (rule_id or "?").replace("codeguard-", "cg-")
         self._log(
             f"   Validation [rule={rule_short}, mut={'+'.join(chain_names) or '?'}]: "
-            f"passes_all={passes} REASON={reason} | "
             f"adherent={meta.get('instruction_adherent')} "
             f"sbert_step={meta.get('sbert_step')} sbert_cum={meta.get('sbert_cum')} "
-            f"ppl={meta.get('perplexity_ratio')} "
             f"inline_code={meta.get('inline_code_retention')} "
             f"keywords={meta.get('keyword_retention')}"
         )

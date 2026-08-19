@@ -169,14 +169,10 @@ def test_ea_saves_every_evaluated_iter_and_identity_keeps_cid(tmp_path: Path):
 
 class _StubValidator:
     """Minimal MutationQualityValidator stand-in (no SBERT model load)."""
-    sbert_threshold = 0.75
-    perplexity_threshold = 2.5
-    keyword_threshold = 0.9
-
     def validate(self, mr):
         mr.metadata["quality"] = {
-            "instruction_adherent": True, "sbert_step": 0.88, "perplexity_ratio": None,
-            "inline_code_retention": 1.0, "keyword_retention": 1.0, "passes_all": True,
+            "instruction_adherent": True, "sbert_step": 0.88,
+            "inline_code_retention": 1.0, "keyword_retention": 1.0,
         }
         return mr
 
@@ -216,13 +212,13 @@ def test_validation_metadata_flows_when_enabled(tmp_path: Path):
     for it in real:
         metas = it["validation_metadata"]
         assert metas, it
-        assert all(m.get("passes_all") is True for m in metas.values())
+        assert all(m.get("instruction_adherent") is True for m in metas.values())
         assert all("sbert_cum" in m for m in metas.values())
     # mutated_rules meta.json also carries it
     metas = list((tmp_path / "mutated_rules").glob("evaluation_*/meta.json"))
     assert metas
     assert any(
-        any(g.get("passes_all") is True
+        any(g.get("instruction_adherent") is True
             for g in json.loads(m.read_text()).get("validation_metadata", {}).values())
         for m in metas
     )
