@@ -1,8 +1,13 @@
 # RQ2 safe-zone specification sensitivity
 
-Unit: one EA/random pair matched by search seed and initialization bundle.
+> **Statistical procedure updated.** The lens data, medians, and intervals in
+> this file remain current. Its exact sign tests are superseded provenance. The
+> submitted thesis uses exact Wilcoxon signed-rank p-values, A12, and
+> lens-specific Holm decisions from `rq_wilcoxon_effect_sizes.json`.
+
+Unit: one EA/random pair matched by search seed and initialisation bundle.
 Outcome: best raw Semgrep-finding reduction (`f1`) observed in 24 hours.
-Primary test within each tier: exact two-sided paired sign test; ties are
+Historical test within each tier: exact two-sided paired sign test; ties are
 excluded. Holm correction covers the four model-language strata within
 that tier. The sign-flip test is magnitude-sensitive secondary evidence.
 
@@ -25,7 +30,7 @@ that tier. The sign-flip test is magnitude-sensitive secondary evidence.
 | qwen_java | 4.0 [3.0, 5.0] | 1.000 | 10 / 0 / 0 | 0.00195 | 0.0125 | YES |
 | qwen_python | 11.5 [8.0, 14.5] | 1.000 | 10 / 0 / 0 | 0.00195 | 0.0167 | YES |
 
-Primary Holm rejections: **4/4**.
+Superseded sign-test Holm rejections: **4/4**.
 
 ### Core structural sensitivity
 
@@ -38,7 +43,7 @@ Primary Holm rejections: **4/4**.
 | qwen_java | 3.5 [1.0, 5.0] | 0.900 | 9 / 1 / 0 | 0.02148 | 0.0250 | YES |
 | qwen_python | 11.5 [6.5, 15.0] | 0.950 | 9 / 0 / 1 | 0.00391 | 0.0167 | YES |
 
-Primary Holm rejections: **3/4**.
+Superseded sign-test Holm rejections: **3/4**.
 
 ### Full safe-zone sensitivity
 
@@ -51,7 +56,7 @@ Primary Holm rejections: **3/4**.
 | qwen_java | 1.5 [0.0, 3.5] | 0.800 | 7 / 1 / 2 | 0.07031 | 0.0125 | no |
 | qwen_python | 10.5 [0.0, 15.0] | 0.750 | 7 / 2 / 1 | 0.17969 | 0.0167 | no |
 
-Primary Holm rejections: **0/4**.
+Superseded sign-test Holm rejections: **0/4**.
 
 ## Why the full result changes
 

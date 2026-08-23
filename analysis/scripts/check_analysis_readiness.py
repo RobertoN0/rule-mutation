@@ -76,16 +76,18 @@ def check() -> dict:
 
     rq2 = load("rq2_safe_zone_tiers.json")
     strict = load("rq2_ea_vs_random.json")
+    wilcoxon = load("rq_wilcoxon_effect_sizes.json")["rq2_ea_vs_random"]
     expected_rejections = {
         "raw_executed": 4,
-        "core_structural": 3,
+        "core_structural": 4,
         "full_contract": 0,
     }
     rq2_ok = set(rq2.get("tiers", {})) == set(expected_rejections)
     for tier, expected in expected_rejections.items():
         result = rq2["tiers"][tier]
         rq2_ok = rq2_ok and set(result["strata"]) == EXPECTED_STRATA
-        rq2_ok = rq2_ok and result["n_holm_rejections_primary"] == expected
+        rq2_ok = rq2_ok and wilcoxon[tier]["n_holm_rejections"] == expected
+        rq2_ok = rq2_ok and set(wilcoxon[tier]["strata"]) == EXPECTED_STRATA
         rq2_ok = rq2_ok and all(
             row["n_pairs"] == 10 for row in result["strata"].values()
         )
@@ -100,7 +102,7 @@ def check() -> dict:
         gate(
             "RQ2 three-lens result",
             rq2_ok,
-            "four strata x ten matched pairs; primary Holm rejections 4/3/0",
+            "four strata x ten matched pairs; exact-Wilcoxon Holm rejections 4/4/0",
         )
     )
 
@@ -148,7 +150,7 @@ def check() -> dict:
     )
     gates.append(
         gate(
-            "sanitized T=0 validation",
+            "sanitised T=0 validation",
             t0_ok,
             "12/12 positive; repair delta range -4 to +1 findings",
         )
@@ -163,49 +165,33 @@ def check() -> dict:
     selection_ok = len(selected) == 20
     gates.append(gate("RQ4 candidate selection", selection_ok, "20 selected candidates"))
 
-    rq4 = load("rq4_phase3_safe_comparison.json")
-    runs = rq4.get("runs", {})
-    pending = rq4.get("pending", [])
-    multiplicity = rq4.get("multiplicity", {})
-    complete_n = multiplicity.get("n_complete_tests")
+    rq4 = load("rq5_three_way_baseline_comparison.json")
+    runs = rq4.get("layer2_candidate_vs_authored", {})
+    multiplicity = rq4.get("multiplicity", {}).get("results", {}).get(
+        "layer2_candidate_vs_authored", {}
+    )
+    complete_n = len(runs)
     rq4_structural_ok = (
-        len(runs) == 20
-        and multiplicity.get("n_planned_tests") == 20
-        and complete_n
-        == sum(row.get("n_seeds") == 20 for row in runs.values())
-        and all(
-            isinstance(row.get("n_seeds"), int)
-            and 0 <= row["n_seeds"] <= 20
-            for row in runs.values()
-        )
+        complete_n == 20
+        and all(row.get("n_seeds") == 20 for row in runs.values())
+        and len(rq4.get("common_task_counts", {})) == 4
+        and rq4.get("decomposition_check", {}).get("pass") is True
+        and rq4.get("decomposition_check", {}).get("n_checked") == 400
+        and not rq4.get("problems")
     )
-    if complete_n == 20:
-        rq4_decision_ok = (
-            multiplicity.get("family_complete") is True
-            and not pending
-            and len(multiplicity.get("holm", {})) == 20
-        )
-        rq4_detail = "20/20 complete; final global Holm family present"
-    else:
-        rq4_decision_ok = (
-            multiplicity.get("family_complete") is False
-            and not multiplicity.get("holm")
-            and len(pending) == 20 - complete_n
-        )
-        rq4_detail = (
-            f"{complete_n}/20 complete; {len(pending)} pending; Holm correctly withheld"
-        )
+    rq4_decision_ok = (
+        multiplicity.get("n_tests") == 20
+        and multiplicity.get("n_planned") == 20
+        and multiplicity.get("family_complete") is True
+        and multiplicity.get("n_raw_p_below_05") == 7
+        and multiplicity.get("n_reject") == 0
+        and len(multiplicity.get("holm", {})) == 20
+    )
+    rq4_detail = "20/20 shared-task-set comparisons; 7 nominal, 0 Holm rejections"
     gates.append(
         gate(
-            "RQ4 artifact consistency",
+            "RQ4 final shared-task-set artifact",
             rq4_structural_ok and rq4_decision_ok,
-            rq4_detail,
-        )
-    )
-    gates.append(
-        gate(
-            "RQ4 final publication gate",
-            complete_n == 20 and rq4_decision_ok,
             rq4_detail,
         )
     )
@@ -214,6 +200,7 @@ def check() -> dict:
         "fig1_rq1_magnitude",
         "fig2_rq2_safe_zone_tiers",
         "fig4_rq3_operators_effectiveness",
+        "fig7_rq4_survival",
     ]
     figure_ok = all(
         (FIGURES / f"{name}.{ext}").is_file()
@@ -223,13 +210,13 @@ def check() -> dict:
     )
     gates.append(
         gate(
-            "frozen RQ1-RQ3 figures",
+            "frozen thesis-result figures",
             figure_ok,
-            "PNG/PDF pairs exist for the preferred RQ1, RQ2, and RQ3 figures",
+            "PNG/PDF pairs exist for the RQ1-RQ4 figures used by the thesis",
         )
     )
 
-    required_ready = all(g["passed"] for g in gates if g["name"] != "RQ4 final publication gate")
+    required_ready = all(g["passed"] for g in gates)
     final_ready = all(g["passed"] for g in gates)
     return {
         "artifact_type": "analysis_readiness_audit",
@@ -242,16 +229,16 @@ def check() -> dict:
                 "RQ1 compact result",
                 "RQ2 three-lens result",
                 "RQ3 nine-family result",
-                "frozen RQ1-RQ3 figures",
+                "frozen thesis-result figures",
             }
         ),
         "rq4_complete": complete_n == 20 and rq4_decision_ok,
         "all_internal_artifact_gates_pass": required_ready,
         "final_report_numbers_ready": final_ready,
         "gates": gates,
-        "external_checks_still_required": [
+        "verification_checklist": [
             "compile canonical Python scripts",
-            "run safe-zone and sanitizer unit tests",
+            "run safe-zone and sanitiser unit tests",
             "run git diff --check",
             "regenerate and visually inspect final RQ4 figure after 20/20",
             "cross-check every main.tex number against canonical JSON",
@@ -274,8 +261,8 @@ def render(report: dict) -> str:
         lines.append(
             f"| {row['name']} | {'YES' if row['passed'] else 'no'} | {row['detail']} |"
         )
-    lines.extend(["", "## External checks still required", ""])
-    lines.extend(f"- {item}" for item in report["external_checks_still_required"])
+    lines.extend(["", "## Verification checklist", ""])
+    lines.extend(f"- {item}" for item in report["verification_checklist"])
     lines.append("")
     return "\n".join(lines)
 

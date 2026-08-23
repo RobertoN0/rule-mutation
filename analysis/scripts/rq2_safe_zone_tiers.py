@@ -188,7 +188,7 @@ def _analyse_tier(pairs_by_stratum: dict[str, list]) -> dict:
         }
 
     report["families"] = {
-        "primary_sign_test": {
+        "sign_test_superseded": {
             "family": "four model-language strata within this tier",
             "holm": _holm_rows(sign_ps),
         },
@@ -197,9 +197,9 @@ def _analyse_tier(pairs_by_stratum: dict[str, list]) -> dict:
             "holm": _holm_rows(sign_flip_ps),
         },
     }
-    report["n_holm_rejections_primary"] = sum(
+    report["n_holm_rejections_sign_test_superseded"] = sum(
         row["reject"]
-        for row in report["families"]["primary_sign_test"]["holm"].values()
+        for row in report["families"]["sign_test_superseded"]["holm"].values()
     )
     return report
 
@@ -264,9 +264,14 @@ def _render_markdown(report: dict) -> str:
     lines = [
         "# RQ2 safe-zone specification sensitivity",
         "",
-        "Unit: one EA/random pair matched by search seed and initialization bundle.",
+        "> **Statistical procedure updated.** The lens data, medians, and intervals in",
+        "> this file remain current. Its exact sign tests are superseded provenance. The",
+        "> submitted thesis uses exact Wilcoxon signed-rank p-values, A12, and",
+        "> lens-specific Holm decisions from `rq_wilcoxon_effect_sizes.json`.",
+        "",
+        "Unit: one EA/random pair matched by search seed and initialisation bundle.",
         "Outcome: best raw Semgrep-finding reduction (`f1`) observed in 24 hours.",
-        "Primary test within each tier: exact two-sided paired sign test; ties are",
+        "Historical test within each tier: exact two-sided paired sign test; ties are",
         "excluded. Holm correction covers the four model-language strata within",
         "that tier. The sign-flip test is magnitude-sensitive secondary evidence.",
         "",
@@ -291,7 +296,7 @@ def _render_markdown(report: dict) -> str:
             ]
         )
         result = report["tiers"][tier]
-        holm_rows = result["families"]["primary_sign_test"]["holm"]
+        holm_rows = result["families"]["sign_test_superseded"]["holm"]
         for stratum in sorted(result["strata"]):
             row = result["strata"][stratum]
             sign = row["sign_test"]
@@ -307,7 +312,8 @@ def _render_markdown(report: dict) -> str:
         lines.extend(
             [
                 "",
-                f"Primary Holm rejections: **{result['n_holm_rejections_primary']}/4**.",
+                "Superseded sign-test Holm rejections: "
+                f"**{result['n_holm_rejections_sign_test_superseded']}/4**.",
                 "",
             ]
         )
@@ -366,7 +372,11 @@ def main() -> int:
         "generated_from": str(SAFE_ZONE_AUDIT),
         "unit_of_analysis": "EA/random search pair matched by seed and initialization bundle",
         "outcome": "best raw Semgrep-finding reduction observed in 24 hours",
-        "primary_test": "exact two-sided paired sign test within tier",
+        "inference_status": (
+            "paired data, medians, and intervals are current; sign-test fields are "
+            "superseded by rq_wilcoxon_effect_sizes.json"
+        ),
+        "primary_test": "exact Wilcoxon signed-rank; stored in rq_wilcoxon_effect_sizes.json",
         "multiplicity": (
             "Holm correction across four model-language strata separately within each "
             "tier; cross-tier comparisons are a nested specification sensitivity, not "

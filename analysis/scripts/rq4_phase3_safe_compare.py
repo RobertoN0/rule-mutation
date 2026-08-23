@@ -1,18 +1,16 @@
 #!/usr/bin/env python3
-"""RQ4 comparison using sanitized replays for structurally invalid selections.
+"""Superseded RQ4 comparison using sanitised replays.
 
 The original temperature-0.6 baselines are intentionally reused.  Candidates
 that already passed the exact safe-zone contract use their existing Phase-3
-replays; candidates that failed it use only the sanitized T=0.6 replays under
-``experiments/06_safe_zone_validation``.  No raw and sanitized evidence is
+replays; candidates that failed it use only the sanitised T=0.6 replays under
+``experiments/06_safe_zone_validation``.  No raw and sanitised evidence is
 silently mixed.
 
-Inference is paired by stochastic seed.  The exact sign test is primary; an
-exact sign-flip test on the mean delta is a magnitude-sensitive sensitivity
-analysis whose interpretation requires within-pair exchangeability under the
-null. Holm controls one family of all complete candidate-level primary tests.
-The selected candidates are not called independent repairs: they share tasks,
-models, baselines, and a post-selection procedure.
+The pairwise task-set policy and sign-test inference are retained for
+provenance. The submitted thesis instead uses the shared-task-set Wilcoxon/A12
+results from ``rq5_three_way_baseline_comparison.json``. Only the deterministic
+temperature-zero gain from this artifact remains in thesis Figure 4.
 """
 
 from __future__ import annotations
@@ -410,9 +408,16 @@ def main() -> int:
     lines = [
         "# RQ4 - safe-zone-aware temperature-0.6 resampling",
         "",
-        "Invalid selected candidates use sanitized replays; candidates already passing",
-        "the contract retain their existing replays. Original baselines are reused.",
-        "Positive delta means fewer Semgrep findings than the original-rule baseline.",
+        "> **Superseded except for the temperature-zero selection gain.** Pairwise rows",
+        "> below use candidate-specific task sets and the earlier exact sign test. The",
+        "> submitted thesis's candidate-versus-authored values come from",
+        "> `rq5_three_way_baseline_comparison.{json,md}`, which uses one shared task set",
+        "> and exact Wilcoxon inference. This file remains for provenance and Figure 4's",
+        "> temperature-zero ticks.",
+        "",
+        "Invalid selected candidates use sanitised replays; candidates already passing",
+        "the contract retain their existing replays. Authored-rules baselines are reused.",
+        "Positive delta means fewer Semgrep findings than the authored-rules baseline.",
         "",
         "| stratum | rank | kind | seeds | T=0 gain | median T=0.6 delta [boot CI] | paired superiority | sign p | surviving |",
         "|---|---:|---|---:|---:|---|---:|---:|---:|",
