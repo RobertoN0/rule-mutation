@@ -14,12 +14,12 @@ The final population requires two independent properties:
 
 1. at least one Semgrep finding was observed over the 20-seed
    temperature-0.6 screening across both code models and both no-rules and
-   original-rules conditions; and
-2. the original-rule temperature-zero output was valid for both code models.
+   authored-rules conditions; and
+2. the authored-rule temperature-zero output was valid for both code models.
 
 The resulting frozen population contains 203 Python and 126 Java tasks. A
 zero-finding task with incomplete screening observations is excluded for lack
-of positive vulnerability evidence; it is not described as proven safe or
+of positive Semgrep-finding evidence; it is not described as proven safe or
 never capable of producing a finding.
 
 ## Integrity fields

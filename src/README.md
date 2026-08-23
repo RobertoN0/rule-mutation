@@ -14,9 +14,9 @@ src/
 ## Search architecture
 
 `optimizer/engine.py` orchestrates a run. `optimizer/search.py` contains the
-supervisor-approved EA and matched random search. Both begin with the same five
+final EA and matched random search. Both begin with the same five
 origin-based random candidates, restored from an identity-checked
-initialization bundle in final paired runs. The EA then samples parents from
+initialisation bundle in final paired runs. The EA then samples parents from
 its bounded nondominated front; random search continues sampling from the
 origin. The origin remains the no-change evaluation reference but is not an EA
 parent or archive-admission threshold.

@@ -73,13 +73,13 @@ overflow policy. The archive has no reset or restart operation.
 
 `run_ea` and `run_random_search` share:
 
-- five origin-based initialization candidates;
+- five origin-based initialisation candidates;
 - `build_random_chromosome`, which applies between one and K changes;
 - the rule/mutator pool, depth cap, order operator, and evaluation callback;
 - identity retry accounting;
 - candidate and prompt-level persistence callbacks.
 
-EA main-loop behavior:
+EA main-loop behaviour:
 
 1. Inject an origin-based random candidate every
    `ea_injection_every` evaluations.
@@ -115,7 +115,7 @@ run with `main_loop_budget=0`.
 
 `ExperimentEngine` owns the evaluation seam:
 
-1. Evaluate the original-rule baseline.
+1. Evaluate the authored-rules baseline.
 2. Build the full chromosome space from the mapped rules.
 3. Load and verify an initialization bundle when supplied.
 4. Dispatch to the selected search runner.
@@ -254,7 +254,7 @@ one row per task:
 - raw and weighted findings, reductions, score source, and analysis status;
 - output-validation decision and Java normalization/line map;
 - generated code, finish reason, tokens, and latencies;
-- source and analyzed-code hashes;
+- source and analysed-code hashes;
 - evaluation-cache or initialization-bundle reuse markers.
 
 ### Archive snapshots and mutated rules
@@ -283,12 +283,12 @@ search-population qualification. It writes:
 
 `scripts/setup/materialize_retrieval_consensus.py` validates every retrieval
 draw against its exact carrier and frozen retrieval contract, applies the
-11-of-20 rule, and materializes deterministic model/language consensus maps.
+11-of-20 rule, and materialises deterministic model/language consensus maps.
 `scripts/setup/materialize_eligible_population.py` validates and applies the
 prospective task-eligibility manifest. `analyze_population_screening.py`
 reconciles one complete 20-seed stochastic screening block across both models
-and both no-rules/original-rules conditions. It records observed-finding,
-all-valid-zero, and incomplete-zero tasks separately and materializes the
+and both no-rules/authored-rules conditions. It records observed-finding,
+all-valid-zero, and incomplete-zero tasks separately and materialises the
 conservative qualification-input population.
 
 `scripts/setup/materialize_qualified_search_maps.py` then verifies the four
@@ -327,6 +327,13 @@ contract, population, map, scanner, and any selected-rule override hash.
 - `validate_replicate_run.py`: per-run temperature>0 reconciliation.
 - `analyze_replicates.py`: pooled per-seed effects and confidence intervals,
   written as reviewer-readable tables plus `replicate_analysis.json`.
+- `analysis/scripts/rq_wilcoxon_effect_sizes.py`: final exact Wilcoxon, A12,
+  and family-specific Holm results for RQ2 and RQ4; the superseded sign-test
+  values remain in the output for provenance.
+- `analysis/scripts/rq5_three_way_baseline.py`: final RQ4 comparison on one
+  task set shared by the no-rules condition, authored rules, and all five
+  candidates of a stratum and seed. Its `rq5` name is a historical filename,
+  not a fifth research question.
 
 ## Extension points
 

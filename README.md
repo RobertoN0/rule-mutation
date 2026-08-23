@@ -2,7 +2,7 @@
 
 **Search-Based Software Testing for LLM Security-Instruction Robustness**
 
-This MSc thesis framework studies how the **phrasing** of **[CodeGuard](https://github.com/cosai-oasis/project-codeguard) security coding guidelines** affects the security of LLM-generated code. CodeGuard rules (shipped as the `project-codeguard/` git submodule) are the natural-language security instructions given to a code-generating LLM. The framework applies **controlled mutations** to those rules — rewording, reordering, restructuring, or deliberately weakening them — and uses **Search-Based Software Testing** to find rule-set edits that lead the LLM to generate **fewer** vulnerabilities, as detected by [Semgrep](https://github.com/semgrep/semgrep). Rule fidelity is measured explicitly rather than assumed. The search direction is **repair** (minimise vulnerable generation); an adversarial direction (maximise) is retained only for secondary experiments.
+This MSc thesis framework studies how the **phrasing** of **[CodeGuard](https://github.com/cosai-oasis/project-codeguard) security coding guidelines** affects Semgrep findings in LLM-generated code. CodeGuard rules (shipped as the `project-codeguard/` git submodule) are the natural-language security instructions given to a code-generating LLM. The framework applies **controlled mutations** to those rules — rewording, reordering, restructuring, or deliberately weakening them — and uses **Search-Based Software Testing** to find candidates that lead the LLM to generate code with fewer Semgrep findings than the authored rules. Rule fidelity is measured explicitly rather than assumed. The search direction is **repair** (minimise findings); an adversarial direction (maximise) is retained only for secondary experiments.
 
 > **Looking for the thesis results?** [EVIDENCE_MAP.md](EVIDENCE_MAP.md) maps every
 > table and figure in the report to the artifact that produced it, names the exact
@@ -47,7 +47,7 @@ uv sync --extra dev --extra analysis     # both at once — NOT two separate syn
 | Extra | Adds | When |
 |---|---|---|
 | `dev` | `pytest`, `ruff` | development + running the test suite |
-| `analysis` | `scipy` | paired statistical analysis (see [Analyze results](#analyze-results)) |
+| `analysis` | `scipy` | paired statistical analysis (see [Analyse results](#analyse-results)) |
 | `gpu` | `accelerate`, `bitsandbytes` | quantized local inference on CUDA hosts (DelftBlue) |
 | `retrieval` | `langchain`, `langgraph` | re-building the rule-retrieval map (pre-computed maps are committed) |
 
@@ -71,7 +71,7 @@ cp .env.example .env
 ```bash
 source .venv/bin/activate     # puts the venv's `semgrep` + `python` on PATH
 
-    # Tiny smoke: 2 cases × (5 initialization + 2 main-loop evaluations)
+    # Tiny smoke: 2 cases × (5 initialisation + 2 main-loop evaluations)
 python scripts/experiments/run_experiment.py \
   --backend claude --optimizer ea --enable-validation \
   --n-cases 2 --main-loop-budget 2 \
@@ -120,21 +120,22 @@ A run directory contains `run_config.json`, `search_summary.json`,
 
 ---
 
-## Analyze results
+## Analyse results
 
 Every run records the raw evidence needed for analysis — the per-evaluation
 trajectory (`evaluations.jsonl`), the per-task evaluations (`intermediate/`),
 the archive snapshots (EA), and the run summary. The exact fields are in
 [IMPLEMENTATION.md → Output schema](IMPLEMENTATION.md#output-schema).
 
-Use `scripts/analyze/validate_search_run.py` to reconcile each search run and
-`scripts/analyze/analyze_search_runs.py` for the cross-run comparison. The
-proposed primary comparison is best f1 after the same scheduler allocation;
-evaluation-count and elapsed-search curves are secondary views. EA and random
-search are compared by matched seed within each model and language; pooled
-model/language values are descriptive only. Temperature>0 repetitions are
-validated with `validate_replicate_run.py` and analyzed with
-`analyze_replicates.py`.
+Use `scripts/analyze/validate_search_run.py` to reconcile each search run. The
+final RQ2 procedure compares EA and random search by matched seed within each
+model and language using the exact Wilcoxon signed-rank test and
+Vargha–Delaney A12; Holm correction is applied separately within each of the
+three four-stratum admissibility lenses. Temperature>0 repetitions are
+validated with `validate_replicate_run.py`. Final RQ4 values come from
+`analysis/scripts/rq5_three_way_baseline.py`, which scores the no-rules
+condition, authored rules, and all five candidates on one shared task set per
+stratum and seed. See `analysis/README.md` for the full procedure.
 
 ---
 
@@ -153,15 +154,15 @@ re-evaluates selected conditions at temperature>0 for statistical analysis.
    prompts that explicitly request a language incompatible with their dataset
    label, together with the reviewed duplicate Java task. This prospective
    filter leaves 322 Python and 227 Java tasks and does not depend on model
-   behavior or Semgrep outcomes.
+   behaviour or Semgrep outcomes.
 3. **Retrieve rules repeatedly and form a consensus.** For each model/language
    pair, run rule retrieval 20 times at temperature 0.6. These are repetitions
    of *rule selection*, not code generation. A rule is mapped to a task only
    when it appears in at least 11 of the 20 valid retrievals, which turns
    stochastic retrieval into one deterministic model-specific consensus map.
-4. **Screen for positive vulnerability evidence.** For every eligible task,
+4. **Screen for positive finding evidence.** For every eligible task,
    generate code at temperature 0.6 for 20 seeds under both no-rules and
-   original-rules conditions with both code models. A task therefore has up to
+   authored-rules conditions with both code models. A task therefore has up to
    80 screening observations: `20 seeds × 2 models × 2 rule conditions`.
    Semgrep findings are counted only for valid target-language outputs. The
    screening report keeps three outcomes separate:
@@ -182,8 +183,8 @@ re-evaluates selected conditions at temperature>0 for statistical analysis.
    search.
 
 > **Two different uses of temperature>0.** Phase 1 screening selects tasks for
-> which vulnerability reduction is empirically observable; it tests only the
-> no-rules and original-rules conditions. Phase 3 instead repeats the already
+> which a Semgrep-finding reduction is empirically observable; it tests only the
+> no-rules and authored-rules conditions. Phase 3 instead repeats the already
 > selected baselines and search-produced chromosomes to estimate their effects
 > across seeds. Phase 1 is a population-construction gate, whereas Phase 3
 > supplies the final paired statistical evidence.
@@ -197,11 +198,11 @@ re-evaluates selected conditions at temperature>0 for statistical analysis.
    and security-keyword retention.
 4. **Generate and validate one target-language implementation** for every task.
 5. **Score** valid implementations with Semgrep (raw findings primary; severity
-   weighting diagnostic), then assemble whole-chromosome f1 vulnerability
+   weighting diagnostic), then assemble whole-chromosome f1 finding-count
    reduction, f2 mean SBERT rule fidelity, and f3 −parsimony.
 6. **Optimize** with one of two search strategies (`--optimizer`)
    over **full rule-set chromosomes** (per-gene rule alleles + a global rule-order gene),
-   scored on the objectives (f1 = vulnerability reduction, f2 = rule fidelity, f3 = −parsimony):
+   scored on the objectives (f1 = finding-count reduction, f2 = textual similarity, f3 = −parsimony):
    - **`ea`** — an archive-based, steady-state EA. Five origin-based random
      candidates create the initial Pareto front. Each main-loop evaluation is
      either a periodic origin-based injection or a one-step mutation/reorder of
@@ -213,18 +214,18 @@ re-evaluates selected conditions at temperature>0 for statistical analysis.
 ### Phase 3 — Temperature>0 repetitions
 
 `scripts/experiments/run_replicates.py` evaluates one fixed condition per run:
-the no-rules baseline, the original-rule baseline, or a chromosome selected
+the no-rules baseline, the authored-rules baseline, or a chromosome selected
 from the search. Each condition is regenerated over the approved common seed
 set at the chosen nonzero temperature. The runner records prompt-level
 generation validity and Semgrep results for every seed; invalid or missing
 outputs remain missing observations with explicit denominators.
 
-`scripts/analyze/analyze_replicates.py` then compares conditions on matched
-seeds and on the common set of valid tasks. The no-rules/original-rules
-comparison measures the effect of supplying the original CodeGuard rules, while
-the original-rules/selected-chromosome comparison tests whether a search
-improvement persists under stochastic generation. These repetitions occur
-after search and are not charged to its initialization or main-loop budget.
+The final analysis compares conditions over matched seeds and a task set shared
+by every condition in the stratum. The no-rules/authored-rules comparison
+measures the effect of supplying the authored CodeGuard rules, while the
+authored-rules/candidate comparison tests whether a search gain persists under
+stochastic generation. These repetitions occur after search and are not charged
+to its initialisation or main-loop budget.
 
 ### Mutation strategies
 
@@ -251,7 +252,12 @@ semantically identical.
 | `voice_change` | Transforms active imperatives to passive advisory form |
 | `paraphrase` | Rewrites prose with weaker vocabulary; inline code masked before the LLM call |
 
-All mutators respect the **safe-zone contract**: YAML frontmatter, fenced code blocks, and inline code are never modified. Full details of each mutator and the quality validator are in [ARCHITECTURE.md](ARCHITECTURE.md).
+The live mutators now enforce the **safe-zone contract** fail-closed: YAML
+frontmatter, fenced code blocks, and inline code must remain unchanged. The
+executed Phase-2 system did not enforce this consistently; the defect and the
+three post-hoc admissibility lenses are documented in
+[EVIDENCE_MAP.md](EVIDENCE_MAP.md). Full mutator details are in
+[ARCHITECTURE.md](ARCHITECTURE.md).
 
 ---
 
@@ -275,7 +281,7 @@ wrappers take the same search env-var overrides:
 N_CASES=2 MAIN_LOOP_BUDGET=2 LANGUAGES=python OPTIMIZER=ea \
   sbatch --time=0:45:00 --job-name="ea_smoke" scripts/slurm/slurm_ea_qwen32b.sh
 
-# Final repair pattern — after qualification and creation of one initialization
+# Final repair pattern — after qualification and creation of one initialisation
 # bundle per model/language/seed.
 : "${APPROVED_SEEDS:?space-separated seeds required}"
 : "${ITERATION_BUDGET:?high safety ceiling required}"
@@ -299,7 +305,7 @@ done
 On DelftBlue the run is stopped by `sbatch --time` plus the wrapper's
 pre-timeout signal, not by `MAIN_LOOP_BUDGET` — that is a safety ceiling set
 high enough never to bind, and `TIME_BUDGET_SECONDS` only *declares* the
-allocation for the analyzer. See
+allocation for the analyser. See
 [WORKFLOW.md → Stopping condition on DelftBlue](WORKFLOW.md#stopping-condition-on-delftblue-wall-time-not-iterations).
 
 Search and replicate entrypoints check the map metadata for the final
@@ -338,7 +344,7 @@ Reproduce any run with `python scripts/experiments/rerun_from_config.py <run_dir
 │   ├── results/           # every JSON/Markdown result the thesis cites
 │   └── figures/           # regenerated PDF + PNG figures
 ├── artifacts/
-│   └── phase3_selected/   # the 20 selected rule sets, the 12 sanitized ones, and their maps
+│   └── phase3_selected/   # the 20 selected rule sets, the 12 sanitised ones, and their maps
 ├── project-codeguard/     # CodeGuard security rule library (git submodule)
 ├── rule_maps/             # Source-population audit + final maps under qualified/
 ├── experiments/           # Experiment run trees (gitignored; see EVIDENCE_MAP.md §4)

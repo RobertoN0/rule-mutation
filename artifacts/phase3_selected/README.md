@@ -19,7 +19,7 @@ artifacts/phase3_selected/
 Directories are named `{model}_{language}_r{rank}_s{search_seed}_{chromosome_id}`,
 so a raw candidate and its sanitized counterpart share a name.
 
-## Raw versus sanitized
+## Raw versus sanitised
 
 Phase 2 did not enforce the structural contract fail-closed, so some archived
 candidates had changed fenced or inline code relative to the authored CodeGuard
@@ -33,14 +33,16 @@ rules.
   wrote a separate artifact in `sanitized/`. The raw artifact was never edited.
   All twelve remained positive after repair, with score changes from -4 to +1.
 
-**Raw and sanitized results are never mixed.** `sanitized/manifest.json` links
+**Raw and sanitised results are never mixed.** `sanitized/manifest.json` links
 each repaired artifact to its raw source by hash, and
-`../../analysis/results/rq4_phase3_safe_comparison.json` records which kind each
-candidate is under `candidate_kind`.
+`../../analysis/results/rq5_three_way_baseline_comparison.json` records which
+kind each candidate is under `candidate_kind`. The older
+`rq4_phase3_safe_comparison.json` is retained for provenance and the
+temperature-zero selection gain only.
 
 Two artifacts additionally needed deterministic repairs for the tokens
 `<input type="password">` and `--cap-drop all`; the linking prose is stored with
-the sanitized outputs.
+the sanitised outputs.
 
 ## Maps
 
