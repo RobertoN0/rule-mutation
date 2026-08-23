@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
-"""Build the analysis figures from the v2 JSON.
+"""Build the analysis figures from the canonical JSON.
 
-Run with the isolated plot venv (matplotlib is deliberately NOT in the frozen
-repo .venv):
+Run with an isolated plotting environment (Matplotlib is deliberately absent
+from the frozen project environment). The committed figures were produced with
+Matplotlib 3.10.9:
 
-    /scratch/rnegro/plotvenv/bin/python /home/rnegro/analysis/make_figures.py
+    ANALYSIS_BASE=/path/with/report-and-figures python make_figures.py
 
-Writes PNG + PDF into /home/rnegro/analysis/figures/.
+``ANALYSIS_BASE/report`` must contain the canonical JSON; output is written to
+``ANALYSIS_BASE/figures``.
 """
+
 import json
 import os
 from pathlib import Path
@@ -15,8 +18,12 @@ from pathlib import Path
 import matplotlib
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-from matplotlib.lines import Line2D
+# Type 42 embeds real TrueType outlines; the matplotlib default (Type 3) is
+# rejected by some publishers and renders poorly in a few PDF viewers.
+matplotlib.rcParams["pdf.fonttype"] = 42
+matplotlib.rcParams["ps.fonttype"] = 42
+import matplotlib.pyplot as plt  # noqa: E402
+from matplotlib.lines import Line2D  # noqa: E402
 
 # Override ANALYSIS_BASE to read/write the figure set somewhere else.
 BASE = Path(os.environ.get("ANALYSIS_BASE", "/home/rnegro/analysis"))
@@ -24,7 +31,9 @@ REP = BASE / "report"
 FIG = BASE / "figures"
 FIG.mkdir(exist_ok=True)
 
-STRATA = ["qwen_python", "qwen_java", "llama_python", "llama_java"]
+# Order matches every table in the report (Llama first, Java before Python),
+# so a reader can put a figure panel next to a table row without re-mapping.
+STRATA = ["llama_java", "llama_python", "qwen_java", "qwen_python"]
 NICE = {
     "qwen_python": "Qwen · Python",
     "qwen_java": "Qwen · Java",
@@ -63,12 +72,18 @@ def fig1():
         hi = [d[s][key]["max"] - d[s][key]["median"] for s in STRATA]
         ax.bar([i + off for i in x], med, w, color=c, label=lab, zorder=3)
         ax.errorbar(
-            [i + off for i in x], med, yerr=[lo, hi], fmt="none",
-            ecolor="#333", elinewidth=1.0, capsize=3, zorder=4,
+            [i + off for i in x],
+            med,
+            yerr=[lo, hi],
+            fmt="none",
+            ecolor="#333",
+            elinewidth=1.0,
+            capsize=3,
+            zorder=4,
         )
     ax.set_xticks(list(x))
     ax.set_xticklabels([NICE[s] for s in STRATA])
-    ax.set_ylabel("Semgrep findings removed\n(% of the original rules' findings)")
+    ax.set_ylabel("Semgrep findings removed\n(% of the authored rules' findings)")
     ax.set_title(
         "RQ1 — best structurally admissible rule-text/order mutations visited\n"
         "bar = median over seeds; whiskers = min–max",
@@ -85,6 +100,7 @@ def fig1():
 # --------------------------------------------------------------------------
 def fig2():
     d = load("rq2_ea_vs_random.json")["strata"]
+    wx = load("rq_wilcoxon_effect_sizes.json")["rq2_ea_vs_random"]["full_contract"]["strata"]
     fig, ax = plt.subplots(figsize=(8.0, 4.8))
     allv = [v for s in STRATA for v in d[s]["deltas_f1"]]
     lo_y, hi_y = min(allv) - 1.5, max(allv) + 4.5
@@ -96,17 +112,28 @@ def fig2():
         cols = ["#2f6f9f" if v > 0 else ("#999" if v == 0 else "#c0392b") for v in dl]
         ax.scatter(jit, dl, s=34, c=cols, zorder=3, edgecolor="white", linewidth=0.6)
         ax.errorbar(
-            i, med["value"],
+            i,
+            med["value"],
             yerr=[
                 [med["value"] - med["bootstrap_ci"][0]],
                 [med["bootstrap_ci"][1] - med["value"]],
             ],
-            fmt="_", color="black", markersize=26, elinewidth=1.8, capsize=5, zorder=4,
+            fmt="_",
+            color="black",
+            markersize=26,
+            elinewidth=1.8,
+            capsize=5,
+            zorder=4,
         )
         # annotations sit on one shared line just under the top of the axes
         ax.annotate(
-            f"sign p={d[s]['primary']['p']:.4g}\nPpair={d[s]['paired_superiority']:.2f}",
-            (i, hi_y - 0.4), ha="center", va="top", fontsize=8.5, color="#333",
+            f"Wilcoxon p={wx[s]['wilcoxon']['p']:.4g}\n"
+            f"A12={wx[s]['vargha_delaney_a12']['value']:.3f}",
+            (i, hi_y - 0.4),
+            ha="center",
+            va="top",
+            fontsize=8.5,
+            color="#333",
         )
     ax.axhline(0, color="#555", linewidth=1.0, linestyle="--")
     ax.set_xticks(range(len(STRATA)))
@@ -125,8 +152,11 @@ def fig2():
             Line2D([], [], marker="o", ls="", color="#999", label="tie"),
             Line2D([], [], marker="o", ls="", color="#c0392b", label="random better"),
         ],
-        frameon=False, fontsize=8.5, ncol=3,
-        loc="upper center", bbox_to_anchor=(0.5, -0.16),
+        frameon=False,
+        fontsize=8.5,
+        ncol=3,
+        loc="upper center",
+        bbox_to_anchor=(0.5, -0.16),
     )
     save(fig, "fig2_rq2_paired_deltas")
 
@@ -134,6 +164,11 @@ def fig2():
 def fig2_tiers():
     """RQ2 specification sensitivity across the three safe-zone lenses."""
     data = load("rq2_safe_zone_tiers.json")
+    # Medians and bootstrap intervals come from the tier artifact; the test
+    # result and the Holm decision come from the Wilcoxon artifact, which is
+    # the procedure the report actually uses (the sign test is superseded and
+    # survives only in the appendix comparison table).
+    wx = load("rq_wilcoxon_effect_sizes.json")["rq2_ea_vs_random"]
     tier_order = ["raw_executed", "core_structural", "full_contract"]
     tier_labels = ["executed\nsystem", "fenced\ncode", "full\ncontract"]
     ink = "#2b2b2b"
@@ -149,8 +184,8 @@ def fig2_tiers():
             row = data["tiers"][tier]["strata"][stratum]
             ci = row["median_percentile_bootstrap_ci"]
             median = row["median_delta"]
-            holm_row = data["tiers"][tier]["families"]["primary_sign_test"]["holm"][stratum]
-            reject = holm_row["reject"]
+            wx_row = wx[tier]["strata"][stratum]
+            reject = wx_row["holm"]["reject"]
             ax.errorbar(
                 x,
                 median,
@@ -165,7 +200,7 @@ def fig2_tiers():
                 capsize=3,
                 zorder=3,
             )
-            p_text = f"{row['sign_test']['p']:.3g}"
+            p_text = f"{wx_row['wilcoxon']['p']:.3g}"
             if p_text.startswith("0."):
                 p_text = p_text[1:]
             ax.annotate(
@@ -190,7 +225,7 @@ def fig2_tiers():
         ax.tick_params(axis="y", labelsize=9.6)
         ax.grid(axis="y", **GRID)
         ax.set_axisbelow(True)
-    axes[0].set_ylabel("Median EA - random\n(findings removed)", fontsize=10.5)
+    axes[0].set_ylabel("Median EA \u2212 random\n(findings removed)", fontsize=10.5)
     fig.suptitle(
         "RQ2 - EA advantage under nested structural lenses",
         fontsize=12.2,
@@ -198,10 +233,24 @@ def fig2_tiers():
     )
     fig.legend(
         handles=[
-            Line2D([], [], marker="o", ls="", markerfacecolor=accent,
-                   markeredgecolor=accent, label="Holm rejection"),
-            Line2D([], [], marker="o", ls="", markerfacecolor="white",
-                   markeredgecolor=ink, label="no Holm rejection"),
+            Line2D(
+                [],
+                [],
+                marker="o",
+                ls="",
+                markerfacecolor=accent,
+                markeredgecolor=accent,
+                label="Holm rejection",
+            ),
+            Line2D(
+                [],
+                [],
+                marker="o",
+                ls="",
+                markerfacecolor="white",
+                markeredgecolor=ink,
+                label="no Holm rejection",
+            ),
         ],
         frameon=False,
         fontsize=9.2,
@@ -219,21 +268,20 @@ def fig2_tiers():
 # Fig 3 - RQ2 paired common-language effect size
 # --------------------------------------------------------------------------
 def fig3():
-    d = load("rq2_ea_vs_random.json")["strata"]
+    d = load("rq_wilcoxon_effect_sizes.json")["rq2_ea_vs_random"]["full_contract"]["strata"]
     fig, ax = plt.subplots(figsize=(6.6, 3.2))
     ys = range(len(STRATA))
     for i, s in enumerate(STRATA):
-        value = d[s]["paired_superiority"]
+        value = d[s]["vargha_delaney_a12"]["value"]
         ax.scatter(value, i, s=95, color=EA_C, zorder=3)
         ax.annotate(f"  {value:.3f}", (value, i), va="center", fontsize=9)
     ax.axvline(0.5, color="#666", ls=":", lw=1)
-    ax.annotate("equal wins/ties", (0.5, len(STRATA) - 0.4),
-                fontsize=8, color="#666", ha="center")
+    ax.annotate("equal wins/ties", (0.5, len(STRATA) - 0.4), fontsize=8, color="#666", ha="center")
     ax.set_yticks(list(ys))
     ax.set_yticklabels([NICE[s] for s in STRATA])
     ax.set_xlim(0.45, 0.85)
-    ax.set_xlabel("paired superiority = P(EA>random) + 0.5·P(tie), matched by seed")
-    ax.set_title("RQ2 — descriptive paired advantage after safe-zone filtering", fontsize=10)
+    ax.set_xlabel("Vargha–Delaney A12 = P(EA>random) + 0.5·P(tie)")
+    ax.set_title("RQ2 — full-contract effect size over ten runs per arm", fontsize=10)
     ax.grid(axis="x", **GRID)
     ax.set_axisbelow(True)
     save(fig, "fig3_rq2_effect_size")
@@ -250,37 +298,50 @@ def fig4():
         items = sorted(ops.items(), key=lambda kv: kv[1]["run_mean_delta"]["median"])
         names = [k for k, _ in items]
         effect = [v["run_mean_delta"]["median"] for _, v in items]
-        lo = [
-            value - v["run_mean_delta"]["q25"]
-            for value, (_, v) in zip(effect, items)
-        ]
-        hi = [
-            v["run_mean_delta"]["q75"] - value
-            for value, (_, v) in zip(effect, items)
-        ]
+        lo = [value - v["run_mean_delta"]["q25"] for value, (_, v) in zip(effect, items)]
+        hi = [v["run_mean_delta"]["q75"] - value for value, (_, v) in zip(effect, items)]
         y = range(len(names))
+        # Reserve a gutter on the right so the P+ labels cannot be overprinted
+        # by the IQR whisker caps or by the zero line.
+        left = min([0.0] + [value - low_error for value, low_error in zip(effect, lo)])
+        right = max([0.0] + [e + h for e, h in zip(effect, hi)])
+        span = max(right - left, 1e-9)
+        gutter = right + 0.06 * span
+        ax.set_xlim(left - 0.06 * span, gutter + 0.26 * span)
         colours = ["#d17c2f" if name == "whole_rule_reorder" else EA_C for name in names]
         ax.scatter(effect, list(y), color=colours, s=42, zorder=4)
         ax.errorbar(
-            effect, list(y), xerr=[lo, hi], fmt="none",
-            ecolor="#555", elinewidth=2.0, capsize=3.0, zorder=3,
+            effect,
+            list(y),
+            xerr=[lo, hi],
+            fmt="none",
+            ecolor="#555",
+            elinewidth=2.0,
+            capsize=3.0,
+            zorder=3,
         )
         for i, (_, v) in enumerate(items):
             ax.annotate(
-                        f" P+={v['run_positive_rate']['median']:.2f}",
-                        (v["run_mean_delta"]["q75"], i),
-                        va="center", fontsize=7.5, color="#555")
+                f"P+={v['run_positive_rate']['median']:.2f}",
+                (gutter, i),
+                ha="left",
+                va="center",
+                fontsize=7.5,
+                color="#555",
+            )
         ax.axvline(0, color="#666", linewidth=0.9, linestyle="--", zorder=1)
         ax.set_yticks(list(y))
         ax.set_yticklabels(names, fontsize=8.5)
-        ax.set_title(f"{NICE[s]}  ({d[s]['total_clean_moves']} clean moves)", fontsize=9.5)
+        ax.set_title(
+            f"{NICE[s]}  ({d[s]['total_clean_moves']:,} full-contract contrasts)", fontsize=9.5
+        )
         ax.grid(axis="x", **GRID)
         ax.set_axisbelow(True)
     for ax in axes[1]:
         ax.set_xlabel("median within-run mean Δf1  — IQR across runs")
     fig.suptitle(
         "RQ3 — local changes from text mutation and whole-rule ordering\n"
-        "Δf1 > 0 means fewer findings; safe-zone-valid contrasts; orange = inter-rule reorder",
+        "Δf1 > 0 means fewer findings; full-contract contrasts; orange = inter-rule reorder",
         fontsize=11,
     )
     fig.tight_layout(rect=[0, 0, 1, 0.94])
@@ -298,22 +359,32 @@ def fig5():
         for name, v in d[st]["operators"].items():
             vw = name == "verb_weakening"
             ax.scatter(
-                v["archive_acceptance_rate"], v["f1_advance_rate"],
-                marker=marks[st], s=58 if vw else 46, alpha=0.9,
+                v["archive_acceptance_rate"],
+                v["f1_advance_rate"],
+                marker=marks[st],
+                s=58 if vw else 46,
+                alpha=0.9,
                 color="#c0392b" if vw else "#7f8c9a",
-                edgecolor="white", linewidth=0.5, zorder=4 if vw else 3,
+                edgecolor="white",
+                linewidth=0.5,
+                zorder=4 if vw else 3,
             )
             if vw:
                 # stagger labels: the two Java/Python points nearly coincide in y
-                off = {"qwen_python": (10, -14, "left"),
-                       "qwen_java": (-10, -12, "right"),
-                       "llama_python": (-10, 8, "right"),
-                       "llama_java": (-10, 10, "right")}[st]
+                off = {
+                    "qwen_python": (10, -14, "left"),
+                    "qwen_java": (-10, -12, "right"),
+                    "llama_python": (-10, 8, "right"),
+                    "llama_java": (-10, 10, "right"),
+                }[st]
                 ax.annotate(
                     f"{NICE[st]}",
                     (v["archive_acceptance_rate"], v["f1_advance_rate"]),
-                    xytext=off[:2], textcoords="offset points",
-                    fontsize=7.5, color="#c0392b", ha=off[2],
+                    xytext=off[:2],
+                    textcoords="offset points",
+                    fontsize=7.5,
+                    color="#c0392b",
+                    ha=off[2],
                 )
     ax.set_xlim(0.02, 0.78)
     ax.set_xlabel("archive acceptance rate  (how often the move is kept)")
@@ -321,15 +392,21 @@ def fig5():
     ax.set_title(
         "RQ3 - archive acceptance and positive finding reduction differ\n"
         "verb_weakening (red) is highly accepted but usually has a low positive-delta rate;\n"
-        "only Llama/Python shows a comparatively favorable local profile", fontsize=10,
+        "only Llama/Python shows a comparatively favorable local profile",
+        fontsize=10,
     )
     ax.grid(**GRID)
     ax.set_axisbelow(True)
     ax.legend(
-        handles=[Line2D([], [], marker=marks[s2], ls="", color="#7f8c9a", label=NICE[s2])
-                 for s2 in STRATA]
+        handles=[
+            Line2D([], [], marker=marks[s2], ls="", color="#7f8c9a", label=NICE[s2])
+            for s2 in STRATA
+        ]
         + [Line2D([], [], marker="o", ls="", color="#c0392b", label="verb_weakening")],
-        frameon=False, fontsize=8.5, loc="upper left", ncol=2,
+        frameon=False,
+        fontsize=8.5,
+        loc="upper left",
+        ncol=2,
     )
     save(fig, "fig5_rq3_acceptance_vs_effect")
 
@@ -354,7 +431,8 @@ def fig6():
     ax.set_ylabel("mean candidate evaluations\ncompleted in 24 h")
     ax.set_title(
         "Search throughput at equal wall clock — the EA evaluates more\n"
-        "candidates because its cache reuses unchanged prompts", fontsize=10,
+        "candidates because its cache reuses unchanged prompts",
+        fontsize=10,
     )
     ax.grid(axis="y", **GRID)
     ax.set_axisbelow(True)
@@ -368,143 +446,165 @@ def fig6():
 # A forest plot keeps candidate-level paired estimates visible.  The five
 # candidates in a stratum share tasks, baselines, model, and selection, so they
 # are deliberately not described as independent repairs.
-def fig7():
-    f = REP / "rq4_phase3_safe_comparison.json"
-    if not f.exists():
-        print("  skip fig7 (no safe-zone-aware rq4 json yet)")
-        return
-    data = json.load(open(f))
-    runs = data["runs"]
-    if not runs:
-        print("  skip fig7 (no finished phase-3 runs yet)")
-        return
+def _boot_median_ci(vals, n=20000, seed=20260821):
+    """Percentile bootstrap interval for the median, matching the analysis scripts."""
+    import numpy as np
 
-    # One row per candidate with at least one paired seed, grouped by stratum.
+    rng = np.random.default_rng(seed)
+    a = np.asarray(vals, float)
+    draws = rng.choice(a, size=(n, a.size), replace=True)
+    meds = np.median(draws, axis=1)
+    return float(np.percentile(meds, 2.5)), float(np.percentile(meds, 97.5))
+
+
+def fig7():
+    """RQ4 candidates against the authored rules, on the three-way task set.
+
+    Reads rq5_three_way_baseline_comparison.json so the medians match section 5.4
+    and Table 11. The temperature-0 tick still comes from the phase-3 artifact,
+    since it is a property of the search rather than of the task-set choice.
+    """
+    f = REP / "rq5_three_way_baseline_comparison.json"
+    if not f.exists():
+        print("  skip fig7 (no three-way rq5 json)")
+        return
+    layer2 = json.load(open(f))["layer2_candidate_vs_authored"]
+    det = {}
+    f4 = REP / "rq4_phase3_safe_comparison.json"
+    if f4.exists():
+        det = {
+            k: r.get("deterministic", {}).get("gain")
+            for k, r in json.load(open(f4))["runs"].items()
+        }
+
     rows = []
     for stratum in STRATA:
         fam = sorted(
-            (
-                (key, r)
-                for key, r in runs.items()
-                if r["stratum"] == stratum
-                and r["comparisons"]["withrules"].get("n", 0) > 0
-            ),
-            key=lambda item: item[1]["rank"],
+            ((k, v) for k, v in layer2.items() if v["stratum"] == stratum),
+            key=lambda kv: kv[1]["rank"],
         )
         if fam:
             rows.append((stratum, fam))
     if not rows:
-        print("  skip fig7 (no selected chromosomes yet)")
+        print("  skip fig7 (no candidates)")
         return
 
     n = sum(len(fam) for _, fam in rows)
-    fig, ax = plt.subplots(figsize=(8.2, 0.52 * n + 2.4))
+    # Sized for full text width. Keeping the drawn width close to the printed
+    # width keeps the type at its nominal size instead of shrinking it.
+    fig, ax = plt.subplots(figsize=(7.0, 0.28 * n + 1.30))
+
+    NOMINAL_C, PLAIN_C = "#2f6f9f", "#9aa5ad"
     y, ylabels, seps = [], [], []
     pos = 0
     for stratum, fam in rows:
-        adjusted = data.get("aggregate", {}).get(stratum, {}).get("holm", {})
-        for key, r in fam:
-            wr = r["comparisons"]["withrules"]
-            estimate = wr["median_delta"]
-            ci_lo, ci_hi = wr["median_bootstrap_ci"]
-            rejects = adjusted.get(key, {}).get("reject", False)
-            colour = EA_C if rejects else "#9aa5ad"
+        for key, v in fam:
+            est = v["median_delta"]
+            lo, hi = _boot_median_ci(v["per_seed_delta"])
+            nominal = v["wilcoxon_exact_p"] < 0.05
+            colour = NOMINAL_C if nominal else PLAIN_C
             ax.errorbar(
-                estimate,
+                est,
                 pos,
-                xerr=[[estimate - ci_lo], [ci_hi - estimate]],
+                xerr=[[est - lo], [hi - est]],
                 fmt="o",
                 color=colour,
                 ecolor=colour,
-                elinewidth=1.8,
-                capsize=3.5,
-                markersize=7,
+                elinewidth=1.6,
+                capsize=3,
+                markersize=6,
                 zorder=4,
             )
-            deterministic = r.get("deterministic")
-            if deterministic is not None:
-                ax.scatter(
-                    deterministic["gain"], pos, marker="|", s=170,
-                    color="#333", zorder=5,
-                )
-            surviving = r.get("pct_of_deterministic_gain_surviving")
-            if surviving is not None:
-                ax.annotate(
-                    f"{surviving:.0f}%",
-                    (ci_hi, pos),
-                    xytext=(7, 0),
-                    textcoords="offset points",
-                    va="center",
-                    fontsize=8.5,
-                    color="#222",
-                    fontweight="bold" if rejects else "normal",
-                )
-            repaired = r["candidate_kind"] == "sanitized_after_structural_violation"
-            lab = f"r{r['rank']} s{r['search_seed']}" + (" repaired" if repaired else " valid")
-            if r["n_seeds"] < data["target_seeds"]:
-                lab += f" [{r['n_seeds']}/{data['target_seeds']}]"
-            ylabels.append(lab)
+            g = det.get(key)
+            if g is not None:
+                ax.scatter(g, pos, marker="|", s=150, color="#333", zorder=5)
+            sanitised = v["candidate_kind"] == "sanitized_after_structural_violation"
+            ylabels.append(
+                f"r{v['rank']} s{v['search_seed']}" + (" sanitised" if sanitised else " raw")
+            )
             y.append(pos)
             pos += 1
         seps.append(pos - 0.5)
-        pos += 0.8
+        pos += 0.9
 
-    ax.axvline(0, color="#555", lw=1.1, ls="--", zorder=1)
-    for s in seps[:-1]:
-        ax.axhline(s + 0.4, color="#ccc", lw=0.8, zorder=1)
+    ax.axvline(0, color="#555", lw=1.0, ls="--", zorder=1)
+    for sep in seps[:-1]:
+        ax.axhline(sep + 0.45, color="#ccc", lw=0.8, zorder=1)
 
     ax.set_yticks(y)
-    ax.set_yticklabels(ylabels, fontsize=9)
+    ax.set_yticklabels(ylabels, fontsize=8)
+    ax.tick_params(axis="x", labelsize=8)
     ax.invert_yaxis()
-    ax.set_xlabel("Semgrep findings removed vs the ORIGINAL rules")
+    ax.set_xlabel("Semgrep findings removed relative to the authored rules", fontsize=9)
 
-    # stratum names down the left, outside the tick labels
     base = 0
     for stratum, fam in rows:
         mid = base + (len(fam) - 1) / 2
-        ax.annotate(NICE[stratum], xy=(0, mid), xycoords=("axes fraction", "data"),
-                    xytext=(-96, 0), textcoords="offset points",
-                    rotation=90, va="center", ha="center",
-                    fontsize=10, fontweight="bold")
-        base += len(fam) + 0.8
+        ax.annotate(
+            NICE[stratum],
+            xy=(0, mid),
+            xycoords=("axes fraction", "data"),
+            xytext=(-88, 0),
+            textcoords="offset points",
+            rotation=90,
+            va="center",
+            ha="center",
+            fontsize=8.5,
+            fontweight="bold",
+        )
+        base += len(fam) + 0.9
 
-    n_complete = sum(
-        r["n_seeds"] == data["target_seeds"]
-        for _, fam in rows
-        for _, r in fam
-    )
-    n_reject = sum(
-        item.get("reject", False)
-        for group in data.get("aggregate", {}).values()
-        for item in group.get("holm", {}).values()
-    )
-    family_complete = data.get("multiplicity", {}).get("family_complete", False)
-    holm_status = (
-        f"{n_reject} Holm rejections"
-        if family_complete
-        else "Holm decisions pending all 20 candidates"
-    )
-    ax.set_title(
-        f"RQ4 - stochastic resampling of selected candidates "
-        f"({n_complete}/{len(runs)} complete; {holm_status})\n"
-        "dot + bar = paired median with percentile-bootstrap interval; tick = T=0 gain;\n"
-        "label = share of deterministic gain surviving against original rules",
-        fontsize=10)
     ax.grid(axis="x", **GRID)
     ax.set_axisbelow(True)
-    ax.legend(handles=[
-        Line2D([], [], marker="o", ls="", color=EA_C,
-               label="exact sign test rejects after planned 20-test Holm"),
-        Line2D([], [], marker="o", ls="", color="#9aa5ad",
-               label="no Holm-adjusted rejection"),
-        Line2D([], [], marker="|", ls="", color="#333", markersize=10,
-               label="deterministic gain at T=0"),
-    ], frameon=False, fontsize=8.5, loc="upper center",
-        bbox_to_anchor=(0.5, -0.10 - 0.30 / n), ncol=1)
+    ax.legend(
+        handles=[
+            Line2D(
+                [],
+                [],
+                marker="o",
+                ls="",
+                color=NOMINAL_C,
+                markersize=6,
+                label="Wilcoxon $p<.05$ before correction",
+            ),
+            Line2D(
+                [],
+                [],
+                marker="o",
+                ls="",
+                color=PLAIN_C,
+                markersize=6,
+                label="not significant before correction",
+            ),
+            Line2D(
+                [],
+                [],
+                marker="|",
+                ls="",
+                color="#333",
+                markersize=9,
+                label="deterministic gain at $T{=}0$",
+            ),
+        ],
+        frameon=False,
+        fontsize=8.5,
+        loc="lower center",
+        bbox_to_anchor=(0.5, 1.005),
+        ncol=3,
+        handletextpad=0.4,
+        columnspacing=1.6,
+    )
     save(fig, "fig7_rq4_survival")
 
 
 if __name__ == "__main__":
     print("writing figures to", FIG)
-    fig1(); fig2(); fig2_tiers(); fig3(); fig4(); fig5(); fig6(); fig7()
+    fig1()
+    fig2()
+    fig2_tiers()
+    fig3()
+    fig4()
+    fig5()
+    fig6()
+    fig7()
     print("done")
