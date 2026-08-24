@@ -7,8 +7,8 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --gpus-per-task=1
 #SBATCH --mem-per-cpu=8000M
-#SBATCH --output=/home/rnegro/thesis/rule-mutation/logs/%j_%x.out
-#SBATCH --error=/home/rnegro/thesis/rule-mutation/logs/%j_%x.err
+#SBATCH --output=logs/%j_%x.out
+#SBATCH --error=logs/%j_%x.err
 # Graceful pre-timeout: deliver SIGUSR1 to the batch shell (B:) this many seconds
 # before the wall-time SIGKILL so the run can save final results. SLURM may
 # deliver up to 60s EARLIER than asked, never later, so the lead is the floor on
@@ -26,15 +26,15 @@
 #
 # Small diagnostic subsets do not predict the frozen full-population runtime.
 # Choose wall time at submission from the run objective: short smoke, an
-# extended behavior validation, or the supervisor-approved final allocation.
+# extended behaviour validation, or the supervisor-approved final allocation.
 # The pre-timeout signal preserves the last completed candidate. Final
 # comparisons use the same allocation; evaluation-index curves are secondary.
 #
 # This file is the only mutation-run launcher: OPTIMIZER ∈ {ea, random_search}.
-# Validation is ON by default — the f2 rule-fidelity objective needs SBERT.
+# Validation is ON by default — the f2 textual-similarity objective needs SBERT.
 #
 # Usage:
-#   # Default: EA, 16 cases, 5 shared initialization + 10 main-loop evaluations.
+#   # Default: EA, 16 cases, 5 shared initialisation + 10 main-loop evaluations.
 #   sbatch scripts/slurm/slurm_ea_qwen32b.sh
 #
 #   # Smoke test before the real run
@@ -47,7 +47,7 @@
 #     sbatch --time="$APPROVED_SLURM_TIME" --job-name="ea_python_final" \
 #            scripts/slurm/slurm_ea_qwen32b.sh
 #
-#   # Random search — same initialization, population, and wall-clock budget.
+#   # Random search — same initialisation, population, and wall-clock budget.
 #   OPTIMIZER=random_search N_CASES=all MAIN_LOOP_BUDGET="$EVALUATION_CEILING" LANGUAGES=python SELECTION=first \
 #     sbatch --time="$APPROVED_SLURM_TIME" --job-name="rand_python_final" \
 #            scripts/slurm/slurm_ea_qwen32b.sh
@@ -62,7 +62,7 @@ MAX_DEPTH=${MAX_DEPTH:-4}                 # per-rule stacked-mutation depth cap 
 # K for the shared random sampler: each random chromosome stacks n∈[1,K] changes
 # (supervisor pseudocode: random(1,10)). Used by random_search + EA init/injection.
 RANDOM_MAX_CHANGES=${RANDOM_MAX_CHANGES:-10}
-# Five shared initialization candidates are fixed by the final method.
+# Five shared initialisation candidates are fixed by the final method.
 EA_INJECTION_EVERY=${EA_INJECTION_EVERY:-10}  # inject a random sample every N EA iters (0=off)
 # Probability of a rule-order move (per EA local move and per sampler change).
 ORDER_MOVE_WEIGHT=${ORDER_MOVE_WEIGHT:-0.1}
@@ -81,14 +81,14 @@ SEMGREP_JOBS=${SEMGREP_JOBS:-4}
 # Mutator pool: the full 8-mutator set. EA and random_search do their own
 # constrained random selection over this pool (no pool-level strategy).
 MUTATORS=${MUTATORS:-"synonym_replacement add_random_word verb_weakening negation_injection voice_change paraphrase section_reorder_shuffle section_reorder_degrade"}
-# Validation default ON: the f2 rule-fidelity objective is SBERT-based and the
+# Validation default ON: the f2 textual-similarity objective is SBERT-based and the
 # entrypoint refuses real runs without it.
 ENABLE_VALIDATION=${ENABLE_VALIDATION:-1}
 ENABLE_EVAL_CACHE=${ENABLE_EVAL_CACHE:-1}
-# Optimization direction: "minimize" (REPAIR: fewer vulns, default) | "maximize".
+# Optimisation direction: "minimize" (REPAIR: fewer findings, default) | "maximize".
 OBJECTIVE_DIRECTION=${OBJECTIVE_DIRECTION:-minimize}
 ALLOW_UNQUALIFIED_MAP=${ALLOW_UNQUALIFIED_MAP:-0}
-REPO_ROOT=${REPO_ROOT:-/home/rnegro/thesis/rule-mutation}
+REPO_ROOT=${REPO_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}
 OUTPUT_BASE=${OUTPUT_BASE:-"$REPO_ROOT/experiments/results"}
 INITIALIZATION_BUNDLE=${INITIALIZATION_BUNDLE:-}
 TIME_BUDGET_SECONDS=${TIME_BUDGET_SECONDS:-}
@@ -147,7 +147,7 @@ echo "  Semgrep jobs:    $SEMGREP_JOBS"
 echo "  Mutators:        $MUTATORS"
 echo "  Validation:      $ENABLE_VALIDATION (1=enabled)"
 echo "  Eval cache:      $ENABLE_EVAL_CACHE (0=disabled)"
-echo "  Objective dir:   $OBJECTIVE_DIRECTION (minimize=reward fewer vulns)"
+echo "  Objective dir:   $OBJECTIVE_DIRECTION (minimize=reward fewer findings)"
 echo "  Init bundle:     ${INITIALIZATION_BUNDLE:-none}"
 echo "  Time budget:     ${TIME_BUDGET_SECONDS:-not declared} seconds"
 echo "  Pretimeout lead: ${PRETIMEOUT_LEAD_SECONDS}s"

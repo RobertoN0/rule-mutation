@@ -1,7 +1,9 @@
 {
   "artifact_type": "rq4_safe_zone_aware_phase3_comparison",
+  "inference_status": "superseded pairwise-task-set/sign-test inference; retained for provenance and the temperature-zero selection gain",
+  "superseded_by": "rq4_three_way_baseline_comparison.json",
   "interpretation": "validation-style stochastic resampling of post-selected candidates; selected candidates share benchmarks, baselines, and model systems",
-  "baseline_policy": "reuse final original-rules/no-rules temperature-0.6 baselines",
+  "baseline_policy": "reuse final authored-rules/no-rules temperature-0.6 baselines",
   "target_seeds": 20,
   "runs": {
     "llama_java_r1_561c0c2f": {
@@ -8183,7 +8185,7 @@
   },
   "pending": [],
   "multiplicity": {
-    "family": "all 20 selected-candidate vs original-rules comparisons",
+    "family": "all 20 selected-candidate vs authored-rules comparisons",
     "n_complete_tests": 20,
     "n_planned_tests": 20,
     "family_complete": true,

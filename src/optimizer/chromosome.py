@@ -14,8 +14,9 @@ only, ``order_priority`` holds bumped rules only. Everything else falls back to
 the originals held by :class:`RuleSetSpace`.
 
 Objectives — the conservative set (all maximised by :class:`ChromosomeArchive`):
-    f1 = vulnerability reduction (raw Semgrep-finding delta)
-    f2 = rule fidelity (mean SBERT of mutated rules vs originals)
+    f1 = Semgrep-finding reduction
+    f2 = textual similarity (mean SBERT versus authored originals; stored as
+         ``rule_fidelity`` for schema compatibility)
     f3 = −parsimony (negated count of mutated rules)
 
 """
@@ -50,8 +51,8 @@ class GeneState:
     rule_id: str
     text: str
     mutation_path: list[str] = field(default_factory=list)
-    """Ordered mutator names that produced ``text`` from the original rule.
-    Empty ⇒ the gene is original."""
+    """Ordered mutator names that produced ``text`` from the authored rule.
+    Empty ⇒ the gene retains the authored text."""
 
     @property
     def depth(self) -> int:

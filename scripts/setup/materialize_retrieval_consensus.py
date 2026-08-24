@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate retrieval sweeps and materialize canonical majority-rule maps."""
+"""Validate retrieval sweeps and materialise canonical majority-rule maps."""
 
 from __future__ import annotations
 
@@ -77,7 +77,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
     consensus = subparsers.add_parser(
         "consensus",
-        help="Validate a sweep and materialize one canonical consensus part.",
+        help="Validate a sweep and materialise one canonical consensus part.",
     )
     _add_sweep_arguments(consensus)
     consensus.add_argument("--canonical-carrier", type=Path, required=True)

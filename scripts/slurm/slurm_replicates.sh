@@ -7,13 +7,14 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --gpus-per-task=1
 #SBATCH --mem-per-cpu=8000M
-#SBATCH --output=/home/rnegro/thesis/rule-mutation/logs/%j_%x.out
-#SBATCH --error=/home/rnegro/thesis/rule-mutation/logs/%j_%x.err
+#SBATCH --output=logs/%j_%x.out
+#SBATCH --error=logs/%j_%x.err
 
 #############################################################################
 # Replicate runner: load the model ONCE, run temp>0 replicates of a SINGLE
 # condition under chosen seeds, for one (MODEL, LANGUAGES). One condition per
-# job; choose the wall time at submission and split norules/withrules into jobs.
+# job; choose the wall time at submission and split no-rules/authored-rules
+# conditions (internally norules/withrules) into jobs.
 #
 # Per-replicate results flush to replicates.jsonl (append), and per-prompt
 # records (incl. generated code) to intermediate/<condtag>_seed<NNNN>.jsonl, so a
@@ -21,7 +22,7 @@
 # to the missing seeds resumes the same OUTPUT_DIR.
 #
 # Usage:
-#   # No-rules / with-rules baselines (one condition each):
+#   # No-rules / authored-rules baselines (one condition each):
 #   MODEL=qwen LANGUAGES=python CONDITION=norules sbatch scripts/slurm/slurm_replicates.sh
 #   MODEL=qwen LANGUAGES=python CONDITION=withrules \
 #       BASELINE_REF=experiments/results/<norules_run_dir> sbatch scripts/slurm/slurm_replicates.sh
@@ -80,7 +81,7 @@ else
     echo "ERROR: set CONDITION=norules|withrules (or RULES_OVERRIDE_DIR for override mode)"; exit 1
 fi
 
-REPO_ROOT="${REPO_ROOT:-/home/rnegro/thesis/rule-mutation}"
+REPO_ROOT="${REPO_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}"
 OUTPUT_BASE=${OUTPUT_BASE:-"$REPO_ROOT/experiments/results"}
 NORULES_MAP=${NORULES_MAP:-"$REPO_ROOT/rule_maps/qualified/final_search_norules_map_${LANGUAGES}.json"}
 WITHRULES_MAP=${WITHRULES_MAP:-"$REPO_ROOT/rule_maps/qualified/final_search_map_${MODEL}_${LANGUAGES}.json"}

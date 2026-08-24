@@ -5,14 +5,10 @@ The comparison uses the best structurally compliant candidate *observed* in
 each original run.  It is a post-hoc sensitivity analysis, not a reconstruction
 of a search that enforced the contract while adapting its archive.
 
-WHY THE CHANGE
---------------
-The four model/language strata were pre-specified but not pre-registered.  Raw
-p-values and Holm-adjusted family decisions are both reported.  The exact sign
-test is primary because it needs neither a symmetric distribution of paired
-differences nor a random-treatment interpretation.  An exact paired sign-flip
-test on the mean is retained as a sensitivity analysis; its inferential reading
-requires within-pair exchangeability under the null.
+The exact sign test and Holm decisions produced here are superseded provenance.
+The submitted thesis uses exact Wilcoxon signed-rank tests and A12 from
+``rq_wilcoxon_effect_sizes.json``. The paired data and descriptive estimates
+remain inputs to the final analysis.
 
 Effect size is paired: median within-seed difference and the paired
 common-language probability P(EA>random)+0.5P(tie).  The former unpaired A12
@@ -43,6 +39,11 @@ def main():
 
     rep = {
         "artifact_type": "rq2_posthoc_safe_zone_sensitivity",
+        "inference_status": (
+            "paired values and descriptive estimates remain current; sign-test and "
+            "sign-flip decisions are superseded provenance"
+        ),
+        "superseded_by": "rq_wilcoxon_effect_sizes.json",
         "interpretation": (
             "best structurally compliant candidates observed within raw searches; "
             "not equivalent to constrained-search reruns"
@@ -137,13 +138,18 @@ def main():
         "The score is the best structurally compliant candidate observed within each",
         "raw search. This post-hoc filter does not reconstruct constrained trajectories.",
         "",
+        "> **Superseded inference.** The paired values and descriptive estimates remain",
+        "> valid, but the exact sign test and its Holm decisions below are provenance",
+        "> only. The submitted thesis uses the exact Wilcoxon signed-rank test and A12 in",
+        "> `rq_wilcoxon_effect_sizes.json`.",
+        "",
         "## Declared family",
         "",
         f"- **Family**: {rep['family']['declared']}",
         f"- **Rationale**: {rep['family']['rationale']}",
         "- Holm thresholds attach to p-value rank, not to a fixed stratum.",
         "",
-        "## Primary result - paired effect size and exact sign test",
+        "## Historical result - paired effect size and superseded exact sign test",
         "",
         "| stratum | n | median Δ [95% boot CI] | paired superiority | + / - / tie | sign p | Holm p-thr | Holm rejects |",
         "|---|---:|---|---:|---:|---:|---:|:--:|",

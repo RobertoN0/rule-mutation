@@ -1,59 +1,58 @@
+# Secrets and environments
 .env
 .venv
 .tools/
+
+# Python build products
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
+
+# Editor / IDE config
+.vscode/
 /.github/instructions
 
-# Dolt database files
+# Local databases and issue-tracker state (internal tooling, never published)
 .dolt/
+.beads/
+.beads-bundle-backup/
 *.db
 
-# Local experiment outputs
+# Experiment run trees and scheduler logs.
+# The 8.4 GB raw tree is archived off-repo; see EVIDENCE_MAP.md section 4.
+/experiments/
 experiments/results/
-logs/
-
-# Beads issue tracker — internal workflow tooling, kept off the public/main repo.
-# Issue data lives locally in .beads/dolt/ and on the dolt_db transport branch.
-.beads/
-
-# Editor/IDE config — local-only
-.vscode/
-
-
-validation/
-LaTex_thesis_scripts/
-
-CLAUDE.md
 experiments/analysis/
 analysis_output/
-AGENTS.md
-STATUS.md
-.beads-bundle-backup/
 results/
+validation/
+logs/*
+!logs/.gitkeep
 
-# Local working docs — kept on disk, not part of the public/main repo
-DEPENDENCIES_AND_FLOW.md
-analysis_prompts/post_run_analysis.md
-
-literature_review/LITERATURE_REVIEW_ANALYSIS.md
+# Published compact analysis outputs (exception to the bare results/ rule above)
+!analysis/results/
 
 # Generated retrieval maps + progress logs (timestamped; API-side variability).
 # The committed reference maps are the explicit map_*.json files under rule_maps/.
 rule_maps/rule_retrieval_map_*.json
 rule_maps/retrieval_map_*.json
 rule_maps/*progress*.jsonl
-
-/experiments/
-
-# DelftBlue-only ops/recovery helpers — useful here, no external value
-scripts/slurm/slurm_tar_archive.sh
-scripts/slurm/slurm_rescore_baseline.sh
 rule_maps/_smoke/
 rule_maps/temp_sweep/
 rule_maps/temp_sweep_reframed
 rule_maps/old_maps/
 
-# Published compact analysis outputs (exception to the bare results/ rule above)
-!analysis/results/
+# DelftBlue-only ops/recovery helpers — no value outside that cluster
+scripts/slurm/slurm_tar_archive.sh
+scripts/slurm/slurm_rescore_baseline.sh
+
+# Local working docs and agent instructions — kept on disk, not published
+AGENTS.md
+CLAUDE.md
+STATUS.md
+DEPENDENCIES_AND_FLOW.md
+analysis_prompts/post_run_analysis.md
+literature_review/LITERATURE_REVIEW_ANALYSIS.md
+
+# The thesis sources live in their own repository
+LaTex_thesis_scripts/

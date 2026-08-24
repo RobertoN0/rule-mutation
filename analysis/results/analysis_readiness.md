@@ -6,20 +6,19 @@
 
 | gate | pass | detail |
 |---|:--:|---|
-| search safe-zone audit | YES | 80 runs; 10789 evaluations; 4598 full-invalid; 2297 core-invalid |
+| search safe-zone audit | YES | 80 runs; 10789 evaluations; 4598 full-contract exclusions; 2297 fenced-code exclusions; 2301 inline-only exclusions |
 | RQ1 compact result | YES | four strata x ten EA runs |
-| RQ2 three-lens result | YES | four strata x ten matched pairs; primary Holm rejections 4/3/0 |
+| RQ2 three-lens result | YES | four strata x ten matched pairs; exact-Wilcoxon Holm rejections 4/4/0 |
 | RQ3 nine-family result | YES | 40 EA runs; eight text operators plus whole-rule reordering |
-| sanitized T=0 validation | YES | 12/12 positive; repair delta range -4 to +1 findings |
+| sanitised T=0 validation | YES | 12/12 positive; sanitisation delta range -4 to +1 findings |
 | RQ4 candidate selection | YES | 20 selected candidates |
-| RQ4 artifact consistency | YES | 20/20 complete; final global Holm family present |
-| RQ4 final publication gate | YES | 20/20 complete; final global Holm family present |
-| frozen RQ1-RQ3 figures | YES | PNG/PDF pairs exist for the preferred RQ1, RQ2, and RQ3 figures |
+| RQ4 final shared-task-set artifact | YES | 20/20 shared-task-set comparisons; 7 nominal, 0 Holm rejections |
+| frozen thesis-result figures | YES | PNG/PDF pairs exist for the RQ1-RQ4 figures used by the thesis |
 
-## External checks still required
+## Verification checklist
 
 - compile canonical Python scripts
-- run safe-zone and sanitizer unit tests
+- run safe-zone and sanitiser unit tests
 - run git diff --check
 - regenerate and visually inspect final RQ4 figure after 20/20
 - cross-check every main.tex number against canonical JSON

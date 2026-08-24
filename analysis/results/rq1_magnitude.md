@@ -43,7 +43,7 @@ frontmatter/fenced-block/inline-code preservation contract.
 
 `f1` counts Semgrep findings without regard to severity (ERROR=3, WARNING=1, INFO=0).
 The weighted value is the score attached to the candidate selected by raw f1;
-it is not a separately optimized best-weighted candidate.
+it is not a separately optimised best-weighted candidate.
 If the weighted reduction is proportionally smaller than the raw reduction,
 the search is preferentially removing low-severity findings.
 
@@ -115,4 +115,3 @@ the search is preferentially removing low-severity findings.
 | 8 | 216 | 26 | 26 | 12.0% | 15 | 15 |
 | 9 | 216 | 9 | 27 | 4.2% | 12 | 21 |
 | 10 | 216 | 27 | 27 | 12.5% | 12 | 13 |
-

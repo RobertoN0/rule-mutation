@@ -50,7 +50,7 @@ These counts are separated from code-generation usage in `search_summary.json`.
 `MutationQualityValidator` records:
 
 - operator-specific instruction adherence;
-- SBERT similarity to the parent and to the original rule;
+- SBERT similarity to the parent and to the authored original rule;
 - inline-code and security-keyword retention.
 
 The measurements do not reject a candidate. SBERT similarity supplies f2, so
@@ -73,13 +73,13 @@ overflow policy. The archive has no reset or restart operation.
 
 `run_ea` and `run_random_search` share:
 
-- five origin-based initialization candidates;
+- five origin-based initialisation candidates;
 - `build_random_chromosome`, which applies between one and K changes;
 - the rule/mutator pool, depth cap, order operator, and evaluation callback;
 - identity retry accounting;
 - candidate and prompt-level persistence callbacks.
 
-EA main-loop behavior:
+EA main-loop behaviour:
 
 1. Inject an origin-based random candidate every
    `ea_injection_every` evaluations.
@@ -92,18 +92,18 @@ EA main-loop behavior:
 
 Random search independently samples from the origin after the shared prefix.
 
-`main_loop_budget` is a maximum number of completed post-initialization
+`main_loop_budget` is a maximum number of completed post-initialisation
 evaluations. Total logical evaluations are `5 + main_loop_budget`. A high value
 is used as a safety ceiling for final wall-time runs.
 
 ### `src/optimizer/initialization.py`
 
-Initialization bundles make the common five-candidate prefix reusable. The
+Initialisation bundles make the common five-candidate prefix reusable. The
 module:
 
 - extracts a strict identity from `run_config.json`;
 - serializes complete chromosomes and aggregate fitness;
-- retains prompt-level initialization evidence;
+- retains prompt-level initialisation evidence;
 - captures and restores search, mutator, and Torch RNG states;
 - restores the evaluation cache;
 - verifies canonical content and file hashes.
@@ -115,9 +115,9 @@ run with `main_loop_budget=0`.
 
 `ExperimentEngine` owns the evaluation seam:
 
-1. Evaluate the original-rule baseline.
+1. Evaluate the authored-rules baseline.
 2. Build the full chromosome space from the mapped rules.
-3. Load and verify an initialization bundle when supplied.
+3. Load and verify an initialisation bundle when supplied.
 4. Dispatch to the selected search runner.
 5. Render each candidate per task, use the temperature-zero signature cache,
    generate missing outputs, validate them, run Semgrep, and aggregate fitness.
@@ -198,11 +198,11 @@ Top-level `artifact_type` is `search_run_config`. The file records:
 - code-generation template hash;
 - rules-map hash, selected-population fingerprint, rule-corpus hash, and
   qualification policy;
-- initialization, main-loop, and total evaluation budgets;
+- initialisation, main-loop, and total evaluation budgets;
 - declared scheduler wall time and pre-timeout lead;
 - mutators, archive/search parameters, seed, and objective direction;
 - Semgrep version, local rules hash, file count, and upstream rules commit;
-- initialization-bundle path and content hash when reused.
+- initialisation-bundle path and content hash when reused.
 
 `git_commit_sha` identifies the checked-out commit. It does not attempt to infer
 or police uncommitted files; submission readiness is checked before a run.
@@ -213,12 +213,13 @@ Top-level `artifact_type` is `search_summary`. It records:
 
 - termination reason: `evaluation_budget_complete`, `wall_time_limit`, or
   `rate_limit`;
-- completed initialization and main-loop evaluations;
-- initialization, main-loop, and total elapsed time;
-- original and best raw/weighted findings and invalid-output counts;
+- completed initialisation and main-loop evaluations;
+- initialisation, main-loop, and total elapsed time;
+- authored-baseline and best-candidate raw/weighted findings and
+  invalid-output counts;
 - actual code-generation LLM calls and tokens;
 - actual mutation-LLM usage;
-- logical usage contributed by a precomputed initialization;
+- logical usage contributed by a precomputed initialisation;
 - best chromosome, mutator statistics, and evaluation-cache statistics.
 
 ### `evaluations.jsonl`
@@ -252,10 +253,10 @@ one row per task:
 
 - task, language, CWE, chromosome, mapped rules, and render order;
 - raw and weighted findings, reductions, score source, and analysis status;
-- output-validation decision and Java normalization/line map;
+- output-validation decision and Java normalisation/line map;
 - generated code, finish reason, tokens, and latencies;
-- source and analyzed-code hashes;
-- evaluation-cache or initialization-bundle reuse markers.
+- source and analysed-code hashes;
+- evaluation-cache or initialisation-bundle reuse markers.
 
 ### Archive snapshots and mutated rules
 
@@ -283,12 +284,12 @@ search-population qualification. It writes:
 
 `scripts/setup/materialize_retrieval_consensus.py` validates every retrieval
 draw against its exact carrier and frozen retrieval contract, applies the
-11-of-20 rule, and materializes deterministic model/language consensus maps.
+11-of-20 rule, and materialises deterministic model/language consensus maps.
 `scripts/setup/materialize_eligible_population.py` validates and applies the
 prospective task-eligibility manifest. `analyze_population_screening.py`
 reconciles one complete 20-seed stochastic screening block across both models
-and both no-rules/original-rules conditions. It records observed-finding,
-all-valid-zero, and incomplete-zero tasks separately and materializes the
+and both no-rules/authored-rules conditions. It records observed-finding,
+all-valid-zero, and incomplete-zero tasks separately and materialises the
 conservative qualification-input population.
 
 `scripts/setup/materialize_qualified_search_maps.py` then verifies the four
@@ -316,6 +317,9 @@ Invalid outputs are missing rather than zero. Effects against a baseline are
 computed per seed over the common valid-task subset. The run contract records
 the exact Git commit, cached model revision, Torch/Transformers versions, prompt
 contract, population, map, scanner, and any selected-rule override hash.
+The retained aggregate keys `vulnerable_cases` and `vulnerable_rate_valid`
+mean prompts with at least one Semgrep finding; their historical names do not
+assert that a vulnerability was established.
 
 ## Analysis
 
@@ -327,6 +331,12 @@ contract, population, map, scanner, and any selected-rule override hash.
 - `validate_replicate_run.py`: per-run temperature>0 reconciliation.
 - `analyze_replicates.py`: pooled per-seed effects and confidence intervals,
   written as reviewer-readable tables plus `replicate_analysis.json`.
+- `analysis/scripts/rq_wilcoxon_effect_sizes.py`: final exact Wilcoxon, A12,
+  and family-specific Holm results for RQ2 and RQ4; the superseded sign-test
+  values remain in the output for provenance.
+- `analysis/scripts/rq4_three_way_baseline.py`: final RQ4 comparison on one
+  task set shared by the no-rules condition, authored rules, and all five
+  candidates of a stratum and seed.
 
 ## Extension points
 

@@ -22,12 +22,12 @@ This is the single most important distinction in the repository.
 |---|---|
 | `09b6b963d47abbf1348f8dab10b5dbc97813c5ce` | **The executed system.** All 80 Phase-2 search arms and the Phase-3 candidate replays. Every `run_config.json` records this under `git_commit_sha`. |
 | `20cba85b61c029a3665a03af16417299662b9b77` | The Phase-3 authored-rules and no-rules baselines, which were produced earlier and reused unchanged. A provenance audit confirmed identical model revisions, generation-contract hash, PyTorch/Transformers/Semgrep versions, and scanner-rule hash across both, with no intervening change to generation or sampling behaviour. |
-| Commits after `09b6b96` | **Post-hoc tooling only.** The safe-zone audit, the Phase-3 sanitizer, the fail-closed masking fix in the live mutators, and their tests. None of this ran during Phase 2. |
+| Commits after `09b6b96` | **Post-hoc tooling only.** The safe-zone audit, the Phase-3 sanitiser, the fail-closed masking fix in the live mutators, and their tests. None of this ran during Phase 2. |
 
 Phase 2 specified a structural contract over each rule (frontmatter, fenced code
 blocks, and inline code spans must stay byte-identical to the authored original)
 but did not enforce it fail-closed. Candidates that broke it were evaluated and
-archived. The audit and sanitizer under `scripts/analyze/` were written after
+archived. The audit and sanitiser under `scripts/analyze/` were written after
 Phase 2 to measure and repair that, and the mutators were subsequently made
 fail-closed. **Filtering stored trajectories identifies admissible candidates a
 run visited; it does not reconstruct the trajectory a correctly constrained
@@ -40,7 +40,9 @@ system from the intended-contract sensitivity view.
 
 Figure and table numbers refer to the thesis PDF. Analysis JSON lives in
 [`analysis/results/`](analysis/results/); the scripts that write it live in
-[`analysis/scripts/`](analysis/scripts/).
+[`analysis/scripts/`](analysis/scripts/). Each figure file in
+[`analysis/figures/`](analysis/figures/) carries the same basename as the copy
+embedded in the report, and the two are byte-identical.
 
 ### Main text
 
@@ -48,11 +50,13 @@ Figure and table numbers refer to the thesis PDF. Analysis JSON lives in
 |---|---|---|
 | Figure 1 — three-phase framework | hand-drawn (draw.io) | figure source lives with the report, not here |
 | Table 1 — mutation operators | source of truth is the code | [`src/mutation/rule_based.py`](src/mutation/rule_based.py), [`src/mutation/llm_based.py`](src/mutation/llm_based.py) |
-| Table 2, Figure 2 — RQ1 magnitude | `rq1_magnitude.py` | `analysis/results/rq1_magnitude.{json,md}`, `analysis/figures/fig1_rq1_magnitude.{pdf,png}` |
-| Table 3 — RQ2 paired EA vs random | `rq2_ea_vs_random.py` | `analysis/results/rq2_ea_vs_random.{json,md}` |
-| Figure 3 — RQ2 across admissibility lenses | `rq2_safe_zone_tiers.py` | `analysis/results/rq2_safe_zone_tiers.{json,md}`, `analysis/figures/fig2_rq2_safe_zone_tiers.{pdf,png}` |
+| Table 2, Figure 2 — RQ1 magnitude | `rq1_magnitude.py` | `analysis/results/rq1_magnitude.{json,md}`, `analysis/figures/rq1_magnitude.{pdf,png}` |
+| §5.1 — per-task spread behind the summed objective | extracted from the archived search trees | `analysis/results/rq1_per_task_distribution.json` |
+| Table 3 — RQ2 paired EA vs random | `rq2_safe_zone_tiers.py`, `rq_wilcoxon_effect_sizes.py` | `analysis/results/rq2_safe_zone_tiers.{json,md}` for medians and intervals; `analysis/results/rq_wilcoxon_effect_sizes.json` for Wilcoxon p-values, Vargha-Delaney A12 and Holm decisions |
+| Figure 3 — RQ2 across admissibility lenses | `rq2_safe_zone_tiers.py` + `rq_wilcoxon_effect_sizes.py` + `make_figures.py` | `analysis/results/rq2_safe_zone_tiers.{json,md}` for medians and intervals; `analysis/results/rq_wilcoxon_effect_sizes.json` for the p-values and Holm decisions the markers encode; `analysis/figures/rq2_safe_zone_tiers.{pdf,png}` |
 | Table 4 — RQ3 move families | `rq3_mutators.py` | `analysis/results/rq3_mutators.{json,md}` |
-| Figure 4 — RQ4 survival | `rq4_phase3_safe_compare.py` | `analysis/results/rq4_phase3_safe_comparison.{json,md}`, `analysis/figures/fig7_rq4_survival.{pdf,png}` |
+| Figure 4 — RQ4 candidates vs authored rules | `rq4_three_way_baseline.py` + `make_figures.py` | `analysis/results/rq4_three_way_baseline_comparison.{json,md}`, `analysis/figures/rq4_survival.{pdf,png}`. The temperature-0 tick is the deterministic gain from `rq4_phase3_safe_comparison.json` |
+| §5.4 — RQ4 three-way comparison (no rules, authored, candidate) | `rq4_three_way_baseline.py` | `analysis/results/rq4_three_way_baseline_comparison.{json,md}` |
 
 ### Appendices
 
@@ -61,15 +65,29 @@ Figure and table numbers refer to the thesis PDF. Analysis JSON lives in
 | Table 5 — rule coverage in final maps | Phase-1 map construction | [`rule_maps/qualified/`](rule_maps/qualified/) |
 | Table 6 — population construction funnel | Phase-1 audit and screening | `rule_maps/qualified/source_population.json`, `analysis/results/analysis_readiness.{json,md}` |
 | Table 7 — search parameters | recorded per run | any `run_config.json` in the archived tree; see §4 |
-| Table 8 — evaluations admitted by each lens | `audit_search_safe_zones.py` | `analysis/results/search_safe_zone_audit.json` |
-| Table 9 — non-compliant evaluations by broken component | `audit_search_safe_zones.py` | `analysis/results/search_safe_zone_audit.json` |
-| Figure 5 — RQ3 detail | `rq3_mutators.py` + `make_figures.py` | `analysis/figures/fig4_rq3_operators_effectiveness.{pdf,png}` |
-| Table 10 — RQ4 selected candidates | `rq4_phase3_safe_compare.py` | `analysis/results/rq4_phase3_safe_comparison.{json,md}` |
+| Table 8 — sign test vs Wilcoxon by lens | `rq_wilcoxon_effect_sizes.py` | `analysis/results/rq_wilcoxon_effect_sizes.json` |
+| Table 9 — evaluations admitted by each lens | `audit_search_safe_zones.py` | `analysis/results/search_safe_zone_audit.json` |
+| Table 10 — non-compliant evaluations by broken component | `audit_search_safe_zones.py` | `analysis/results/search_safe_zone_audit.json` |
+| Figure 5 — RQ3 detail | `rq3_mutators.py` + `make_figures.py` | `analysis/figures/rq3_operators.{pdf,png}` |
+| Table 11 — RQ4 selected candidates | `rq4_three_way_baseline.py` | `analysis/results/rq4_three_way_baseline_comparison.{json,md}` |
 | Appendix D — prompt templates | source of truth is the code | [`src/retrieval/rule_retrieval_mapping.py`](src/retrieval/rule_retrieval_mapping.py), [`src/evaluation/generation_contract.py`](src/evaluation/generation_contract.py), [`src/mutation/llm_based.py`](src/mutation/llm_based.py) |
 
 The report's own consistency checker (`verify_report_numbers.py`, kept with the
 report sources) validates every number printed in the thesis against these JSON
 files.
+
+**Statistical procedure.** The thesis reports Wilcoxon signed-rank tests with
+Vargha-Delaney A12 effect sizes. p-values are exact, computed by enumerating the
+permutation null over all 2^n sign assignments rather than by normal
+approximation, which matters at n=10 with tied absolute differences. The exact
+sign test used in an earlier version of this analysis is retained in
+`rq_wilcoxon_effect_sizes.json` under `sign_test_p_superseded`, so the change of
+procedure stays traceable. `rq4_three_way_baseline_comparison.json` supersedes
+`rq4_phase3_safe_comparison.json` for every candidate-versus-authored number the
+thesis prints, because it scores all conditions on one shared task set per
+stratum and seed. The older artifact is kept unchanged for provenance only: no task count, drop
+rate, median or p-value printed in the thesis is taken from it, with the single
+exception of the temperature-0 tick in Figure 4.
 
 ---
 
@@ -81,10 +99,11 @@ Phase 2  80 search arms (EA vs random)      -> experiments/03_search_runs/      
          post-hoc structural audit          -> analysis/results/search_safe_zone_audit.json
 Phase 3  candidate selection                -> analysis/results/phase3_selection_topk.{json,md}
          selected rule sets (20)            -> artifacts/phase3_selected/raw/
-         sanitized rule sets (12)           -> artifacts/phase3_selected/sanitized/
+         sanitised rule sets (12)           -> artifacts/phase3_selected/sanitized/
          resampling at T=0.6                -> experiments/05_phase3_resampling/ [archived, §4]
-         sanitized validation               -> experiments/06_safe_zone_validation/ [archived, §4]
-         final comparison                   -> analysis/results/rq4_phase3_safe_comparison.{json,md}
+         sanitised validation               -> experiments/06_safe_zone_validation/ [archived, §4]
+         pairwise comparison (superseded)   -> analysis/results/rq4_phase3_safe_comparison.{json,md}
+         three-way final comparison         -> analysis/results/rq4_three_way_baseline_comparison.{json,md}
 ```
 
 Supporting checks, all in `analysis/results/`:
@@ -94,7 +113,7 @@ Supporting checks, all in `analysis/results/`:
   with the final task population.
 - `phase3_order_priority_check.json` — verifies the rule ordering carried by
   each selected candidate's derived retrieval map.
-- `safe_zone_validation.json` — compares each sanitized candidate's
+- `safe_zone_validation.json` — compares each sanitised candidate's
   temperature-0 rerun with its immutable raw source evaluation.
 
 ---
@@ -114,17 +133,17 @@ contain the raw run trees, which total about **8.4 GB**.
 | `analysis/scripts/` | the canonical read-only analyses and the figure builder | ~350 KB |
 | `analysis/results/` | every JSON/Markdown result the thesis cites | ~2 MB |
 | `analysis/figures/` | regenerated PDF and PNG figures | ~1 MB |
-| `artifacts/phase3_selected/` | the 20 selected rule sets, the 12 sanitized ones, their maps and manifests | ~6 MB |
+| `artifacts/phase3_selected/` | the 20 selected rule sets, the 12 sanitised ones, their maps and manifests | ~6 MB |
 | `project-codeguard/` | the authored rule library, as a submodule pinned at `8ec52cf4591bad0a541e3ee5ee6979522ee99757` | submodule |
 
-**Archived outside the repository** (retained in the research worktree; not
-deposited publicly)
+**Archived outside the repository** (retained on DelftBlue under
+`/scratch/rnegro`; not present in this workspace and not deposited publicly)
 
 | Path | Contents | Size |
 |---|---|---|
 | `experiments/03_search_runs/` | 80 arms across 156 job directories: `run_config.json`, `evaluations.jsonl`, `search_summary.json`, `search_validation.json`, `evaluation_manifest.json`, archive snapshots, every mutated rule set, Semgrep debug output | 6.6 GB |
 | `experiments/05_phase3_resampling/` | 17 job directories of temperature-0.6 candidate replays with per-task records | 352 MB |
-| `experiments/06_safe_zone_validation/` | 21 job directories validating the sanitized candidates | 202 MB |
+| `experiments/06_safe_zone_validation/` | 21 job directories validating the sanitised candidates | 202 MB |
 | `experiments/01_population_and_maps/` | Phase-1 retrieval sweeps and the Phase-3 screening baselines | 314 MB |
 | `experiments/00_population_audit/`, `02_readiness_validation/` | source-population audit and readiness checks | 46 MB |
 | `experiments/99_superseded/` | superseded waves, kept for provenance only | 969 MB |
@@ -183,11 +202,16 @@ export ANALYSIS_OUT=/path/to/output/dir
 .venv/bin/python analysis/scripts/rq2_safe_zone_tiers.py
 .venv/bin/python analysis/scripts/rq3_mutators.py
 .venv/bin/python analysis/scripts/rq4_phase3_safe_compare.py
+.venv/bin/python analysis/scripts/rq4_three_way_baseline.py
+.venv/bin/python analysis/scripts/rq_wilcoxon_effect_sizes.py \
+  analysis/results analysis/results/rq_wilcoxon_effect_sizes.json
 ```
 
 `make_figures.py` needs `matplotlib`, which is deliberately absent from the
-frozen environment; run it from a separate plotting environment and set
-`ANALYSIS_BASE` to the directory holding `report/` and `figures/`.
+frozen environment. The committed figures use Matplotlib 3.10.9. From a
+separate plotting environment, run it without path overrides to read
+`analysis/results/` and write `analysis/figures/`. `ANALYSIS_BASE` remains
+available for the historical `report/` plus `figures/` layout.
 
 Without the archived experiment tree the scripts have nothing to read. The
 published JSON in `analysis/results/` is the record of what they produced.
@@ -201,11 +225,20 @@ published JSON in `analysis/results/` is the record of what they produced.
   greedy temperature-0 decoding, but GPU determinism was not explicitly
   enforced, and the synonym augmenter drew from process-global Python and NumPy
   streams that were seeded at process start but not captured in the
-  initialization bundle.
+  initialisation bundle.
 - Semgrep findings are a proxy. A match may be a false positive and an absent
   finding may be a false negative. A lower count is not evidence of fewer
   vulnerabilities, of secure code, or of functional correctness.
 - Semantic equivalence between a mutated rule and its authored original was
   never verified, and several operators deliberately weaken security guidance.
-- Raw and sanitized Phase-3 candidates are kept in separate directories and
+- Raw and sanitised Phase-3 candidates are kept in separate directories and
   their results are never mixed.
+- The safe-zone contract is **structural, not semantic**. It constrains which
+  spans of a rule may change; it says nothing about whether the changed rule
+  still means what the authored rule meant.
+- RQ3 reports **associations** between move families and observed gains. Moves
+  within a run are dependent and were never randomised, so no result here
+  supports a causal claim about an operator.
+- Non-significance is never evidence that two conditions are equal.
+- How much of a rule's original meaning a repair must preserve is deliberately
+  left open. That is a stated open question, not an omission.

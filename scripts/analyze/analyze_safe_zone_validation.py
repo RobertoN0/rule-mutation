@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare sanitized-candidate validation runs with their immutable raw sources."""
+"""Compare sanitised-candidate validation runs with their immutable raw sources."""
 
 from __future__ import annotations
 

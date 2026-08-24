@@ -286,7 +286,7 @@ def main() -> int:
     if invalid:
         for result in invalid:
             print(json.dumps(result, indent=2), file=sys.stderr)
-        raise SystemExit("Refusing to analyze invalid replicate-run artifacts")
+        raise SystemExit("Refusing to analyse invalid replicate-run artifacts")
     _assert_comparable(validation_dirs)
 
     by_cond = pool(args.run_dirs)
@@ -334,7 +334,7 @@ def main() -> int:
         for record in sorted(records, key=lambda row: row["seed"])
     ]
     write_csv(out / "observed_raw_findings.csv", observed_header, observed_rows)
-    lines.append("\n## Observed raw vulnerability counts and denominators")
+    lines.append("\n## Observed raw Semgrep-finding counts and denominators")
     lines.append(
         "Raw counts are primary but are not compared as full-population totals when "
         "a replicate has invalid outputs."

@@ -26,7 +26,7 @@ qualification:
 
 1. apply the reviewed, outcome-independent eligibility manifest;
 2. screen the remaining tasks at temperature 0.6 under both no-rules and
-   original-rules conditions for Qwen and Llama over seeds 1–20;
+   authored-rules conditions for Qwen and Llama over seeds 1–20;
 3. distinguish tasks with at least one observed finding, tasks whose 80
    observations are all valid and zero, and zero-finding tasks with incomplete
    observations;
@@ -84,7 +84,7 @@ MODEL=llama LANGUAGES=java RULES_MAP=<screened-llama-java-map> \
 ```
 
 Each wrapper writes `qualification_validation.json`; all four results must be
-`VALID`. Then materialize the shared model intersection:
+`VALID`. Then materialise the shared model intersection:
 
 ```bash
 python scripts/setup/materialize_qualified_search_maps.py \
@@ -111,7 +111,7 @@ The entrypoint is `scripts/experiments/run_experiment.py`. Choose a backend
 (`--backend`), a model (`--model`), a search strategy (`--optimizer`), and a
 rule map.
 
-### Prepare the shared initialization
+### Prepare the shared initialisation
 
 For each final `(model, language, seed)` combination, evaluate the five initial
 candidates once by running either optimizer with `MAIN_LOOP_BUDGET=0`. Validate
@@ -151,7 +151,8 @@ python scripts/experiments/run_experiment.py \
 
 Swap `--optimizer random_search` for the i.i.d. baseline (same sampler, no
 archive). `--enable-validation` is **required** on real runs (it computes the f2
-rule-fidelity objective); only `--dry-run` may omit it.
+textual-similarity objective, stored as `rule_fidelity`); only `--dry-run` may
+omit it.
 
 ### Choosing the model
 
@@ -177,7 +178,7 @@ run-level outcomes are in `search_summary.json`.
 | `--objective-direction {minimize,maximize}` | `minimize` (default) = repair; `maximize` = secondary adversarial direction |
 | `--rules-map PATH` | prompt → rule-IDs map (pre-computed maps in `rule_maps/`) |
 | `--n-cases N`, `--languages …` | size + language filter of the prompt set |
-| `--main-loop-budget B` | safety ceiling after the shared five-candidate initialization; identities do not consume an evaluation |
+| `--main-loop-budget B` | safety ceiling after the shared five-candidate initialisation; identities do not consume an evaluation |
 | `--initialization-bundle PATH` | reuse the strictly keyed five-candidate prefix |
 | `--wall-time-budget-seconds S` | declared scheduler allocation; the final common value is frozen after supervisor approval |
 | `--selection {first,random}` | take the first N cases, or a seeded random N |
@@ -185,7 +186,7 @@ run-level outcomes are in `search_summary.json`.
 | `--random-max-changes K` | shared sampler's changes-per-sample cap (default 10) |
 | `--ea-injection-every N` | inject an origin-based random candidate every N main-loop evaluations |
 | `--order-move-weight P` | reorder probability; mutate probability is `1-P` |
-| `--enable-validation` | quality recording; **required** on real runs (feeds f2 fidelity) |
+| `--enable-validation` | quality recording; **required** on real runs (feeds f2 textual similarity) |
 | `--seed N` | reproducibility |
 | `--dry-run` | wire a mock backend (no API calls) to check the plumbing |
 
@@ -194,6 +195,11 @@ run-level outcomes are in `search_summary.json`.
 The thesis runs use DelftBlue A100 nodes with local Qwen and Llama models. The
 model-specific wrappers take the same search overrides and call the common
 entrypoint with `--backend delftblue`:
+
+> **Submit from the repository root.** The wrappers write scheduler output to
+> `logs/` and default `REPO_ROOT` to `$SLURM_SUBMIT_DIR`, both relative to the
+> directory `sbatch` was invoked from. Set `REPO_ROOT` explicitly to submit from
+> anywhere else.
 
 ```bash
 # Smoke before any big batch
@@ -233,7 +239,7 @@ run actually stops.
 | `sbatch --time=HH:MM:SS` | **The real budget.** SLURM kills the job here. |
 | `#SBATCH --signal=B:USR1@<lead>` | **The real stop trigger.** SLURM sends SIGUSR1 `<lead>` seconds before that kill. |
 | `MAIN_LOOP_BUDGET` / `--main-loop-budget B` | Safety ceiling on evaluations (`E = 5 + B`). Set high; if it binds, the run ended early and the pair is not time-matched. |
-| `TIME_BUDGET_SECONDS` / `--wall-time-budget-seconds S` | **Declares the allocation; stops nothing.** No code in `src/` reads it. It is recorded in `run_config.json` so the analyzer can refuse to pool runs that declared different allocations, and so the validator can check the lead is below it. Set it to the same number of seconds as `--time`. |
+| `TIME_BUDGET_SECONDS` / `--wall-time-budget-seconds S` | **Declares the allocation; stops nothing.** No code in `src/` reads it. It is recorded in `run_config.json` so the analyser can refuse to pool runs that declared different allocations, and so the validator can check the lead is below it. Set it to the same number of seconds as `--time`. |
 
 **`TIME_BUDGET_SECONDS` is not optional on a final run.** It stops nothing, but
 `validate_search_run.py` marks a run `final_search_eligible` only when *all* of
@@ -244,7 +250,7 @@ these hold, and a missing or zero budget fails the fourth:
 - completion state is `partial` — a run that *finished* its evaluation ceiling
   did not spend its allocation and is not time-comparable;
 - `wall_time_budget_seconds` is a positive integer;
-- exactly five initialization evaluations are present;
+- exactly five initialisation evaluations are present;
 - `n_cases` equals the full map population (`N_CASES=all`).
 
 The stop path is: SLURM raises SIGUSR1 → the batch shell's `trap` forwards it to
@@ -350,7 +356,7 @@ task-level failure records or a fatal run error; the usual systemic cause is
 
 After selecting conditions from Phase 2, use
 `scripts/experiments/run_replicates.py` through
-`scripts/slurm/slurm_replicates.sh` to rerun no-rules, original-rules, or one
+`scripts/slurm/slurm_replicates.sh` to rerun no-rules, authored-rules, or one
 selected chromosome at temperature greater than zero. One job evaluates one
 model, language, and condition over the declared seeds:
 
@@ -366,9 +372,18 @@ MODEL=qwen LANGUAGES=python CONDITION=withrules \
 For a selected chromosome, set `RULES_OVERRIDE_DIR` to its
 `mutated_rules/evaluation_NNNN/` directory and give it a stable
 `CONDITION_LABEL`. Validate every run with `validate_replicate_run.py`; then
-analyze the complete matrix with `analyze_replicates.py`. Invalid stochastic
+analyse the complete matrix with `analyze_replicates.py`. Invalid stochastic
 outputs are missing observations rather than clean zero-finding outputs, and
 paired task effects are reduced to one effect per seed before inference.
+
+For the submitted thesis, the final RQ4 step is
+`analysis/scripts/rq4_three_way_baseline.py`. It intersects valid tasks across
+the no-rules condition, authored rules, and all five candidates within each
+stratum and seed. Candidate-versus-authored comparisons use exact Wilcoxon
+signed-rank p-values and A12, with Holm correction across all twenty
+candidates. `analysis/scripts/rq_wilcoxon_effect_sizes.py` records this final
+procedure and the three separate four-stratum RQ2 families. Earlier sign tests
+and the pairwise-task-set `rq4_phase3_safe_comparison.json` are superseded.
 
 ---
 
@@ -393,14 +408,15 @@ back to the SLURM wrapper's env vars (`--as delftblue` to force that form).
 
 ### The three objectives (conservative set, all maximised over the whole chromosome)
 
-- **f1 = `total_raw_reduction`** — raw Semgrep-finding reduction vs. baseline under `--objective-direction minimize` (higher = safer); the primary signal.
-- **f2 = `rule_fidelity`** — mean SBERT similarity of each mutated rule to its original (1.0 = unchanged); needs `--enable-validation`.
+- **f1 = `total_raw_reduction`** — raw Semgrep-finding reduction versus the authored-rules baseline under `--objective-direction minimize` (higher = fewer findings); the primary signal.
+- **f2 = `rule_fidelity`** — mean SBERT textual similarity of each mutated rule to its authored original (1.0 = unchanged); needs `--enable-validation`. The field name is historical and does not establish semantic fidelity.
 - **f3 = `−parsimony`** — negated count of text-mutated rules (fewer edits = higher).
 
 f1's sign depends on `objective_direction` (f1 is negated at search time so the EA always
-maximises): under **minimize** (the repair runs) higher f1 = *safer* code (fewer findings);
-under **maximize** (the secondary adversarial direction) higher f1 = *more vulnerable* code.
-f2/f3 capture how faithfully and minimally the rule set was edited. The
+maximises): under **minimize** (the repair runs) higher f1 means fewer findings;
+under **maximize** (the secondary adversarial direction) higher f1 means more findings.
+Neither direction establishes code security. f2/f3 capture textual similarity
+and edit count. The
 severity-weighted reduction is reported separately and does not drive search.
 
 ### Analysis and validation
@@ -411,7 +427,7 @@ Run the per-run validator after each completed search and again after syncing:
 python scripts/analyze/validate_search_run.py --write <run_dir>
 ```
 
-Analyze a validated matrix with:
+Analyse a validated matrix with:
 
 ```bash
 python scripts/analyze/analyze_search_runs.py \
@@ -466,7 +482,7 @@ preflight, so a failed run still has provenance. To finish a shorter run, lower 
 
 - **Always `--seed`.** It fixes the mutator draws and the search trajectory.
 - **Smoke first.** `--dry-run` (mock backend) checks the plumbing for free; a
-  two-case run with five initialization and two main-loop evaluations checks
+  two-case run with five initialisation and two main-loop evaluations checks
   the backend and Semgrep before a large batch.
 - **One run tree per (strategy, language, seed).** The analysis scripts key on `run_config.json`; keep runs in separate `--output-dir`s.
 - **Check `semgrep_debug` once per new environment** (§2) to confirm Semgrep actually ran, not just that findings were 0.

@@ -5,7 +5,7 @@ Main experiment runner: rule-set search (EA / random search) over a retrieval ma
 
 Prompts come exclusively from a retrieval map. Origin-baseline Semgrep scores
 are computed live before the search candidates. Final matched runs may restore
-their shared five-candidate initialization from a strictly keyed bundle.
+their shared five-candidate initialisation from a strictly keyed bundle.
 Direction is repair by default (``--objective-direction minimize``): positive
 f1 means fewer findings than the origin baseline.
 
@@ -230,7 +230,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=5,
         help=(
             "Candidate evaluations after the shared five-candidate "
-            "initialization (default: 5; total evaluations = 5 + this value). "
+            "initialisation (default: 5; total evaluations = 5 + this value). "
             "Identity/no-op proposals do not consume an evaluation. Set this "
             "ceiling high for time-bounded SLURM runs."
         ),
@@ -268,10 +268,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--objective-direction",
         choices=["minimize", "maximize"],
         default="minimize",
-        help="f1 optimization direction. 'minimize' (default) = REPAIR: reward "
-             "fewer vulnerabilities than baseline (positive recorded f1 ⇒ the "
-             "mutation reduced vulns). 'maximize' = the adversarial direction, "
-             "kept for secondary experiments only.",
+        help="f1 optimisation direction. 'minimize' (default) = REPAIR: reward "
+             "fewer Semgrep findings than the authored-rules baseline (positive "
+             "recorded f1 means fewer findings). 'maximize' = the adversarial "
+             "direction, kept for secondary experiments only.",
     )
     parser.add_argument(
         "--seed",
@@ -410,7 +410,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=(
             "Enable in-loop mutation quality validation (SBERT semantic "
             "similarity + structural criteria). Observational — never gates "
-            "acceptance — but REQUIRED for real runs: the f2 rule-fidelity "
+            "acceptance — but REQUIRED for real runs: the f2 textual-similarity "
             "objective is the validator's SBERT similarity."
         ),
     )
@@ -458,11 +458,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
     args = parser.parse_args(argv)
 
-    # The f2 rule-fidelity objective is computed by the validator's SBERT model;
+    # The f2 textual-similarity objective is computed by the validator's SBERT model;
     # without it f2 degenerates to a constant 1.0. Only mock smokes may skip it.
     if not args.dry_run and not args.enable_validation:
         parser.error(
-            "--enable-validation is required for real runs: the f2 rule-fidelity "
+            "--enable-validation is required for real runs: the f2 textual-similarity "
             "objective is SBERT-based. Only --dry-run (mock backend) may omit it."
         )
     if args.main_loop_budget < 0:
@@ -640,7 +640,7 @@ def create_mock_backend():
             return True
 
         def generate(self, system, messages, **kwargs):
-            # Return vulnerable-looking code for testing
+            # Return code with an obvious scanner finding for testing.
             return LLMResponse(
                 content='import os\nresult = os.system(f"ls {user_input}")\nprint(result)',
                 model="mock-model",
@@ -845,11 +845,13 @@ def print_config_summary(args: argparse.Namespace, config: SearchConfig, n_promp
     print("\n⚙️  Search Configuration:")
     print(f"   Test cases: {n_prompts}")
     print(
-        f"   Evaluation budget: 5 initialization + "
+        f"   Evaluation budget: 5 initialisation + "
         f"{config.main_loop_budget} main-loop = {5 + config.main_loop_budget} total"
     )
-    print(f"   Direction: {args.objective_direction} "
-          f"({'repair — positive f1 = fewer vulns' if args.objective_direction == 'minimize' else 'adversarial'})")
+    print(
+        f"   Direction: {args.objective_direction} "
+        f"({'repair — positive f1 = fewer findings' if args.objective_direction == 'minimize' else 'adversarial'})"
+    )
     print(f"   Prompt contract: {prompt_contract_sha256()}")
     if args.optimizer == "ea":
         print(f"   Optimizer: ea (single local move, "
@@ -873,7 +875,7 @@ def print_results_summary(result, n_prompts: int) -> None:
     print(f"Test cases: {n_prompts}")
     print(f"Evaluations completed: {len(result.iterations)}")
     print(f"Total time: {result.total_time_seconds:.1f}s")
-    print(f"Initialization time: {result.initialization_time_seconds:.1f}s")
+    print(f"Initialisation time: {result.initialization_time_seconds:.1f}s")
     print(f"Main-loop time: {result.main_loop_time_seconds:.1f}s")
     print(f"LLM calls: {result.total_llm_calls}")
     print(
@@ -883,17 +885,17 @@ def print_results_summary(result, n_prompts: int) -> None:
     )
     print()
     print("Baseline:")
-    print(f"  - Vulnerable prompts: {result.original_fitness.num_vulnerable}/{result.original_fitness.num_prompts}")
+    print(f"  - Finding-positive prompts: {result.original_fitness.num_vulnerable}/{result.original_fitness.num_prompts}")
     print(
-        "  - Raw vulnerabilities (primary): "
+        "  - Raw Semgrep findings (primary): "
         f"{result.original_fitness.total_raw_count}"
     )
     print(f"  - Severity-weighted score (diagnostic): {result.original_fitness.total_weighted_score:.1f}")
     print()
-    print("Best evaluated repair (origin is the floor):")
-    print(f"  - Vulnerable prompts: {result.best_fitness.num_vulnerable}/{result.best_fitness.num_prompts}")
+    print("Best evaluated candidate (origin is the floor):")
+    print(f"  - Finding-positive prompts: {result.best_fitness.num_vulnerable}/{result.best_fitness.num_prompts}")
     print(
-        "  - Raw vulnerabilities (primary): "
+        "  - Raw Semgrep findings (primary): "
         f"{result.best_fitness.total_raw_count}"
     )
     print(f"  - Severity-weighted score (diagnostic): {result.best_fitness.total_weighted_score:.1f}")
@@ -1141,7 +1143,7 @@ def main():
         sys.exit(1)
 
     rule_loader = create_rule_loader(RULES_DIR)
-    print(f"📜 Rule loader initialized: {len(rule_loader.available_rules)} rules available")
+    print(f"📜 Rule loader initialised: {len(rule_loader.available_rules)} rules available")
 
     print()
     prompts_with_rules = load_prompts_with_rules(
@@ -1199,13 +1201,13 @@ def main():
                     expected_identity=config.initialization_identity,
                 )
             except (OSError, ValueError, json.JSONDecodeError) as exc:
-                print(f"❌ Error: initialization bundle rejected: {exc}")
+                print(f"❌ Error: initialisation bundle rejected: {exc}")
                 return 1
             if (
                 run_config["args"]["initialization_bundle_content_sha256"]
                 != bundle.content_sha256
             ):
-                print("❌ Error: initialization bundle changed while configuring the run")
+                print("❌ Error: initialisation bundle changed while configuring the run")
                 return 1
 
     # Run configuration is durable before model loading, NLTK/SBERT preflight,

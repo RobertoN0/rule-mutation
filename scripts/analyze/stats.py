@@ -54,7 +54,7 @@ def mcnemar_binary(baseline_pos: Sequence[bool], treatment_pos: Sequence[bool]) 
     a = np.asarray(baseline_pos, bool)
     b = np.asarray(treatment_pos, bool)
     n = len(a)
-    b01 = int(np.sum(~a & b))   # baseline negative → treatment positive (newly vulnerable)
+    b01 = int(np.sum(~a & b))   # baseline negative → treatment finding-positive
     b10 = int(np.sum(a & ~b))   # baseline positive → treatment negative
     discordant = b01 + b10
     if discordant == 0:
@@ -143,7 +143,7 @@ def mann_whitney_u(a: Sequence[float], b: Sequence[float],
                    alternative: str = "two-sided") -> TestResult:
     """Mann-Whitney U for two genuinely independent samples.
 
-    Do not use this helper when arms share a seed-specific initialization bundle
+    Do not use this helper when arms share a seed-specific initialisation bundle
     or otherwise form matched pairs; preserve that pairing with a paired test.
     """
     from scipy import stats

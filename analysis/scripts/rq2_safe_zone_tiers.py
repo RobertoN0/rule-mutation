@@ -9,14 +9,14 @@ This report keeps three estimands visibly separate:
 
 ``core_structural``
     A post-hoc diagnostic that requires frontmatter and fenced-code structure
-    to be preserved, while allowing inline-code changes. This tier was created
+    to be preserved, while allowing inline-code changes. This lens was created
     after the safe-zone problem was discovered and is exploratory.
 
 ``full_contract``
     The post-hoc exact contract used elsewhere in the corrected analysis:
     preserve frontmatter, fenced-code blocks, and inline-code spans.
 
-The latter two tiers select the best admissible candidate *observed along the
+The latter two lenses select the best admissible candidate *observed along the
 historical raw trajectory*. Neither reconstructs the trajectory that a search
 with fail-closed enforcement would have followed.
 """
@@ -49,7 +49,7 @@ EXPECTED_STRATA = {
 }
 TIERS = {
     "raw_executed": {
-        "label": "Raw executed system",
+        "label": "Executed-system lens",
         "audit_field": "reported_best_f1",
         "status": "system-level result",
         "description": (
@@ -58,7 +58,7 @@ TIERS = {
         ),
     },
     "core_structural": {
-        "label": "Core structural sensitivity",
+        "label": "Fenced-code lens",
         "audit_field": "core_structural_best_f1",
         "status": "post-hoc exploratory sensitivity",
         "description": (
@@ -67,7 +67,7 @@ TIERS = {
         ),
     },
     "full_contract": {
-        "label": "Full safe-zone sensitivity",
+        "label": "Full-contract lens",
         "audit_field": "strict_best_f1",
         "status": "post-hoc conservative sensitivity",
         "description": (
@@ -127,7 +127,7 @@ def _load_and_validate_pairs() -> tuple[dict, list[str], dict]:
                 full = float(row["strict_best_f1"])
                 if not full <= core <= raw:
                     raise ValueError(
-                        "safe-zone tiers are not nested for "
+                        "admissibility lenses are not nested for "
                         f"{stratum} s{seed} {optimizer}: {full}, {core}, {raw}"
                     )
                 for tier, definition in TIERS.items():
@@ -188,18 +188,18 @@ def _analyse_tier(pairs_by_stratum: dict[str, list]) -> dict:
         }
 
     report["families"] = {
-        "primary_sign_test": {
-            "family": "four model-language strata within this tier",
+        "sign_test_superseded": {
+            "family": "four model-language strata within this lens",
             "holm": _holm_rows(sign_ps),
         },
         "magnitude_sensitive_sign_flip": {
-            "family": "four model-language strata within this tier",
+            "family": "four model-language strata within this lens",
             "holm": _holm_rows(sign_flip_ps),
         },
     }
-    report["n_holm_rejections_primary"] = sum(
+    report["n_holm_rejections_sign_test_superseded"] = sum(
         row["reject"]
-        for row in report["families"]["primary_sign_test"]["holm"].values()
+        for row in report["families"]["sign_test_superseded"]["holm"].values()
     )
     return report
 
@@ -212,9 +212,9 @@ def _crosscheck_existing_full(full: dict) -> None:
     for stratum, row in full["strata"].items():
         previous = existing["strata"][stratum]
         if row["deltas_f1"] != previous["deltas_f1"]:
-            raise ValueError(f"full-tier delta mismatch for {stratum}")
+            raise ValueError(f"full-contract lens delta mismatch for {stratum}")
         if abs(row["sign_test"]["p"] - previous["primary"]["p"]) > 1e-12:
-            raise ValueError(f"full-tier sign-test mismatch for {stratum}")
+            raise ValueError(f"full-contract lens sign-test mismatch for {stratum}")
 
 
 def _aggregate_issue_counts(audit: dict) -> dict:
@@ -262,17 +262,22 @@ def _aggregate_issue_counts(audit: dict) -> dict:
 
 def _render_markdown(report: dict) -> str:
     lines = [
-        "# RQ2 safe-zone specification sensitivity",
+        "# RQ2 admissibility-lens sensitivity",
         "",
-        "Unit: one EA/random pair matched by search seed and initialization bundle.",
+        "> **Statistical procedure updated.** The lens data, medians, and intervals in",
+        "> this file remain current. Its exact sign tests are superseded provenance. The",
+        "> submitted thesis uses exact Wilcoxon signed-rank p-values, A12, and",
+        "> lens-specific Holm decisions from `rq_wilcoxon_effect_sizes.json`.",
+        "",
+        "Unit: one EA/random pair matched by search seed and initialisation bundle.",
         "Outcome: best raw Semgrep-finding reduction (`f1`) observed in 24 hours.",
-        "Primary test within each tier: exact two-sided paired sign test; ties are",
+        "Historical test within each lens: exact two-sided paired sign test; ties are",
         "excluded. Holm correction covers the four model-language strata within",
-        "that tier. The sign-flip test is magnitude-sensitive secondary evidence.",
+        "that lens. The sign-flip test is magnitude-sensitive secondary evidence.",
         "",
-        "> **Interpretation guardrail.** The core and full tiers are post-hoc",
+        "> **Interpretation guardrail.** The fenced-code and full-contract lenses are post-hoc",
         "> filters over candidates visited by the historical searches. They do not",
-        "> reconstruct fail-closed constrained-search trajectories. The core tier",
+        "> reconstruct fail-closed constrained-search trajectories. The fenced-code lens",
         "> is an exploratory component diagnostic and must not be selected as the",
         "> primary result merely because it is more favourable.",
         "",
@@ -291,7 +296,7 @@ def _render_markdown(report: dict) -> str:
             ]
         )
         result = report["tiers"][tier]
-        holm_rows = result["families"]["primary_sign_test"]["holm"]
+        holm_rows = result["families"]["sign_test_superseded"]["holm"]
         for stratum in sorted(result["strata"]):
             row = result["strata"][stratum]
             sign = row["sign_test"]
@@ -307,7 +312,8 @@ def _render_markdown(report: dict) -> str:
         lines.extend(
             [
                 "",
-                f"Primary Holm rejections: **{result['n_holm_rejections_primary']}/4**.",
+                "Superseded sign-test Holm rejections: "
+                f"**{result['n_holm_rejections_sign_test_superseded']}/4**.",
                 "",
             ]
         )
@@ -320,7 +326,7 @@ def _render_markdown(report: dict) -> str:
             f"Across {issue['completed_evaluations']:,} completed evaluations, "
             f"{issue['full_contract_invalid_evaluations']:,} "
             f"({issue['full_contract_invalid_fraction']:.1%}) failed the full contract. "
-            f"The core tier rejected {issue['core_structural_invalid_evaluations']:,} "
+            f"The fenced-code lens rejected {issue['core_structural_invalid_evaluations']:,} "
             f"({issue['core_structural_invalid_fraction']:.1%}); "
             f"{issue['inline_only_rescued_evaluations']:,} evaluations "
             f"({issue['inline_only_rescued_fraction']:.1%}) were therefore excluded "
@@ -348,7 +354,7 @@ def _render_markdown(report: dict) -> str:
             "is clear for the executed system but sensitive to the strictest",
             "admissibility definition.",
             "",
-            "Do not infer from the full-tier non-rejections that EA and random are",
+            "Do not infer from the full-contract-lens non-rejections that EA and random are",
             "equivalent. Also do not claim that a genuinely constrained EA would have",
             "followed the post-hoc filtered trajectory; that counterfactual was not run.",
             "",
@@ -364,19 +370,23 @@ def main() -> int:
     report = {
         "artifact_type": "rq2_safe_zone_tier_sensitivity",
         "generated_from": str(SAFE_ZONE_AUDIT),
-        "unit_of_analysis": "EA/random search pair matched by seed and initialization bundle",
+        "unit_of_analysis": "EA/random search pair matched by seed and initialisation bundle",
         "outcome": "best raw Semgrep-finding reduction observed in 24 hours",
-        "primary_test": "exact two-sided paired sign test within tier",
+        "inference_status": (
+            "paired data, medians, and intervals are current; sign-test fields are "
+            "superseded by rq_wilcoxon_effect_sizes.json"
+        ),
+        "primary_test": "exact Wilcoxon signed-rank; stored in rq_wilcoxon_effect_sizes.json",
         "multiplicity": (
             "Holm correction across four model-language strata separately within each "
-            "tier; cross-tier comparisons are a nested specification sensitivity, not "
+            "lens; cross-lens comparisons are a nested specification sensitivity, not "
             "three independent confirmatory families"
         ),
         "guardrails": [
-            "core and full tiers are post-hoc filters over historical trajectories",
-            "core tier is exploratory and was defined after discovering the issue",
-            "full-tier non-rejection is not evidence of equivalence",
-            "no tier establishes semantic equivalence of mutated rules",
+            "fenced-code and full-contract lenses are post-hoc filters over historical trajectories",
+            "fenced-code lens is exploratory and was defined after discovering the issue",
+            "full-contract-lens non-rejection is not evidence of equivalence",
+            "no lens establishes semantic equivalence of mutated rules",
         ],
         "excluded": excluded,
         "tier_definitions": TIERS,

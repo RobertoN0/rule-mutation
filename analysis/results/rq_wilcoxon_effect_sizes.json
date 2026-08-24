@@ -1,0 +1,923 @@
+{
+  "artifact_type": "wilcoxon_signed_rank_and_vargha_delaney",
+  "purpose": "Primary inferential procedure for RQ2 and RQ4, replacing the exact sign test. Vargha-Delaney A12 is the reported effect size.",
+  "alpha": 0.05,
+  "multiplicity": "Holm-Bonferroni within each declared family; families are not pooled.",
+  "rq2_ea_vs_random": {
+    "raw_executed": {
+      "strata": {
+        "llama_java": {
+          "n_pairs": 10,
+          "median_delta": 3.5,
+          "wilcoxon": {
+            "test": "wilcoxon signed-rank",
+            "p": 0.0078125,
+            "p_normal_approx": 0.011209733383895203,
+            "statistic": 0.0,
+            "n_effective": 8,
+            "n_zeros_dropped": 2,
+            "method": "exact permutation null over 2^n sign assignments",
+            "rank_biserial": 1.0
+          },
+          "vargha_delaney_a12": {
+            "value": 0.89,
+            "magnitude": "large",
+            "reading": "P(EA run beats random run), ties at half"
+          },
+          "paired_superiority": 0.9,
+          "sign_test_p_superseded": 0.0078125,
+          "holm": {
+            "p": 0.0078125,
+            "threshold": 0.05,
+            "reject": true
+          }
+        },
+        "llama_python": {
+          "n_pairs": 10,
+          "median_delta": 5.5,
+          "wilcoxon": {
+            "test": "wilcoxon signed-rank",
+            "p": 0.00390625,
+            "p_normal_approx": 0.006801553132897053,
+            "statistic": 1.0,
+            "n_effective": 10,
+            "n_zeros_dropped": 0,
+            "method": "exact permutation null over 2^n sign assignments",
+            "rank_biserial": 0.9636363636363636
+          },
+          "vargha_delaney_a12": {
+            "value": 0.9,
+            "magnitude": "large",
+            "reading": "P(EA run beats random run), ties at half"
+          },
+          "paired_superiority": 0.9,
+          "sign_test_p_superseded": 0.021484375,
+          "holm": {
+            "p": 0.00390625,
+            "threshold": 0.025,
+            "reject": true
+          }
+        },
+        "qwen_java": {
+          "n_pairs": 10,
+          "median_delta": 4.0,
+          "wilcoxon": {
+            "test": "wilcoxon signed-rank",
+            "p": 0.001953125,
+            "p_normal_approx": 0.0046982565725118,
+            "statistic": 0.0,
+            "n_effective": 10,
+            "n_zeros_dropped": 0,
+            "method": "exact permutation null over 2^n sign assignments",
+            "rank_biserial": 1.0
+          },
+          "vargha_delaney_a12": {
+            "value": 0.9949999999999999,
+            "magnitude": "large",
+            "reading": "P(EA run beats random run), ties at half"
+          },
+          "paired_superiority": 1.0,
+          "sign_test_p_superseded": 0.001953125,
+          "holm": {
+            "p": 0.001953125,
+            "threshold": 0.0125,
+            "reject": true
+          }
+        },
+        "qwen_python": {
+          "n_pairs": 10,
+          "median_delta": 11.5,
+          "wilcoxon": {
+            "test": "wilcoxon signed-rank",
+            "p": 0.001953125,
+            "p_normal_approx": 0.005005074402905223,
+            "statistic": 0.0,
+            "n_effective": 10,
+            "n_zeros_dropped": 0,
+            "method": "exact permutation null over 2^n sign assignments",
+            "rank_biserial": 1.0
+          },
+          "vargha_delaney_a12": {
+            "value": 0.985,
+            "magnitude": "large",
+            "reading": "P(EA run beats random run), ties at half"
+          },
+          "paired_superiority": 1.0,
+          "sign_test_p_superseded": 0.001953125,
+          "holm": {
+            "p": 0.001953125,
+            "threshold": 0.016666666666666666,
+            "reject": true
+          }
+        }
+      },
+      "n_holm_rejections": 4
+    },
+    "core_structural": {
+      "strata": {
+        "llama_java": {
+          "n_pairs": 10,
+          "median_delta": 2.0,
+          "wilcoxon": {
+            "test": "wilcoxon signed-rank",
+            "p": 0.00390625,
+            "p_normal_approx": 0.00736857462637493,
+            "statistic": 0.0,
+            "n_effective": 9,
+            "n_zeros_dropped": 1,
+            "method": "exact permutation null over 2^n sign assignments",
+            "rank_biserial": 1.0
+          },
+          "vargha_delaney_a12": {
+            "value": 0.8300000000000001,
+            "magnitude": "large",
+            "reading": "P(EA run beats random run), ties at half"
+          },
+          "paired_superiority": 0.95,
+          "sign_test_p_superseded": 0.00390625,
+          "holm": {
+            "p": 0.00390625,
+            "threshold": 0.0125,
+            "reject": true
+          }
+        },
+        "llama_python": {
+          "n_pairs": 10,
+          "median_delta": 4.5,
+          "wilcoxon": {
+            "test": "wilcoxon signed-rank",
+            "p": 0.04296875,
+            "p_normal_approx": 0.04345530404779366,
+            "statistic": 5.5,
+            "n_effective": 9,
+            "n_zeros_dropped": 1,
+            "method": "exact permutation null over 2^n sign assignments",
+            "rank_biserial": 0.7555555555555555
+          },
+          "vargha_delaney_a12": {
+            "value": 0.71,
+            "magnitude": "medium",
+            "reading": "P(EA run beats random run), ties at half"
+          },
+          "paired_superiority": 0.75,
+          "sign_test_p_superseded": 0.1796875,
+          "holm": {
+            "p": 0.04296875,
+            "threshold": 0.05,
+            "reject": true
+          }
+        },
+        "qwen_java": {
+          "n_pairs": 10,
+          "median_delta": 3.5,
+          "wilcoxon": {
+            "test": "wilcoxon signed-rank",
+            "p": 0.0078125,
+            "p_normal_approx": 0.008711912962379593,
+            "statistic": 2.0,
+            "n_effective": 10,
+            "n_zeros_dropped": 0,
+            "method": "exact permutation null over 2^n sign assignments",
+            "rank_biserial": 0.9272727272727272
+          },
+          "vargha_delaney_a12": {
+            "value": 0.89,
+            "magnitude": "large",
+            "reading": "P(EA run beats random run), ties at half"
+          },
+          "paired_superiority": 0.9,
+          "sign_test_p_superseded": 0.021484375,
+          "holm": {
+            "p": 0.0078125,
+            "threshold": 0.025,
+            "reject": true
+          }
+        },
+        "qwen_python": {
+          "n_pairs": 10,
+          "median_delta": 11.5,
+          "wilcoxon": {
+            "test": "wilcoxon signed-rank",
+            "p": 0.00390625,
+            "p_normal_approx": 0.007473541540877042,
+            "statistic": 0.0,
+            "n_effective": 9,
+            "n_zeros_dropped": 1,
+            "method": "exact permutation null over 2^n sign assignments",
+            "rank_biserial": 1.0
+          },
+          "vargha_delaney_a12": {
+            "value": 0.945,
+            "magnitude": "large",
+            "reading": "P(EA run beats random run), ties at half"
+          },
+          "paired_superiority": 0.95,
+          "sign_test_p_superseded": 0.00390625,
+          "holm": {
+            "p": 0.00390625,
+            "threshold": 0.016666666666666666,
+            "reject": true
+          }
+        }
+      },
+      "n_holm_rejections": 4
+    },
+    "full_contract": {
+      "strata": {
+        "llama_java": {
+          "n_pairs": 10,
+          "median_delta": 1.5,
+          "wilcoxon": {
+            "test": "wilcoxon signed-rank",
+            "p": 0.1484375,
+            "p_normal_approx": 0.12164285939134006,
+            "statistic": 7.0,
+            "n_effective": 8,
+            "n_zeros_dropped": 2,
+            "method": "exact permutation null over 2^n sign assignments",
+            "rank_biserial": 0.6111111111111112
+          },
+          "vargha_delaney_a12": {
+            "value": 0.665,
+            "magnitude": "medium",
+            "reading": "P(EA run beats random run), ties at half"
+          },
+          "paired_superiority": 0.7,
+          "sign_test_p_superseded": 0.2890625,
+          "holm": {
+            "p": 0.1484375,
+            "threshold": 0.025,
+            "reject": false
+          }
+        },
+        "llama_python": {
+          "n_pairs": 10,
+          "median_delta": 3.0,
+          "wilcoxon": {
+            "test": "wilcoxon signed-rank",
+            "p": 0.533203125,
+            "p_normal_approx": 0.5067954114046354,
+            "statistic": 21.0,
+            "n_effective": 10,
+            "n_zeros_dropped": 0,
+            "method": "exact permutation null over 2^n sign assignments",
+            "rank_biserial": 0.23636363636363636
+          },
+          "vargha_delaney_a12": {
+            "value": 0.6199999999999999,
+            "magnitude": "small",
+            "reading": "P(EA run beats random run), ties at half"
+          },
+          "paired_superiority": 0.6,
+          "sign_test_p_superseded": 0.75390625,
+          "holm": {
+            "p": 0.533203125,
+            "threshold": 0.05,
+            "reject": false
+          }
+        },
+        "qwen_java": {
+          "n_pairs": 10,
+          "median_delta": 1.5,
+          "wilcoxon": {
+            "test": "wilcoxon signed-rank",
+            "p": 0.0546875,
+            "p_normal_approx": 0.04827181085171039,
+            "statistic": 4.0,
+            "n_effective": 8,
+            "n_zeros_dropped": 2,
+            "method": "exact permutation null over 2^n sign assignments",
+            "rank_biserial": 0.7777777777777778
+          },
+          "vargha_delaney_a12": {
+            "value": 0.7150000000000001,
+            "magnitude": "large",
+            "reading": "P(EA run beats random run), ties at half"
+          },
+          "paired_superiority": 0.8,
+          "sign_test_p_superseded": 0.0703125,
+          "holm": {
+            "p": 0.0546875,
+            "threshold": 0.016666666666666666,
+            "reject": false
+          }
+        },
+        "qwen_python": {
+          "n_pairs": 10,
+          "median_delta": 10.5,
+          "wilcoxon": {
+            "test": "wilcoxon signed-rank",
+            "p": 0.0234375,
+            "p_normal_approx": 0.023767701926011343,
+            "statistic": 3.5,
+            "n_effective": 9,
+            "n_zeros_dropped": 1,
+            "method": "exact permutation null over 2^n sign assignments",
+            "rank_biserial": 0.8444444444444444
+          },
+          "vargha_delaney_a12": {
+            "value": 0.7550000000000001,
+            "magnitude": "large",
+            "reading": "P(EA run beats random run), ties at half"
+          },
+          "paired_superiority": 0.75,
+          "sign_test_p_superseded": 0.1796875,
+          "holm": {
+            "p": 0.0234375,
+            "threshold": 0.0125,
+            "reject": false
+          }
+        }
+      },
+      "n_holm_rejections": 0
+    }
+  },
+  "rq4_candidates_vs_authored": {
+    "runs": {
+      "llama_java_r1_561c0c2f": {
+        "stratum": "llama_java",
+        "rank": 1,
+        "candidate_kind": "raw_structurally_valid",
+        "n_seeds": 20,
+        "median_delta": 1.5,
+        "wilcoxon": {
+          "test": "wilcoxon signed-rank",
+          "p": 0.13544464111328125,
+          "p_normal_approx": 0.13045765156815434,
+          "statistic": 57.5,
+          "n_effective": 19,
+          "n_zeros_dropped": 1,
+          "method": "exact permutation null over 2^n sign assignments",
+          "rank_biserial": 0.39473684210526316
+        },
+        "vargha_delaney_a12": {
+          "value": 0.6725,
+          "magnitude": "medium",
+          "reading": "P(candidate has fewer findings than authored rules), ties at half"
+        },
+        "paired_superiority": 0.625,
+        "sign_test_p_superseded": 0.359283447265625,
+        "holm": {
+          "p": 0.13544464111328125,
+          "threshold": 0.005,
+          "reject": false
+        }
+      },
+      "llama_java_r2_fe7cf23a": {
+        "stratum": "llama_java",
+        "rank": 2,
+        "candidate_kind": "sanitized_after_structural_violation",
+        "n_seeds": 20,
+        "median_delta": 1.0,
+        "wilcoxon": {
+          "test": "wilcoxon signed-rank",
+          "p": 0.20545196533203125,
+          "p_normal_approx": 0.19390451704917233,
+          "statistic": 70.5,
+          "n_effective": 20,
+          "n_zeros_dropped": 0,
+          "method": "exact permutation null over 2^n sign assignments",
+          "rank_biserial": 0.32857142857142857
+        },
+        "vargha_delaney_a12": {
+          "value": 0.6362500000000001,
+          "magnitude": "small",
+          "reading": "P(candidate has fewer findings than authored rules), ties at half"
+        },
+        "paired_superiority": 0.65,
+        "sign_test_p_superseded": 0.26317596435546875,
+        "holm": {
+          "p": 0.20545196533203125,
+          "threshold": 0.0071428571428571435,
+          "reject": false
+        }
+      },
+      "llama_java_r3_5b524d6c": {
+        "stratum": "llama_java",
+        "rank": 3,
+        "candidate_kind": "raw_structurally_valid",
+        "n_seeds": 20,
+        "median_delta": -0.5,
+        "wilcoxon": {
+          "test": "wilcoxon signed-rank",
+          "p": 0.6569480895996094,
+          "p_normal_approx": 0.6423712619366431,
+          "statistic": 83.5,
+          "n_effective": 19,
+          "n_zeros_dropped": 1,
+          "method": "exact permutation null over 2^n sign assignments",
+          "rank_biserial": 0.12105263157894737
+        },
+        "vargha_delaney_a12": {
+          "value": 0.5475,
+          "magnitude": "negligible",
+          "reading": "P(candidate has fewer findings than authored rules), ties at half"
+        },
+        "paired_superiority": 0.475,
+        "sign_test_p_superseded": 1.0,
+        "holm": {
+          "p": 0.6569480895996094,
+          "threshold": 0.025,
+          "reject": false
+        }
+      },
+      "llama_java_r4_2309988f": {
+        "stratum": "llama_java",
+        "rank": 4,
+        "candidate_kind": "sanitized_after_structural_violation",
+        "n_seeds": 20,
+        "median_delta": 3.0,
+        "wilcoxon": {
+          "test": "wilcoxon signed-rank",
+          "p": 0.07335090637207031,
+          "p_normal_approx": 0.0722631664546157,
+          "statistic": 57.0,
+          "n_effective": 20,
+          "n_zeros_dropped": 0,
+          "method": "exact permutation null over 2^n sign assignments",
+          "rank_biserial": 0.45714285714285713
+        },
+        "vargha_delaney_a12": {
+          "value": 0.66875,
+          "magnitude": "medium",
+          "reading": "P(candidate has fewer findings than authored rules), ties at half"
+        },
+        "paired_superiority": 0.7,
+        "sign_test_p_superseded": 0.11531829833984375,
+        "holm": {
+          "p": 0.07335090637207031,
+          "threshold": 0.0038461538461538464,
+          "reject": false
+        }
+      },
+      "llama_java_r5_43b2d360": {
+        "stratum": "llama_java",
+        "rank": 5,
+        "candidate_kind": "raw_structurally_valid",
+        "n_seeds": 20,
+        "median_delta": 0.0,
+        "wilcoxon": {
+          "test": "wilcoxon signed-rank",
+          "p": 0.6776657104492188,
+          "p_normal_approx": 0.6625582666834811,
+          "statistic": 75.5,
+          "n_effective": 18,
+          "n_zeros_dropped": 2,
+          "method": "exact permutation null over 2^n sign assignments",
+          "rank_biserial": -0.11695906432748537
+        },
+        "vargha_delaney_a12": {
+          "value": 0.49625,
+          "magnitude": "negligible",
+          "reading": "P(candidate has fewer findings than authored rules), ties at half"
+        },
+        "paired_superiority": 0.5,
+        "sign_test_p_superseded": 1.0,
+        "holm": {
+          "p": 0.6776657104492188,
+          "threshold": 0.05,
+          "reject": false
+        }
+      },
+      "llama_python_r1_5731e673": {
+        "stratum": "llama_python",
+        "rank": 1,
+        "candidate_kind": "raw_structurally_valid",
+        "n_seeds": 20,
+        "median_delta": 9.0,
+        "wilcoxon": {
+          "test": "wilcoxon signed-rank",
+          "p": 0.0453643798828125,
+          "p_normal_approx": 0.04606287862245314,
+          "statistic": 45.5,
+          "n_effective": 19,
+          "n_zeros_dropped": 1,
+          "method": "exact permutation null over 2^n sign assignments",
+          "rank_biserial": 0.5210526315789473
+        },
+        "vargha_delaney_a12": {
+          "value": 0.68,
+          "magnitude": "medium",
+          "reading": "P(candidate has fewer findings than authored rules), ties at half"
+        },
+        "paired_superiority": 0.725,
+        "sign_test_p_superseded": 0.063568115234375,
+        "holm": {
+          "p": 0.0453643798828125,
+          "threshold": 0.0035714285714285718,
+          "reject": false
+        }
+      },
+      "llama_python_r2_b7a0e656": {
+        "stratum": "llama_python",
+        "rank": 2,
+        "candidate_kind": "sanitized_after_structural_violation",
+        "n_seeds": 20,
+        "median_delta": -2.0,
+        "wilcoxon": {
+          "test": "wilcoxon signed-rank",
+          "p": 0.571929931640625,
+          "p_normal_approx": 0.5562046928175106,
+          "statistic": 72.0,
+          "n_effective": 18,
+          "n_zeros_dropped": 2,
+          "method": "exact permutation null over 2^n sign assignments",
+          "rank_biserial": -0.15789473684210525
+        },
+        "vargha_delaney_a12": {
+          "value": 0.45625,
+          "magnitude": "negligible",
+          "reading": "P(candidate has fewer findings than authored rules), ties at half"
+        },
+        "paired_superiority": 0.4,
+        "sign_test_p_superseded": 0.480682373046875,
+        "holm": {
+          "p": 0.571929931640625,
+          "threshold": 0.0125,
+          "reject": false
+        }
+      },
+      "llama_python_r3_3517cec1": {
+        "stratum": "llama_python",
+        "rank": 3,
+        "candidate_kind": "raw_structurally_valid",
+        "n_seeds": 20,
+        "median_delta": 7.0,
+        "wilcoxon": {
+          "test": "wilcoxon signed-rank",
+          "p": 0.16740036010742188,
+          "p_normal_approx": 0.16104573827460933,
+          "statistic": 67.5,
+          "n_effective": 20,
+          "n_zeros_dropped": 0,
+          "method": "exact permutation null over 2^n sign assignments",
+          "rank_biserial": 0.35714285714285715
+        },
+        "vargha_delaney_a12": {
+          "value": 0.61875,
+          "magnitude": "small",
+          "reading": "P(candidate has fewer findings than authored rules), ties at half"
+        },
+        "paired_superiority": 0.7,
+        "sign_test_p_superseded": 0.11531829833984375,
+        "holm": {
+          "p": 0.16740036010742188,
+          "threshold": 0.005555555555555556,
+          "reject": false
+        }
+      },
+      "llama_python_r4_411b2a00": {
+        "stratum": "llama_python",
+        "rank": 4,
+        "candidate_kind": "sanitized_after_structural_violation",
+        "n_seeds": 20,
+        "median_delta": 4.0,
+        "wilcoxon": {
+          "test": "wilcoxon signed-rank",
+          "p": 0.03857231140136719,
+          "p_normal_approx": 0.03968014705731148,
+          "statistic": 50.0,
+          "n_effective": 20,
+          "n_zeros_dropped": 0,
+          "method": "exact permutation null over 2^n sign assignments",
+          "rank_biserial": 0.5238095238095238
+        },
+        "vargha_delaney_a12": {
+          "value": 0.73375,
+          "magnitude": "large",
+          "reading": "P(candidate has fewer findings than authored rules), ties at half"
+        },
+        "paired_superiority": 0.7,
+        "sign_test_p_superseded": 0.11531829833984375,
+        "holm": {
+          "p": 0.03857231140136719,
+          "threshold": 0.0033333333333333335,
+          "reject": false
+        }
+      },
+      "llama_python_r5_04c4685c": {
+        "stratum": "llama_python",
+        "rank": 5,
+        "candidate_kind": "sanitized_after_structural_violation",
+        "n_seeds": 20,
+        "median_delta": 4.0,
+        "wilcoxon": {
+          "test": "wilcoxon signed-rank",
+          "p": 0.1736621856689453,
+          "p_normal_approx": 0.1670360918434789,
+          "statistic": 68.0,
+          "n_effective": 20,
+          "n_zeros_dropped": 0,
+          "method": "exact permutation null over 2^n sign assignments",
+          "rank_biserial": 0.3523809523809524
+        },
+        "vargha_delaney_a12": {
+          "value": 0.58625,
+          "magnitude": "small",
+          "reading": "P(candidate has fewer findings than authored rules), ties at half"
+        },
+        "paired_superiority": 0.6,
+        "sign_test_p_superseded": 0.5034446716308594,
+        "holm": {
+          "p": 0.1736621856689453,
+          "threshold": 0.00625,
+          "reject": false
+        }
+      },
+      "qwen_java_r1_b3e4754e": {
+        "stratum": "qwen_java",
+        "rank": 1,
+        "candidate_kind": "sanitized_after_structural_violation",
+        "n_seeds": 20,
+        "median_delta": 2.5,
+        "wilcoxon": {
+          "test": "wilcoxon signed-rank",
+          "p": 0.003448486328125,
+          "p_normal_approx": 0.005075372615828044,
+          "statistic": 21.5,
+          "n_effective": 18,
+          "n_zeros_dropped": 2,
+          "method": "exact permutation null over 2^n sign assignments",
+          "rank_biserial": 0.7485380116959064
+        },
+        "vargha_delaney_a12": {
+          "value": 0.72875,
+          "magnitude": "large",
+          "reading": "P(candidate has fewer findings than authored rules), ties at half"
+        },
+        "paired_superiority": 0.7,
+        "sign_test_p_superseded": 0.09625244140625,
+        "holm": {
+          "p": 0.003448486328125,
+          "threshold": 0.0025,
+          "reject": false
+        }
+      },
+      "qwen_java_r2_2dbec79a": {
+        "stratum": "qwen_java",
+        "rank": 2,
+        "candidate_kind": "sanitized_after_structural_violation",
+        "n_seeds": 20,
+        "median_delta": 2.0,
+        "wilcoxon": {
+          "test": "wilcoxon signed-rank",
+          "p": 0.01865386962890625,
+          "p_normal_approx": 0.020173039173098678,
+          "statistic": 37.5,
+          "n_effective": 19,
+          "n_zeros_dropped": 1,
+          "method": "exact permutation null over 2^n sign assignments",
+          "rank_biserial": 0.6052631578947368
+        },
+        "vargha_delaney_a12": {
+          "value": 0.76,
+          "magnitude": "large",
+          "reading": "P(candidate has fewer findings than authored rules), ties at half"
+        },
+        "paired_superiority": 0.775,
+        "sign_test_p_superseded": 0.0192108154296875,
+        "holm": {
+          "p": 0.01865386962890625,
+          "threshold": 0.0029411764705882353,
+          "reject": false
+        }
+      },
+      "qwen_java_r3_d3dd6fd8": {
+        "stratum": "qwen_java",
+        "rank": 3,
+        "candidate_kind": "raw_structurally_valid",
+        "n_seeds": 20,
+        "median_delta": 4.0,
+        "wilcoxon": {
+          "test": "wilcoxon signed-rank",
+          "p": 0.008497238159179688,
+          "p_normal_approx": 0.010367533899019536,
+          "statistic": 36.5,
+          "n_effective": 20,
+          "n_zeros_dropped": 0,
+          "method": "exact permutation null over 2^n sign assignments",
+          "rank_biserial": 0.6523809523809524
+        },
+        "vargha_delaney_a12": {
+          "value": 0.765,
+          "magnitude": "large",
+          "reading": "P(candidate has fewer findings than authored rules), ties at half"
+        },
+        "paired_superiority": 0.8,
+        "sign_test_p_superseded": 0.01181793212890625,
+        "holm": {
+          "p": 0.008497238159179688,
+          "threshold": 0.002777777777777778,
+          "reject": false
+        }
+      },
+      "qwen_java_r4_37aa0e24": {
+        "stratum": "qwen_java",
+        "rank": 4,
+        "candidate_kind": "sanitized_after_structural_violation",
+        "n_seeds": 20,
+        "median_delta": 0.5,
+        "wilcoxon": {
+          "test": "wilcoxon signed-rank",
+          "p": 0.4092254638671875,
+          "p_normal_approx": 0.3922367737212821,
+          "statistic": 58.5,
+          "n_effective": 17,
+          "n_zeros_dropped": 3,
+          "method": "exact permutation null over 2^n sign assignments",
+          "rank_biserial": 0.23529411764705882
+        },
+        "vargha_delaney_a12": {
+          "value": 0.63375,
+          "magnitude": "small",
+          "reading": "P(candidate has fewer findings than authored rules), ties at half"
+        },
+        "paired_superiority": 0.575,
+        "sign_test_p_superseded": 0.629058837890625,
+        "holm": {
+          "p": 0.4092254638671875,
+          "threshold": 0.008333333333333333,
+          "reject": false
+        }
+      },
+      "qwen_java_r5_24af1719": {
+        "stratum": "qwen_java",
+        "rank": 5,
+        "candidate_kind": "sanitized_after_structural_violation",
+        "n_seeds": 20,
+        "median_delta": 2.0,
+        "wilcoxon": {
+          "test": "wilcoxon signed-rank",
+          "p": 0.095245361328125,
+          "p_normal_approx": 0.09239750364814228,
+          "statistic": 47.0,
+          "n_effective": 18,
+          "n_zeros_dropped": 2,
+          "method": "exact permutation null over 2^n sign assignments",
+          "rank_biserial": 0.4502923976608187
+        },
+        "vargha_delaney_a12": {
+          "value": 0.6849999999999999,
+          "magnitude": "medium",
+          "reading": "P(candidate has fewer findings than authored rules), ties at half"
+        },
+        "paired_superiority": 0.65,
+        "sign_test_p_superseded": 0.237884521484375,
+        "holm": {
+          "p": 0.095245361328125,
+          "threshold": 0.004545454545454546,
+          "reject": false
+        }
+      },
+      "qwen_python_r1_f953f53a": {
+        "stratum": "qwen_python",
+        "rank": 1,
+        "candidate_kind": "sanitized_after_structural_violation",
+        "n_seeds": 20,
+        "median_delta": 2.0,
+        "wilcoxon": {
+          "test": "wilcoxon signed-rank",
+          "p": 0.615203857421875,
+          "p_normal_approx": 0.600895447328852,
+          "statistic": 91.0,
+          "n_effective": 20,
+          "n_zeros_dropped": 0,
+          "method": "exact permutation null over 2^n sign assignments",
+          "rank_biserial": 0.13333333333333333
+        },
+        "vargha_delaney_a12": {
+          "value": 0.5225,
+          "magnitude": "negligible",
+          "reading": "P(candidate has fewer findings than authored rules), ties at half"
+        },
+        "paired_superiority": 0.55,
+        "sign_test_p_superseded": 0.8238029479980469,
+        "holm": {
+          "p": 0.615203857421875,
+          "threshold": 0.016666666666666666,
+          "reject": false
+        }
+      },
+      "qwen_python_r2_2004e6c4": {
+        "stratum": "qwen_python",
+        "rank": 2,
+        "candidate_kind": "sanitized_after_structural_violation",
+        "n_seeds": 20,
+        "median_delta": 7.0,
+        "wilcoxon": {
+          "test": "wilcoxon signed-rank",
+          "p": 0.0258636474609375,
+          "p_normal_approx": 0.027709023516362983,
+          "statistic": 35.0,
+          "n_effective": 18,
+          "n_zeros_dropped": 2,
+          "method": "exact permutation null over 2^n sign assignments",
+          "rank_biserial": 0.5906432748538012
+        },
+        "vargha_delaney_a12": {
+          "value": 0.6925000000000001,
+          "magnitude": "medium",
+          "reading": "P(candidate has fewer findings than authored rules), ties at half"
+        },
+        "paired_superiority": 0.6,
+        "sign_test_p_superseded": 0.480682373046875,
+        "holm": {
+          "p": 0.0258636474609375,
+          "threshold": 0.003125,
+          "reject": false
+        }
+      },
+      "qwen_python_r3_dec458ea": {
+        "stratum": "qwen_python",
+        "rank": 3,
+        "candidate_kind": "raw_structurally_valid",
+        "n_seeds": 20,
+        "median_delta": 7.5,
+        "wilcoxon": {
+          "test": "wilcoxon signed-rank",
+          "p": 0.004367828369140625,
+          "p_normal_approx": 0.00619458388625538,
+          "statistic": 27.0,
+          "n_effective": 19,
+          "n_zeros_dropped": 1,
+          "method": "exact permutation null over 2^n sign assignments",
+          "rank_biserial": 0.7157894736842105
+        },
+        "vargha_delaney_a12": {
+          "value": 0.74875,
+          "magnitude": "large",
+          "reading": "P(candidate has fewer findings than authored rules), ties at half"
+        },
+        "paired_superiority": 0.725,
+        "sign_test_p_superseded": 0.063568115234375,
+        "holm": {
+          "p": 0.004367828369140625,
+          "threshold": 0.002631578947368421,
+          "reject": false
+        }
+      },
+      "qwen_python_r4_9da15599": {
+        "stratum": "qwen_python",
+        "rank": 4,
+        "candidate_kind": "sanitized_after_structural_violation",
+        "n_seeds": 20,
+        "median_delta": 6.0,
+        "wilcoxon": {
+          "test": "wilcoxon signed-rank",
+          "p": 0.09490966796875,
+          "p_normal_approx": 0.09256445109533018,
+          "statistic": 60.0,
+          "n_effective": 20,
+          "n_zeros_dropped": 0,
+          "method": "exact permutation null over 2^n sign assignments",
+          "rank_biserial": 0.42857142857142855
+        },
+        "vargha_delaney_a12": {
+          "value": 0.6625,
+          "magnitude": "medium",
+          "reading": "P(candidate has fewer findings than authored rules), ties at half"
+        },
+        "paired_superiority": 0.65,
+        "sign_test_p_superseded": 0.26317596435546875,
+        "holm": {
+          "p": 0.09490966796875,
+          "threshold": 0.004166666666666667,
+          "reject": false
+        }
+      },
+      "qwen_python_r5_b7b79cc4": {
+        "stratum": "qwen_python",
+        "rank": 5,
+        "candidate_kind": "raw_structurally_valid",
+        "n_seeds": 20,
+        "median_delta": 0.5,
+        "wilcoxon": {
+          "test": "wilcoxon signed-rank",
+          "p": 0.410675048828125,
+          "p_normal_approx": 0.39530372453863905,
+          "statistic": 66.0,
+          "n_effective": 18,
+          "n_zeros_dropped": 2,
+          "method": "exact permutation null over 2^n sign assignments",
+          "rank_biserial": 0.22807017543859648
+        },
+        "vargha_delaney_a12": {
+          "value": 0.5225,
+          "magnitude": "negligible",
+          "reading": "P(candidate has fewer findings than authored rules), ties at half"
+        },
+        "paired_superiority": 0.55,
+        "sign_test_p_superseded": 0.8145294189453125,
+        "holm": {
+          "p": 0.410675048828125,
+          "threshold": 0.01,
+          "reject": false
+        }
+      }
+    },
+    "n_candidates": 20,
+    "n_holm_rejections": 0,
+    "family": "one Holm family across all twenty selected candidates",
+    "task_set": "shared across no-rules, authored-rules, and all five candidates per stratum and seed"
+  }
+}

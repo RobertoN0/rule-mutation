@@ -1,5 +1,7 @@
 {
   "artifact_type": "rq2_posthoc_safe_zone_sensitivity",
+  "inference_status": "paired values and descriptive estimates remain current; sign-test and sign-flip decisions are superseded provenance",
+  "superseded_by": "rq_wilcoxon_effect_sizes.json",
   "interpretation": "best structurally compliant candidates observed within raw searches; not equivalent to constrained-search reruns",
   "excluded": [],
   "strata": {

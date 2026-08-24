@@ -1,8 +1,15 @@
 # RQ4 - safe-zone-aware temperature-0.6 resampling
 
-Invalid selected candidates use sanitized replays; candidates already passing
-the contract retain their existing replays. Original baselines are reused.
-Positive delta means fewer Semgrep findings than the original-rule baseline.
+> **Superseded except for the temperature-zero selection gain.** Pairwise rows
+> below use candidate-specific task sets and the earlier exact sign test. The
+> submitted thesis's candidate-versus-authored values come from
+> `rq4_three_way_baseline_comparison.{json,md}`, which uses one shared task set
+> and exact Wilcoxon inference. This file remains for provenance and Figure 4's
+> temperature-zero ticks.
+
+Invalid selected candidates use sanitised replays; candidates already passing
+the contract retain their existing replays. Authored-rules baselines are reused.
+Positive delta means fewer Semgrep findings than the authored-rules baseline.
 
 | stratum | rank | kind | seeds | T=0 gain | median T=0.6 delta [boot CI] | paired superiority | sign p | surviving |
 |---|---:|---|---:|---:|---|---:|---:|---:|
@@ -28,7 +35,7 @@ Positive delta means fewer Semgrep findings than the original-rule baseline.
 | qwen_python | 5 | raw_structurally_valid | 20 | 26.0 | 0.5 [-2.0, 6.0] | 0.550 | 0.81453 | 1.9% |
 
 Multiplicity status: final.
-The planned Holm family contains all 20 candidate-vs-original comparisons.
+The historical Holm family contains all 20 candidate-versus-authored comparisons.
 
 The five candidates per stratum come from different search seeds but share
 the same tasks, baseline generations, model system, and selection procedure;

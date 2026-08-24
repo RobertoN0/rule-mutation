@@ -1,47 +1,62 @@
 # Analysis package
 
-The read-only analyses behind the thesis results, the JSON and Markdown they
-produce, and the figures built from that JSON.
-
-Nothing here writes to the experiment tree. Each script opens run directories
-for reading and writes a single result file.
-
-See [EVIDENCE_MAP.md](../EVIDENCE_MAP.md) for the mapping from each table and
-figure in the thesis to the artifact below that produced it.
+This directory contains the read-only analyses behind the submitted thesis, the
+canonical JSON and Markdown they produced, and figures built from that JSON.
+See [`../EVIDENCE_MAP.md`](../EVIDENCE_MAP.md) for the report-object mapping and
+the exact executed revisions.
 
 ## Layout
 
-```
+```text
 analysis/
-├── scripts/     the canonical analyses + the figure builder
-├── results/     every JSON/Markdown result the thesis cites
-└── figures/     regenerated PDF + PNG figures
+├── scripts/     canonical analyses and figure builder
+├── results/     canonical JSON plus human-readable Markdown
+└── figures/     regenerated PDF and PNG figures
 ```
 
-## Scripts
+## Canonical scripts and outputs
 
-| Script | Produces |
+| Script | Status and output |
 |---|---|
-| `common.py` | shared loaders, the arm index, and the statistics helpers used by every analysis |
-| `check_analysis_readiness.py` | `analysis_readiness.{json,md}` — completeness gate; run before anything else |
-| `baseline_reconcile.py` | `baseline_reconciliation.{json,md}` — reconciles the reused Phase-3 baselines against the final task population |
-| `rq1_magnitude.py` | `rq1_magnitude.{json,md}` — RQ1 estimation |
-| `rq2_ea_vs_random.py` | `rq2_ea_vs_random.{json,md}` — RQ2 paired EA vs random |
-| `rq2_safe_zone_tiers.py` | `rq2_safe_zone_tiers.{json,md}` — RQ2 across the three admissibility lenses |
-| `rq3_mutators.py` | `rq3_mutators.{json,md}` — RQ3 move-family associations |
-| `phase3_select_topk.py` | `phase3_selection_topk.{json,md}` — the 20 selected candidates |
-| `rq4_phase3_safe_compare.py` | `rq4_phase3_safe_comparison.{json,md}` — RQ4 under resampling |
-| `make_figures.py` | everything in `figures/` |
+| `common.py` | Shared run loaders, bootstrap helpers, and legacy statistical helpers. |
+| `check_analysis_readiness.py` | Completeness gate: `analysis_readiness.{json,md}`. |
+| `baseline_reconcile.py` | Phase-3 baseline provenance: `baseline_reconciliation.{json,md}`. |
+| `rq1_magnitude.py` | RQ1 full-contract estimates: `rq1_magnitude.{json,md}`. |
+| `rq2_ea_vs_random.py` | Executed/full-contract paired data and descriptive estimates: `rq2_ea_vs_random.{json,md}`. Its sign-test decision is superseded. |
+| `rq2_safe_zone_tiers.py` | RQ2 paired data, medians, and intervals across all three lenses: `rq2_safe_zone_tiers.{json,md}`. Its stored sign tests are provenance only. |
+| `rq_wilcoxon_effect_sizes.py` | Final exact Wilcoxon, A12, and Holm results for RQ2 and RQ4: `rq_wilcoxon_effect_sizes.json`. It recomputes RQ4 from the final shared-task-set artifact. |
+| `rq3_mutators.py` | RQ3 move-family associations: `rq3_mutators.{json,md}`. |
+| `phase3_select_topk.py` | Selection of twenty candidates: `phase3_selection_topk.{json,md}`. |
+| `rq4_phase3_safe_compare.py` | Superseded pairwise-task-set RQ4 artifact: `rq4_phase3_safe_comparison.{json,md}`. Retained for provenance and the Figure 4 temperature-zero ticks only. |
+| `rq4_three_way_baseline.py` | Final RQ4 comparison on one shared task set per stratum and seed: `rq4_three_way_baseline_comparison.{json,md}`. |
+| `make_figures.py` | Rebuilds all PDF/PNG files in `figures/` from canonical JSON. |
 
-The structural audit and the Phase-3 sanitizer live in
-[`../scripts/analyze/`](../scripts/analyze/) rather than here, because they read
-and write repository artifacts rather than only summarising them.
+The structural audit and Phase-3 sanitiser live in
+[`../scripts/analyze/`](../scripts/analyze/) because they materialise repository
+artifacts rather than only summarising them.
 
-One script is deliberately **not** published: `rq4_phase3_compare.py` analyses
-the historical raw Phase-3 mixture. It is a diagnostic, it mixes raw and
-sanitized candidates, and it is not the thesis result.
+An earlier unpublished comparison script pooled raw and sanitised candidates in
+one test. It was discarded rather than corrected, is deliberately absent from
+this repository, and produced no thesis result.
+
+## Final inference rules
+
+- **RQ2:** ten matched EA/random seed pairs per model-language stratum. Use the
+  exact two-sided Wilcoxon signed-rank p-value and Vargha–Delaney A12 from
+  `rq_wilcoxon_effect_sizes.json`. Holm correction is separate within each
+  four-stratum lens: executed system, fenced code, and full contract.
+- **RQ4:** twenty generation seeds per candidate on a task set shared by the
+  no-rules condition, authored rules, and all five candidates of the stratum.
+  Use `rq4_three_way_baseline_comparison.json`. The candidate-versus-authored
+  tests form one twenty-test Holm family.
+- All exact Wilcoxon p-values enumerate the permutation null over every 2^n
+  sign assignment. The normal approximation is diagnostic only.
+- The exact sign tests in older JSON are explicitly superseded and retained for
+  the thesis Appendix F comparison.
 
 ## Running
+
+Analyses that read raw runs require an unpacked copy of the DelftBlue archive:
 
 ```bash
 export RULE_MUTATION_REPO=/path/to/checkout-with-unpacked-experiments
@@ -49,27 +64,33 @@ export ANALYSIS_OUT=/path/to/output/dir
 .venv/bin/python analysis/scripts/rq1_magnitude.py
 ```
 
-Both variables default to the paths this study ran under, so the scripts behave
-identically to the recorded runs when neither is set. They need the archived
-experiment tree described in [EVIDENCE_MAP.md](../EVIDENCE_MAP.md) §4; without
-it there is nothing to read, and `results/` is the record of what they produced.
+Without those overrides, JSON-only checks use this checkout and
+`analysis/results/`. Absolute DelftBlue paths embedded in published JSON are
+recorded provenance, not paths a reviewer is expected to resolve locally.
 
-`make_figures.py` needs `matplotlib`, which is intentionally absent from the
-frozen environment. Run it from a separate plotting environment and set
-`ANALYSIS_BASE` to the directory containing `report/` and `figures/`.
+The final Wilcoxon artifact can be reproduced from the published JSON alone:
 
-## Reading the results
+```bash
+.venv/bin/python analysis/scripts/rq_wilcoxon_effect_sizes.py \
+  analysis/results /tmp/rq_wilcoxon_effect_sizes.json
+```
 
-Each `.md` file is a human-readable rendering of its `.json` sibling; the JSON is
-canonical. Two conventions matter when reading them:
+`make_figures.py` needs Matplotlib, deliberately absent from the frozen project
+environment. The committed figures use Matplotlib 3.10.9. From a separate
+plotting environment, run `python analysis/scripts/make_figures.py`; it reads
+the committed `analysis/results/` and writes `analysis/figures/`. Set
+`ANALYSIS_BASE` only when using the historical `report/` plus `figures/`
+layout.
 
-- **Admissibility lenses.** Results are reported under three nested lenses:
-  *executed system* (every candidate that ran), *fenced code* (fenced blocks
-  match the authored original, inline code may drift), and *full contract*
-  (inline code preserved too). The two filtered lenses were defined after the
-  Phase-2 enforcement defect was found and are sensitivity analyses, not
-  reconstructions of a fail-closed search.
-- **Raw versus sanitized candidates.** Eight of the twenty selected candidates
-  already satisfied the structural contract; twelve were repaired and rescored.
-  The two are never pooled. `candidate_kind` distinguishes them in
-  `rq4_phase3_safe_comparison.json`.
+## Interpretation
+
+The three nested lenses contain 10,789 executed, 8,492 fenced-code-admissible,
+and 6,191 full-contract-admissible evaluations. The two filtered lenses were
+defined after the Phase-2 enforcement defect was found. They are exploratory
+sensitivity analyses and do not reconstruct a fail-closed search.
+
+Eight selected candidates already met the structural contract; twelve were
+sanitised and rescored. Raw and sanitised candidates are never pooled. A lower
+Semgrep count is not evidence of fewer vulnerabilities, secure code, or
+functional correctness, and semantic equivalence to the authored rules was not
+verified.

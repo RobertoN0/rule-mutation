@@ -105,14 +105,15 @@ python scripts/experiments/run_experiment.py \
   --output-dir experiments/results/replication_smoke
 ```
 
-This evaluates a five-candidate initialization followed by two main-loop
+This evaluates a five-candidate initialisation followed by two main-loop
 candidates and writes a complete run directory (see §6). The number of API
 calls depends on the task count and evaluation-cache reuse. To run independent
-random search instead, use `--optimizer random_search` (same initialization and
+random search instead, use `--optimizer random_search` (same initialisation and
 sampler, no archive).
 
 `--enable-validation` is **required** on every real run: it computes the f2
-rule-fidelity objective (SBERT similarity of each mutated rule to its original)
+textual-similarity objective (stored as `rule_fidelity`; mean SBERT similarity
+of each mutated rule to its authored original)
 and records the post-hoc quality metadata (instruction adherence, keyword
 retention, etc.) into `evaluations.jsonl` — nothing is rejected. Only `--dry-run`
 may omit it. The run validator checks that the resulting artifacts
@@ -147,7 +148,7 @@ For search-run health, use:
 .venv/bin/python scripts/analyze/validate_search_run.py --write <run_dir>
 ```
 
-This is a reconciliation validator, not the final multi-run thesis analyzer:
+This is a reconciliation validator, not the final multi-run thesis analyser:
 it checks artifact consistency, raw f1, imputation, map/rule provenance, and
 Semgrep-debug coverage.
 
@@ -275,7 +276,7 @@ environment variable; the `#SBATCH` lines are not, so edit them.
 
 `--seed`, the exact model revision (for the local backend), library versions,
 the Git commit, map/rule hashes, and Semgrep provenance are recorded in
-`run_config.json`. For the final local-model matrix, the shared initialization
+`run_config.json`. For the final local-model matrix, the shared initialisation
 bundle additionally restores the search, mutator, and Torch RNG states at the
 five-candidate boundary.
 
@@ -314,16 +315,31 @@ validation, and Semgrep pipeline the study used, at whatever scale you choose.
 
 **What you cannot do here.** Regenerate the thesis numbers from scratch. Those
 came from 80 search arms on DelftBlue A100 nodes with two local models, and the
-resulting run trees total about 8.4 GB. They are retained in the research
-worktree rather than deposited publicly, so this repository ships the derived
-results instead of the raw evidence:
+resulting run trees total about 8.4 GB. They remain on DelftBlue under
+`/scratch/rnegro` rather than in this workspace or the public repository, so
+this package ships the derived results instead of the raw evidence:
 
 - `analysis/results/` — every JSON and Markdown result the thesis cites.
 - `analysis/figures/` — the figures, regenerated from that JSON.
-- `artifacts/phase3_selected/` — the 20 selected rule sets, the 12 sanitized
+- `artifacts/phase3_selected/` — the 20 selected rule sets, the 12 sanitised
   ones, and their retrieval maps.
 - `rule_maps/qualified/` — the frozen task population and final retrieval maps,
   which are the inputs every run consumed.
+
+The final inferential procedure is exact Wilcoxon signed-rank with
+Vargha–Delaney A12. RQ2 applies Holm correction separately within each of three
+four-stratum admissibility lenses; RQ4 applies one twenty-candidate Holm family.
+The final RQ4 artifact uses a task set shared by no rules, authored rules, and
+all five candidates per stratum and seed. Recompute the published statistical
+artifact without the raw run tree with:
+
+```bash
+.venv/bin/python analysis/scripts/rq_wilcoxon_effect_sizes.py \
+  analysis/results /tmp/rq_wilcoxon_effect_sizes.json
+```
+
+The exact sign-test fields in older artifacts are superseded provenance, not
+the procedure reported in the thesis.
 
 [EVIDENCE_MAP.md](EVIDENCE_MAP.md) §4 describes the archived tree in full, and
 §6 shows how to point the analysis suite at an unpacked copy of it.
@@ -350,7 +366,7 @@ Three things follow, all of them visible in this repository:
    trajectory identifies admissible candidates a run visited; it does not
    reconstruct the trajectory a fail-closed search would have taken.
 3. The live mutators were subsequently made fail-closed. That fix, the audit,
-   and the Phase-3 sanitizer are **post-hoc** and were not part of the executed
+   and the Phase-3 sanitiser are **post-hoc** and were not part of the executed
    system, which is revision `09b6b963d47abbf1348f8dab10b5dbc97813c5ce`.
 
 A confirmatory rerun with admission checked fail-closed is the first item of

@@ -23,7 +23,7 @@ def main() -> int:
     parser.add_argument("output_dir", type=Path, help="new bundle directory")
     args = parser.parse_args()
     path = materialize_initialization_bundle(args.source_run, args.output_dir)
-    print(f"Initialization bundle written to {path}")
+    print(f"Initialisation bundle written to {path}")
     return 0
 
 

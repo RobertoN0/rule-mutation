@@ -1,5 +1,10 @@
 # RQ2 - archive EA vs i.i.d. random search (equal 24 h wall clock)
 
+> **Superseded inference.** The paired values and descriptive estimates remain
+> valid, but the exact sign test and its Holm decisions below are provenance
+> only. The submitted thesis uses the exact Wilcoxon signed-rank test and A12 in
+> `rq_wilcoxon_effect_sizes.json`.
+
 Unit of analysis: the paired run seed. Strata are never pooled.
 Primary outcome: best raw Semgrep-finding reduction (`f1`).
 The score is the best structurally compliant candidate observed within each
@@ -11,7 +16,7 @@ raw search. This post-hoc filter does not reconstruct constrained trajectories.
 - **Rationale**: Four pre-specified (not pre-registered) model/language strata. Raw p-values are shown, while Holm controls the four-test family.
 - Holm thresholds attach to p-value rank, not to a fixed stratum.
 
-## Primary result - paired effect size and exact sign test
+## Historical result - paired effect size and superseded exact sign test
 
 | stratum | n | median Δ [95% boot CI] | paired superiority | + / - / tie | sign p | Holm p-thr | Holm rejects |
 |---|---:|---|---:|---:|---:|---:|:--:|
@@ -114,4 +119,3 @@ candidate; it was not separately selected as a weighted optimum.
 | 8 | 216 | 26 | 15 | +11 | 251 | 53 |
 | 9 | 216 | 9 | 12 | -3 | 224 | 86 |
 | 10 | 216 | 27 | 12 | +15 | 164 | 91 |
-

@@ -18,7 +18,7 @@ three things:
      task i was produced under exactly the rules the final search used for task i.
 
 If (2) and (3) hold, the baselines can be subset to the final population and used
-directly as the original-rules and no-rules reference, with no re-running.
+directly as the authored-rules and no-rules reference, with no re-running.
 """
 from __future__ import annotations
 

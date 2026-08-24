@@ -16,7 +16,8 @@ in :mod:`search`. It owns everything they need around them:
 
 Direction: the search REPAIRS — with ``objective_direction="minimize"``
 (default) a positive f1 means the mutated rule set produced FEWER
-vulnerabilities than the baseline.
+Semgrep findings than the authored-rules baseline. This objective is not a
+measure of code security or functional correctness.
 """
 
 from __future__ import annotations
@@ -127,16 +128,17 @@ class SearchConfig:
 
     main_loop_budget: int = 20
     """Maximum candidate evaluations after the shared five-candidate
-    initialization. Identity/no-op proposals do not consume this budget. Total
+    initialisation. Identity/no-op proposals do not consume this budget. Total
     candidate evaluations are ``5 + main_loop_budget``."""
 
     objective_direction: str = "minimize"
-    """Optimization direction for the f1 raw-finding-reduction objective.
-        "minimize" — reward FEWER vulnerabilities than baseline (REPAIR — the
+    """Optimisation direction for the f1 raw-finding-reduction objective.
+        "minimize" — reward FEWER Semgrep findings than the authored-rules baseline
+                     (REPAIR — the
                      thesis direction and default). Implemented by negating
-                     raw-count delta so the archive's maximize logic is unchanged;
-                     a positive recorded f1 means the mutation REDUCED vulns.
-        "maximize" — reward MORE vulnerabilities (the adversarial direction;
+                     raw-count delta so the archive's maximise logic is unchanged;
+                     a positive recorded f1 means the mutation reduced findings.
+        "maximize" — reward MORE Semgrep findings (the adversarial direction;
                      kept for secondary experiments only).
     """
 
@@ -151,14 +153,14 @@ class SearchConfig:
 
     enable_validation: bool = False
     """Run MutationQualityValidator on each mutation (observational).
-    REQUIRED for real runs: the f2 rule-fidelity objective
+    REQUIRED for real runs: the f2 textual-similarity objective
     is the validator's SBERT similarity; without it f2 degenerates to a
     constant 1.0 (only acceptable for mock/dry-run smokes)."""
 
     optimizer: str = "ea"
     """Optimizer family. One of:
         "ea"            — archive-based EA over a full-chromosome Pareto front,
-                          random initialization + periodic random injection
+                          random initialisation + periodic random injection
         "random_search" — i.i.d. random sampler (independent chromosome per
                           iteration, best-of-budget; no archive)
     """
@@ -251,13 +253,13 @@ class SearchResult:
     """All iteration results."""
 
     total_time_seconds: float
-    """Total optimization time."""
+    """Total optimisation time."""
 
     initialization_time_seconds: float
     """Time spent evaluating or loading the shared five-candidate prefix."""
 
     main_loop_time_seconds: float
-    """Optimizer wall time after the shared initialization boundary."""
+    """Optimiser wall time after the shared initialisation boundary."""
 
     termination_reason: str
     """Why the optimizer stopped: budget completion, wall time, or rate limit."""
@@ -308,7 +310,7 @@ class ExperimentEngine:
         config: SearchConfig | None = None,
         validator: MutationQualityValidator | None = None,
     ):
-        """Initialize the engine.
+        """Initialise the engine.
 
         Args:
             llm_backend: LLM backend for code generation.
@@ -319,7 +321,7 @@ class ExperimentEngine:
                 ``config.enable_validation`` is True, every changed gene is
                 validated observationally (metrics recorded; acceptance is
                 never gated) and its SBERT similarity feeds the f2
-                rule-fidelity objective.
+                textual-similarity objective.
         """
         self.llm = llm_backend
         self.config = config or SearchConfig()
@@ -671,7 +673,7 @@ class ExperimentEngine:
                 and finalization (summary, final snapshot) still happens.
 
         Returns:
-            SearchResult with optimization results.
+            SearchResult with optimisation results.
         """
         start_time = time.perf_counter()
         self._total_llm_calls = 0
@@ -690,8 +692,8 @@ class ExperimentEngine:
             raise ValueError(f"Duplicate test_case_id values are not allowed: {duplicate_ids[:3]}")
 
         self._log(
-            "Starting per-prompt-rules optimization: "
-            f"5 initialization + {self.config.main_loop_budget} main-loop evaluations, "
+            "Starting per-prompt-rules optimisation: "
+            f"5 initialisation + {self.config.main_loop_budget} main-loop evaluations, "
             f"{len(prompts_with_rules)} prompts"
         )
 
@@ -743,16 +745,18 @@ class ExperimentEngine:
                 self._log("\n Rate limit hit during baseline evaluation")
             raise
 
-        self._log(f"   Baseline fitness: {original_fitness.total_fitness:.1f} "
-                  f"({original_fitness.num_vulnerable}/{original_fitness.num_prompts} vulnerable, "
-                  f"{original_fitness.total_raw_count} raw findings, "
-                  f"{original_fitness.total_weighted_score:.1f} weighted)")
+        self._log(
+            f"   Baseline fitness: {original_fitness.total_fitness:.1f} "
+            f"({original_fitness.num_vulnerable}/{original_fitness.num_prompts} "
+            f"finding-positive prompts, {original_fitness.total_raw_count} raw findings, "
+            f"{original_fitness.total_weighted_score:.1f} weighted)"
+        )
 
         original_fitness.total_raw_reduction = 0.0
         original_fitness.total_weighted_reduction = 0.0
         self._save_evaluation_manifest(original_results)
 
-        # Origin objectives (conservative set): (f1=0, fidelity=1.0, −parsimony=0)
+        # Origin objectives: (f1=0, textual similarity=1.0, −parsimony=0).
         from .search import _objectives
         origin.f1, origin.f2, origin.f3 = _objectives(original_fitness)
         origin.fitness = original_fitness
@@ -792,13 +796,13 @@ class ExperimentEngine:
         loaded_initialization = None
         if self.config.initialization_bundle is not None:
             if self.config.initialization_identity is None:
-                raise ValueError("initialization bundle requires an expected identity")
+                raise ValueError("initialisation bundle requires an expected identity")
             loaded_initialization = load_initialization_bundle(
                 self.config.initialization_bundle,
                 expected_identity=self.config.initialization_identity,
             )
             self._log(
-                "   Reusing shared initialization bundle "
+                "   Reusing shared initialisation bundle "
                 f"{loaded_initialization.content_sha256}"
             )
 
@@ -1660,7 +1664,7 @@ class ExperimentEngine:
 
             if fitness.raw_reduction is not None:
                 tc_log_lines[idx] = (
-                    f"       → TC#{tc_id}: Vulns={fitness.raw_count} "
+                    f"       → TC#{tc_id}: Findings={fitness.raw_count} "
                     f"Weighted={fitness.weighted_score:.3f}, "
                     f"raw_reduction={fitness.raw_reduction:+.3f}, "
                     f"status={fitness.analysis_status}"
@@ -1668,7 +1672,7 @@ class ExperimentEngine:
             else:
                 tc_log_lines[idx] = (
                     f"       → TC#{tc_id}: Score={fitness.weighted_score:.3f}, "
-                    f"Vulns={fitness.raw_count}"
+                    f"Findings={fitness.raw_count}"
                 )
 
         fresh_set = set(fresh_indices)
@@ -1680,7 +1684,7 @@ class ExperimentEngine:
             reused_vuln_prompts = sum(1 for i in reused_idx if fitness_results[i].raw_count > 0)
             self._log(
                 f"   ♻️  {len(reused_idx)} prompts reused from cache — "
-                f"vuln_prompts={reused_vuln_prompts}, vulns={reused_vulns}"
+                f"finding_prompts={reused_vuln_prompts}, findings={reused_vulns}"
             )
 
         # Affected-prompt coverage is reported but is not an objective.
@@ -1695,8 +1699,8 @@ class ExperimentEngine:
         )
         # Chromosome-level conservative objectives (pure functions of the
         # chromosome, independent of the per-prompt eval): f3 parsimony = # mutated
-        # rules; f2 rule_fidelity = mean SBERT of mutated rules vs originals (1.0
-        # if none).
+        # rules; f2 textual similarity is stored as rule_fidelity for schema
+        # compatibility (mean SBERT versus authored originals; 1.0 if none).
         aggregated.parsimony = len(mutated)
         aggregated.rule_fidelity = self._chromosome_fidelity(chromo, space)
 
@@ -1717,18 +1721,18 @@ class ExperimentEngine:
             # (f1/f2/f3, conservative set) are logged on the "archive add" line
             # in the runner.
             self._log(
-                f"   📊 vuln_prompts={cur_vuln_prompts}/{len(fitness_results)} "
+                f"   📊 finding_prompts={cur_vuln_prompts}/{len(fitness_results)} "
                 f"(Δ{cur_vuln_prompts - base_vuln_prompts:+d}) | "
-                f"vulns={cur_vulns} (Δ{cur_vulns - base_vulns:+d}) | "
+                f"findings={cur_vulns} (Δ{cur_vulns - base_vulns:+d}) | "
                 f"f1_raw_reduction={aggregated.total_raw_reduction:+.2f} "
                 f"weighted_reduction={aggregated.total_weighted_reduction:+.2f} "
                 f"invalid={aggregated.num_invalid_prompts} "
-                f"fidelity={aggregated.rule_fidelity:.3f} pars={aggregated.parsimony}"
+                f"text_similarity={aggregated.rule_fidelity:.3f} pars={aggregated.parsimony}"
             )
         else:
             self._log(
-                f"   📊 baseline: vuln_prompts={cur_vuln_prompts}/{len(fitness_results)} | "
-                f"vulns={cur_vulns}"
+                f"   📊 baseline: finding_prompts={cur_vuln_prompts}/{len(fitness_results)} | "
+                f"findings={cur_vulns}"
             )
 
         if intermediate_records:

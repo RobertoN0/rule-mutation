@@ -1,6 +1,9 @@
-# Phase 3 selection v2 - top 5 repairs from 5 distinct seeds
+# Phase 3 candidate selection - top 5 from 5 distinct seeds
 
 pool all chromosomes from every eligible EA run's final archive; rank by f1 desc, f2 desc, f3 desc, cid asc; walk the ranking and keep a chromosome only if its seed is not already represented; stop at K. At most ONE chromosome per run.
+
+`f2` is mean SBERT textual similarity to the authored originals; it does not
+establish semantic equivalence.
 
 ## llama_java
 

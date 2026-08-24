@@ -131,7 +131,7 @@ class SynonymReplacementMutator(Mutator):
     def validate_runtime_dependencies() -> None:
         """Verify WordNet and POS tagging without attempting a download.
 
-        ``nlpaug`` tries to download missing corpora itself.  That behavior is
+        ``nlpaug`` tries to download missing corpora itself. That behaviour is
         unsafe for an offline experiment node because the failure can occur in
         the middle of a run.  Exercise the two exact NLTK operations used by
         ``SynonymAug`` and fail with an actionable message instead.

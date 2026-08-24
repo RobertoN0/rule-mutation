@@ -1,18 +1,16 @@
 #!/usr/bin/env python3
-"""RQ4 comparison using sanitized replays for structurally invalid selections.
+"""Superseded RQ4 comparison using sanitised replays.
 
 The original temperature-0.6 baselines are intentionally reused.  Candidates
 that already passed the exact safe-zone contract use their existing Phase-3
-replays; candidates that failed it use only the sanitized T=0.6 replays under
-``experiments/06_safe_zone_validation``.  No raw and sanitized evidence is
+replays; candidates that failed it use only the sanitised T=0.6 replays under
+``experiments/06_safe_zone_validation``.  No raw and sanitised evidence is
 silently mixed.
 
-Inference is paired by stochastic seed.  The exact sign test is primary; an
-exact sign-flip test on the mean delta is a magnitude-sensitive sensitivity
-analysis whose interpretation requires within-pair exchangeability under the
-null. Holm controls one family of all complete candidate-level primary tests.
-The selected candidates are not called independent repairs: they share tasks,
-models, baselines, and a post-selection procedure.
+The pairwise task-set policy and sign-test inference are retained for
+provenance. The submitted thesis instead uses the shared-task-set Wilcoxon/A12
+results from ``rq4_three_way_baseline_comparison.json``. Only the deterministic
+temperature-zero gain from this artifact remains in thesis Figure 4.
 """
 
 from __future__ import annotations
@@ -45,7 +43,7 @@ QUALIFIED = Path(REPO) / "rule_maps/qualified"
 MANIFEST = Path(
     os.environ.get(
         "PHASE3_SANITIZED_MANIFEST",
-        "/home/rnegro/analysis/phase3_sanitized/manifest.json",
+        str(Path(REPO) / "artifacts/phase3_selected/sanitized/manifest.json"),
     )
 )
 T0_REPORT = OUT / "safe_zone_validation.json"
@@ -273,11 +271,16 @@ def main() -> int:
 
     output = {
         "artifact_type": "rq4_safe_zone_aware_phase3_comparison",
+        "inference_status": (
+            "superseded pairwise-task-set/sign-test inference; retained for provenance "
+            "and the temperature-zero selection gain"
+        ),
+        "superseded_by": "rq4_three_way_baseline_comparison.json",
         "interpretation": (
             "validation-style stochastic resampling of post-selected candidates; "
             "selected candidates share benchmarks, baselines, and model systems"
         ),
-        "baseline_policy": "reuse final original-rules/no-rules temperature-0.6 baselines",
+        "baseline_policy": "reuse final authored-rules/no-rules temperature-0.6 baselines",
         "target_seeds": TARGET_SEEDS,
         "runs": {},
         "pending": [],
@@ -353,7 +356,7 @@ def main() -> int:
     # both the family size and potentially every step-down threshold.
     all_adjusted = holm(all_p_values) if multiplicity_family_complete else {}
     output["multiplicity"] = {
-        "family": "all 20 selected-candidate vs original-rules comparisons",
+        "family": "all 20 selected-candidate vs authored-rules comparisons",
         "n_complete_tests": len(all_p_values),
         "n_planned_tests": 4 * TARGET_K,
         "family_complete": multiplicity_family_complete,
@@ -410,9 +413,16 @@ def main() -> int:
     lines = [
         "# RQ4 - safe-zone-aware temperature-0.6 resampling",
         "",
-        "Invalid selected candidates use sanitized replays; candidates already passing",
-        "the contract retain their existing replays. Original baselines are reused.",
-        "Positive delta means fewer Semgrep findings than the original-rule baseline.",
+        "> **Superseded except for the temperature-zero selection gain.** Pairwise rows",
+        "> below use candidate-specific task sets and the earlier exact sign test. The",
+        "> submitted thesis's candidate-versus-authored values come from",
+        "> `rq4_three_way_baseline_comparison.{json,md}`, which uses one shared task set",
+        "> and exact Wilcoxon inference. This file remains for provenance and Figure 4's",
+        "> temperature-zero ticks.",
+        "",
+        "Invalid selected candidates use sanitised replays; candidates already passing",
+        "the contract retain their existing replays. Authored-rules baselines are reused.",
+        "Positive delta means fewer Semgrep findings than the authored-rules baseline.",
         "",
         "| stratum | rank | kind | seeds | T=0 gain | median T=0.6 delta [boot CI] | paired superiority | sign p | surviving |",
         "|---|---:|---|---:|---:|---|---:|---:|---:|",
@@ -438,7 +448,7 @@ def main() -> int:
     lines += [
         "",
         f"Multiplicity status: {output['multiplicity']['decision_status']}.",
-        "The planned Holm family contains all 20 candidate-vs-original comparisons.",
+        "The historical Holm family contains all 20 candidate-versus-authored comparisons.",
         "",
         "The five candidates per stratum come from different search seeds but share",
         "the same tasks, baseline generations, model system, and selection procedure;",

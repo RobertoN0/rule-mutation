@@ -26,7 +26,6 @@ from __future__ import annotations
 import json
 
 from common import (
-    OUT,
     bootstrap_ci,
     bootstrap_median_ci,
     load_runs,
@@ -69,7 +68,6 @@ def main():
         ea_f1 = [e["f1"] for _, e, _ in pairs]
         rd_f1 = [r["f1"] for _, _, r in pairs]
         ea_w = [e["wred"] for _, e, _ in pairs]
-        rd_w = [r["wred"] for _, _, r in pairs]
         orig = [e["orig"] for _, e, _ in pairs]
         orig_w = [e["orig_w"] for _, e, _ in pairs if e["orig_w"] is not None]
         ea_reported = [e["reported_f1"] for _, e, _ in pairs]
@@ -197,7 +195,7 @@ def main():
         "",
         "`f1` counts Semgrep findings without regard to severity (ERROR=3, WARNING=1, INFO=0).",
         "The weighted value is the score attached to the candidate selected by raw f1;",
-        "it is not a separately optimized best-weighted candidate.",
+        "it is not a separately optimised best-weighted candidate.",
         "If the weighted reduction is proportionally smaller than the raw reduction,",
         "the search is preferentially removing low-severity findings.",
         "",

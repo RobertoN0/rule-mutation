@@ -7,8 +7,8 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --gpus-per-task=1
 #SBATCH --mem-per-cpu=8000M
-#SBATCH --output=/home/rnegro/thesis/rule-mutation/logs/%j_%x.out
-#SBATCH --error=/home/rnegro/thesis/rule-mutation/logs/%j_%x.err
+#SBATCH --output=logs/%j_%x.out
+#SBATCH --error=logs/%j_%x.err
 # Same graceful-shutdown budget as the mutation wrappers: this job's post-run
 # stages (semgrep_debug filter, capped at 250s, then the validator) do not fit in
 # 300s on a contended node. See WORKFLOW.md "Stopping condition on DelftBlue".
@@ -18,7 +18,7 @@ set -euo pipefail
 
 MODEL=${MODEL:-qwen}
 LANGUAGES=${LANGUAGES:-python}
-REPO_ROOT=${REPO_ROOT:-/home/rnegro/thesis/rule-mutation}
+REPO_ROOT=${REPO_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}
 OUTPUT_BASE=${OUTPUT_BASE:-experiments/qualification}
 SEMGREP_RULESET=${SEMGREP_RULESET:-/scratch/$USER/semgrep-rules/security-audit}
 SEMGREP_TIMEOUT_SECONDS=${SEMGREP_TIMEOUT_SECONDS:-180}

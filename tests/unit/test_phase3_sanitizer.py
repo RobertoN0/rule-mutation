@@ -1,4 +1,4 @@
-"""Regression tests for post-hoc Phase-3 structural sanitization."""
+"""Regression tests for post-hoc Phase-3 structural sanitisation."""
 
 from scripts.analyze.sanitize_phase3_candidates import (
     is_valid,

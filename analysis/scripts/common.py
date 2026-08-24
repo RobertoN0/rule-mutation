@@ -15,11 +15,12 @@ import math
 import os
 from pathlib import Path
 
-# Defaults reproduce the paths this study ran under. Override the two
-# environment variables to point the suite at a different checkout or an
-# unpacked copy of the archived experiment tree.
-REPO = os.environ.get("RULE_MUTATION_REPO", "/home/rnegro/thesis/rule-mutation")
-OUT = Path(os.environ.get("ANALYSIS_OUT", "/home/rnegro/analysis/report"))
+# A fresh checkout defaults to itself and its published results. Override the
+# two environment variables when running against an unpacked copy of the raw
+# DelftBlue archive or writing a separate result set.
+DEFAULT_REPO = Path(__file__).resolve().parents[2]
+REPO = os.environ.get("RULE_MUTATION_REPO", str(DEFAULT_REPO))
+OUT = Path(os.environ.get("ANALYSIS_OUT", str(DEFAULT_REPO / "analysis/results")))
 SAFE_ZONE_AUDIT = OUT / "search_safe_zone_audit.json"
 
 # All 80 finished search runs live under one directory per model. The old
