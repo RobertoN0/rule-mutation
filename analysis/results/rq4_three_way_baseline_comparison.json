@@ -1,5 +1,5 @@
 {
-  "artifact_type": "rq5_three_way_phase3_baseline_comparison",
+  "artifact_type": "rq4_three_way_phase3_baseline_comparison",
   "generated_from": "experiments/{01_population_and_maps/phase3_screening/block1,05_phase3_resampling,06_safe_zone_validation}/**/replicates.jsonl",
   "unit_of_analysis": "one generation seed; 20 seeds per comparison at temperature 0.6",
   "task_set_policy": "per (stratum, seed): qualified task ids intersected with the per-task maps of the no-rules baseline, the authored baseline, and all five candidates of the stratum. Independent of which candidate is tested, so layer 1 is one comparison per stratum and the layers decompose exactly.",

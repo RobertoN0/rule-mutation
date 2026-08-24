@@ -65,7 +65,7 @@ def load(n):
 # --------------------------------------------------------------------------
 # Fig 1 - RQ1 magnitude: share of the origin's findings removed
 # --------------------------------------------------------------------------
-def fig1():
+def rq1_magnitude_figure():
     d = load("rq1_magnitude.json")["strata"]
     fig, ax = plt.subplots(figsize=(7.2, 4.0))
     x = range(len(STRATA))
@@ -99,13 +99,13 @@ def fig1():
     ax.grid(axis="y", **GRID)
     ax.set_axisbelow(True)
     ax.legend(frameon=False)
-    save(fig, "fig1_rq1_magnitude")
+    save(fig, "rq1_magnitude")
 
 
 # --------------------------------------------------------------------------
 # Fig 2 - RQ2 paired per-seed differences (the core result)
 # --------------------------------------------------------------------------
-def fig2():
+def rq2_paired_deltas_figure():
     d = load("rq2_ea_vs_random.json")["strata"]
     wx = load("rq_wilcoxon_effect_sizes.json")["rq2_ea_vs_random"]["full_contract"]["strata"]
     fig, ax = plt.subplots(figsize=(8.0, 4.8))
@@ -165,10 +165,10 @@ def fig2():
         loc="upper center",
         bbox_to_anchor=(0.5, -0.16),
     )
-    save(fig, "fig2_rq2_paired_deltas")
+    save(fig, "rq2_paired_deltas")
 
 
-def fig2_tiers():
+def rq2_safe_zone_tiers_figure():
     """RQ2 specification sensitivity across the three safe-zone lenses."""
     data = load("rq2_safe_zone_tiers.json")
     # Medians and bootstrap intervals come from the historical ``tiers`` artifact; the test
@@ -268,13 +268,13 @@ def fig2_tiers():
         columnspacing=1.2,
     )
     fig.subplots_adjust(left=0.072, right=0.995, bottom=0.22, top=0.68, wspace=0.14)
-    save(fig, "fig2_rq2_safe_zone_tiers")
+    save(fig, "rq2_safe_zone_tiers")
 
 
 # --------------------------------------------------------------------------
 # Fig 3 - RQ2 paired common-language effect size
 # --------------------------------------------------------------------------
-def fig3():
+def rq2_effect_size_figure():
     d = load("rq_wilcoxon_effect_sizes.json")["rq2_ea_vs_random"]["full_contract"]["strata"]
     fig, ax = plt.subplots(figsize=(6.6, 3.2))
     ys = range(len(STRATA))
@@ -291,13 +291,13 @@ def fig3():
     ax.set_title("RQ2 — full-contract effect size over ten runs per arm", fontsize=10)
     ax.grid(axis="x", **GRID)
     ax.set_axisbelow(True)
-    save(fig, "fig3_rq2_effect_size")
+    save(fig, "rq2_effect_size")
 
 
 # --------------------------------------------------------------------------
 # Fig 4 - RQ3 move families, aggregated at the independent-run level
 # --------------------------------------------------------------------------
-def fig4():
+def rq3_operators_figure():
     d = load("rq3_mutators.json")["level1_single_operator"]
     fig, axes = plt.subplots(2, 2, figsize=(11.0, 7.2), sharex=False)
     for ax, s in zip(axes.ravel(), STRATA):
@@ -352,13 +352,13 @@ def fig4():
         fontsize=11,
     )
     fig.tight_layout(rect=[0, 0, 1, 0.94])
-    save(fig, "fig4_rq3_operators_effectiveness")
+    save(fig, "rq3_operators")
 
 
 # --------------------------------------------------------------------------
 # Fig 5 - RQ3 the divergence: being accepted != removing findings
 # --------------------------------------------------------------------------
-def fig5():
+def rq3_acceptance_vs_effect_figure():
     d = load("rq3_mutators.json")["level1_single_operator"]
     fig, ax = plt.subplots(figsize=(8.2, 5.6))
     marks = {"qwen_python": "o", "qwen_java": "s", "llama_python": "^", "llama_java": "D"}
@@ -415,13 +415,13 @@ def fig5():
         loc="upper left",
         ncol=2,
     )
-    save(fig, "fig5_rq3_acceptance_vs_effect")
+    save(fig, "rq3_acceptance_vs_effect")
 
 
 # --------------------------------------------------------------------------
 # Fig 6 - search progress: evaluations spent per arm
 # --------------------------------------------------------------------------
-def fig6():
+def evaluations_per_arm_figure():
     d = load("rq2_ea_vs_random.json")["strata"]
     fig, ax = plt.subplots(figsize=(7.0, 3.8))
     x = range(len(STRATA))
@@ -444,7 +444,7 @@ def fig6():
     ax.grid(axis="y", **GRID)
     ax.set_axisbelow(True)
     ax.legend(frameon=False)
-    save(fig, "fig6_evaluations_per_arm")
+    save(fig, "evaluations_per_arm")
 
 
 # --------------------------------------------------------------------------
@@ -464,16 +464,16 @@ def _boot_median_ci(vals, n=20000, seed=20260821):
     return float(np.percentile(meds, 2.5)), float(np.percentile(meds, 97.5))
 
 
-def fig7():
+def rq4_survival_figure():
     """RQ4 candidates against the authored rules, on the three-way task set.
 
-    Reads rq5_three_way_baseline_comparison.json so the medians match section 5.4
+    Reads rq4_three_way_baseline_comparison.json so the medians match section 5.4
     and Table 11. The temperature-0 tick still comes from the phase-3 artifact,
     since it is a property of the search rather than of the task-set choice.
     """
-    f = REP / "rq5_three_way_baseline_comparison.json"
+    f = REP / "rq4_three_way_baseline_comparison.json"
     if not f.exists():
-        print("  skip fig7 (no three-way rq5 json)")
+        print("  skip rq4_survival (no three-way json)")
         return
     layer2 = json.load(open(f))["layer2_candidate_vs_authored"]
     det = {}
@@ -493,7 +493,7 @@ def fig7():
         if fam:
             rows.append((stratum, fam))
     if not rows:
-        print("  skip fig7 (no candidates)")
+        print("  skip rq4_survival (no candidates)")
         return
 
     n = sum(len(fam) for _, fam in rows)
@@ -601,17 +601,17 @@ def fig7():
         handletextpad=0.4,
         columnspacing=1.6,
     )
-    save(fig, "fig7_rq4_survival")
+    save(fig, "rq4_survival")
 
 
 if __name__ == "__main__":
     print("writing figures to", FIG)
-    fig1()
-    fig2()
-    fig2_tiers()
-    fig3()
-    fig4()
-    fig5()
-    fig6()
-    fig7()
+    rq1_magnitude_figure()
+    rq2_paired_deltas_figure()
+    rq2_safe_zone_tiers_figure()
+    rq2_effect_size_figure()
+    rq3_operators_figure()
+    rq3_acceptance_vs_effect_figure()
+    evaluations_per_arm_figure()
+    rq4_survival_figure()
     print("done")

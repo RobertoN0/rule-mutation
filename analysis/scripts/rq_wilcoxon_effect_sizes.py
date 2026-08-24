@@ -9,7 +9,7 @@ sign-test p-values remain alongside the Wilcoxon results under
 
 RQ2 is reconstructed from ``rq2_safe_zone_tiers.json``. RQ4 is reconstructed
 from the final shared-task-set artifact,
-``rq5_three_way_baseline_comparison.json``; the older pairwise-task-set RQ4
+``rq4_three_way_baseline_comparison.json``; the older pairwise-task-set RQ4
 artifact is deliberately not used.
 
 The raw experiment archive is not required:
@@ -191,7 +191,7 @@ def build_report(results_dir: Path) -> dict:
         }
     report["rq2_ea_vs_random"] = rq2
 
-    three_way = json.loads((results_dir / "rq5_three_way_baseline_comparison.json").read_text())
+    three_way = json.loads((results_dir / "rq4_three_way_baseline_comparison.json").read_text())
     rq4 = {}
     for name, row in three_way["layer2_candidate_vs_authored"].items():
         differences = row["per_seed_delta"]

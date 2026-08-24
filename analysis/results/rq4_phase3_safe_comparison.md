@@ -3,7 +3,7 @@
 > **Superseded except for the temperature-zero selection gain.** Pairwise rows
 > below use candidate-specific task sets and the earlier exact sign test. The
 > submitted thesis's candidate-versus-authored values come from
-> `rq5_three_way_baseline_comparison.{json,md}`, which uses one shared task set
+> `rq4_three_way_baseline_comparison.{json,md}`, which uses one shared task set
 > and exact Wilcoxon inference. This file remains for provenance and Figure 4's
 > temperature-zero ticks.
 

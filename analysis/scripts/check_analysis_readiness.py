@@ -166,7 +166,7 @@ def check() -> dict:
     selection_ok = len(selected) == 20
     gates.append(gate("RQ4 candidate selection", selection_ok, "20 selected candidates"))
 
-    rq4 = load("rq5_three_way_baseline_comparison.json")
+    rq4 = load("rq4_three_way_baseline_comparison.json")
     runs = rq4.get("layer2_candidate_vs_authored", {})
     multiplicity = rq4.get("multiplicity", {}).get("results", {}).get(
         "layer2_candidate_vs_authored", {}
@@ -198,10 +198,10 @@ def check() -> dict:
     )
 
     figure_names = [
-        "fig1_rq1_magnitude",
-        "fig2_rq2_safe_zone_tiers",
-        "fig4_rq3_operators_effectiveness",
-        "fig7_rq4_survival",
+        "rq1_magnitude",
+        "rq2_safe_zone_tiers",
+        "rq3_operators",
+        "rq4_survival",
     ]
     figure_ok = all(
         (FIGURES / f"{name}.{ext}").is_file()

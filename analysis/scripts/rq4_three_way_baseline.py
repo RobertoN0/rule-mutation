@@ -136,7 +136,7 @@ def main() -> int:
         candidates_by_stratum[cand["stratum"]].append(cand)
 
     output = {
-        "artifact_type": "rq5_three_way_phase3_baseline_comparison",
+        "artifact_type": "rq4_three_way_phase3_baseline_comparison",
         "generated_from": "experiments/{01_population_and_maps/phase3_screening/block1,"
         "05_phase3_resampling,06_safe_zone_validation}/**/replicates.jsonl",
         "unit_of_analysis": "one generation seed; 20 seeds per comparison at temperature 0.6",
@@ -324,9 +324,9 @@ def main() -> int:
     }
 
     (OUT).mkdir(parents=True, exist_ok=True)
-    (OUT / "rq5_three_way_baseline_comparison.json").write_text(json.dumps(output, indent=2))
-    print(f"wrote {OUT / 'rq5_three_way_baseline_comparison.json'}")
-    write("rq5_three_way_baseline_comparison.md", render_md(output))
+    (OUT / "rq4_three_way_baseline_comparison.json").write_text(json.dumps(output, indent=2))
+    print(f"wrote {OUT / 'rq4_three_way_baseline_comparison.json'}")
+    write("rq4_three_way_baseline_comparison.md", render_md(output))
     return 0
 
 

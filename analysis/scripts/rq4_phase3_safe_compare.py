@@ -9,7 +9,7 @@ silently mixed.
 
 The pairwise task-set policy and sign-test inference are retained for
 provenance. The submitted thesis instead uses the shared-task-set Wilcoxon/A12
-results from ``rq5_three_way_baseline_comparison.json``. Only the deterministic
+results from ``rq4_three_way_baseline_comparison.json``. Only the deterministic
 temperature-zero gain from this artifact remains in thesis Figure 4.
 """
 
@@ -275,7 +275,7 @@ def main() -> int:
             "superseded pairwise-task-set/sign-test inference; retained for provenance "
             "and the temperature-zero selection gain"
         ),
-        "superseded_by": "rq5_three_way_baseline_comparison.json",
+        "superseded_by": "rq4_three_way_baseline_comparison.json",
         "interpretation": (
             "validation-style stochastic resampling of post-selected candidates; "
             "selected candidates share benchmarks, baselines, and model systems"
@@ -416,7 +416,7 @@ def main() -> int:
         "> **Superseded except for the temperature-zero selection gain.** Pairwise rows",
         "> below use candidate-specific task sets and the earlier exact sign test. The",
         "> submitted thesis's candidate-versus-authored values come from",
-        "> `rq5_three_way_baseline_comparison.{json,md}`, which uses one shared task set",
+        "> `rq4_three_way_baseline_comparison.{json,md}`, which uses one shared task set",
         "> and exact Wilcoxon inference. This file remains for provenance and Figure 4's",
         "> temperature-zero ticks.",
         "",
