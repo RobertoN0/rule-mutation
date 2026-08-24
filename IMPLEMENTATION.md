@@ -334,10 +334,9 @@ assert that a vulnerability was established.
 - `analysis/scripts/rq_wilcoxon_effect_sizes.py`: final exact Wilcoxon, A12,
   and family-specific Holm results for RQ2 and RQ4; the superseded sign-test
   values remain in the output for provenance.
-- `analysis/scripts/rq5_three_way_baseline.py`: final RQ4 comparison on one
+- `analysis/scripts/rq4_three_way_baseline.py`: final RQ4 comparison on one
   task set shared by the no-rules condition, authored rules, and all five
-  candidates of a stratum and seed. Its `rq5` name is a historical filename,
-  not a fifth research question.
+  candidates of a stratum and seed.
 
 ## Extension points
 

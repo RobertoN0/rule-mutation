@@ -35,7 +35,7 @@ rules.
 
 **Raw and sanitised results are never mixed.** `sanitized/manifest.json` links
 each repaired artifact to its raw source by hash, and
-`../../analysis/results/rq5_three_way_baseline_comparison.json` records which
+`../../analysis/results/rq4_three_way_baseline_comparison.json` records which
 kind each candidate is under `candidate_kind`. The older
 `rq4_phase3_safe_comparison.json` is retained for provenance and the
 temperature-zero selection gain only.

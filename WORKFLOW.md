@@ -196,6 +196,11 @@ The thesis runs use DelftBlue A100 nodes with local Qwen and Llama models. The
 model-specific wrappers take the same search overrides and call the common
 entrypoint with `--backend delftblue`:
 
+> **Submit from the repository root.** The wrappers write scheduler output to
+> `logs/` and default `REPO_ROOT` to `$SLURM_SUBMIT_DIR`, both relative to the
+> directory `sbatch` was invoked from. Set `REPO_ROOT` explicitly to submit from
+> anywhere else.
+
 ```bash
 # Smoke before any big batch
 N_CASES=2 MAIN_LOOP_BUDGET=2 LANGUAGES=python OPTIMIZER=ea \
@@ -372,7 +377,7 @@ outputs are missing observations rather than clean zero-finding outputs, and
 paired task effects are reduced to one effect per seed before inference.
 
 For the submitted thesis, the final RQ4 step is
-`analysis/scripts/rq5_three_way_baseline.py`. It intersects valid tasks across
+`analysis/scripts/rq4_three_way_baseline.py`. It intersects valid tasks across
 the no-rules condition, authored rules, and all five candidates within each
 stratum and seed. Candidate-versus-authored comparisons use exact Wilcoxon
 signed-rank p-values and A12, with Holm correction across all twenty

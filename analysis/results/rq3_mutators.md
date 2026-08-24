@@ -3,6 +3,11 @@
 Sign convention: **delta > 0 means FEWER findings than the reference (an improvement)**.
 EA runs in scope: 40.
 
+**These are associations, not causal effects.** Moves were selected by the
+search rather than randomised, and successive moves within a run are
+dependent, so a high positive-delta rate for an operator does not establish
+that the operator caused the reduction.
+
 ## Level 1 - clean one-move parent/child contrasts (the anchor)
 
 Text moves changed one rule by one operator; whole-rule reorder moves changed

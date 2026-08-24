@@ -105,7 +105,7 @@ are reduced to one effect per seed before inference so repeated tasks are not
 treated as independent experimental units.
 
 The submitted thesis's final RQ4 table is a later shared-task-set analysis:
-`analysis/scripts/rq5_three_way_baseline.py` intersects valid tasks across the
+`analysis/scripts/rq4_three_way_baseline.py` intersects valid tasks across the
 no-rules condition, authored rules, and all five candidates per stratum and
 seed. `analysis/scripts/rq_wilcoxon_effect_sizes.py` records the final exact
 Wilcoxon, A12, and Holm results for RQ2 and RQ4. The sign tests in earlier

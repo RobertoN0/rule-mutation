@@ -155,7 +155,7 @@ model and language using the exact Wilcoxon signed-rank test and
 Vargha–Delaney A12; Holm correction is applied separately within each of the
 three four-stratum admissibility lenses. Temperature>0 repetitions are
 validated with `validate_replicate_run.py`. Final RQ4 values come from
-`analysis/scripts/rq5_three_way_baseline.py`, which scores the no-rules
+`analysis/scripts/rq4_three_way_baseline.py`, which scores the no-rules
 condition, authored rules, and all five candidates on one shared task set per
 stratum and seed. See `analysis/README.md` for the full procedure.
 
@@ -275,7 +275,7 @@ or verify that a candidate is semantically equivalent to the authored rule.
 | `voice_change` | Transforms active imperatives to passive advisory form |
 | `paraphrase` | Rewrites prose with weaker vocabulary; inline code masked before the LLM call |
 
-The live mutators now enforce the **safe-zone contract** fail-closed: YAML
+The live mutators enforce the **safe-zone contract** fail-closed: YAML
 frontmatter, fenced code blocks, and inline code must remain unchanged. The
 executed Phase-2 system did not enforce this consistently; the defect and the
 three post-hoc admissibility lenses are documented in

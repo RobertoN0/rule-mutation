@@ -28,14 +28,16 @@ analysis/
 | `rq3_mutators.py` | RQ3 move-family associations: `rq3_mutators.{json,md}`. |
 | `phase3_select_topk.py` | Selection of twenty candidates: `phase3_selection_topk.{json,md}`. |
 | `rq4_phase3_safe_compare.py` | Superseded pairwise-task-set RQ4 artifact: `rq4_phase3_safe_comparison.{json,md}`. Retained for provenance and the Figure 4 temperature-zero ticks only. |
-| `rq5_three_way_baseline.py` | Final RQ4 comparison on one shared task set per stratum and seed: `rq5_three_way_baseline_comparison.{json,md}`. The `rq5` filename is a historical development label; the thesis research question is RQ4. |
+| `rq4_three_way_baseline.py` | Final RQ4 comparison on one shared task set per stratum and seed: `rq4_three_way_baseline_comparison.{json,md}`. |
 | `make_figures.py` | Rebuilds all PDF/PNG files in `figures/` from canonical JSON. |
 
 The structural audit and Phase-3 sanitiser live in
 [`../scripts/analyze/`](../scripts/analyze/) because they materialise repository
-artifacts rather than only summarising them. The unpublished
-`rq4_phase3_compare.py` mixed raw and sanitised candidates and is not a thesis
-result.
+artifacts rather than only summarising them.
+
+An earlier unpublished comparison script pooled raw and sanitised candidates in
+one test. It was discarded rather than corrected, is deliberately absent from
+this repository, and produced no thesis result.
 
 ## Final inference rules
 
@@ -45,7 +47,7 @@ result.
   four-stratum lens: executed system, fenced code, and full contract.
 - **RQ4:** twenty generation seeds per candidate on a task set shared by the
   no-rules condition, authored rules, and all five candidates of the stratum.
-  Use `rq5_three_way_baseline_comparison.json`. The candidate-versus-authored
+  Use `rq4_three_way_baseline_comparison.json`. The candidate-versus-authored
   tests form one twenty-test Holm family.
 - All exact Wilcoxon p-values enumerate the permutation null over every 2^n
   sign assignment. The normal approximation is diagnostic only.

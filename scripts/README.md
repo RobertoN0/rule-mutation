@@ -86,6 +86,6 @@ search outcomes; it is not part of the search budget.
 
 The thesis-facing analyses live under `../analysis/scripts/`. In particular,
 `rq_wilcoxon_effect_sizes.py` contains the final exact Wilcoxon/A12 procedure,
-and `rq5_three_way_baseline.py` produces the final RQ4 shared-task-set
+and `rq4_three_way_baseline.py` produces the final RQ4 shared-task-set
 comparison. The older sign-test outputs and pairwise-task-set RQ4 artifact are
 retained only for provenance.
