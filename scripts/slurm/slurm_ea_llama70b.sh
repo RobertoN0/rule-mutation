@@ -7,8 +7,8 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --gpus-per-task=1
 #SBATCH --mem-per-cpu=8000M
-#SBATCH --output=/home/rnegro/thesis/rule-mutation/logs/%j_%x.out
-#SBATCH --error=/home/rnegro/thesis/rule-mutation/logs/%j_%x.err
+#SBATCH --output=logs/%j_%x.out
+#SBATCH --error=logs/%j_%x.err
 # Graceful pre-timeout: deliver SIGUSR1 to the batch shell (B:) this many seconds
 # before the wall-time SIGKILL so the run can save final results. SLURM may
 # deliver up to 60s EARLIER than asked, never later, so the lead is the floor on
@@ -97,7 +97,7 @@ ENABLE_EVAL_CACHE=${ENABLE_EVAL_CACHE:-1}
 # Optimisation direction: "minimize" (REPAIR: fewer findings, default) | "maximize".
 OBJECTIVE_DIRECTION=${OBJECTIVE_DIRECTION:-minimize}
 ALLOW_UNQUALIFIED_MAP=${ALLOW_UNQUALIFIED_MAP:-0}
-REPO_ROOT=${REPO_ROOT:-/home/rnegro/thesis/rule-mutation}
+REPO_ROOT=${REPO_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}
 OUTPUT_BASE=${OUTPUT_BASE:-"$REPO_ROOT/experiments/results"}
 INITIALIZATION_BUNDLE=${INITIALIZATION_BUNDLE:-}
 TIME_BUDGET_SECONDS=${TIME_BUDGET_SECONDS:-}

@@ -33,14 +33,14 @@ dependencies = [
     "python-dotenv>=1.0,<2",
     "pydantic>=2.0,<3",
 
-    # Mutation quality validation (bd-03k)
+    # Mutation quality validation
     # torch is listed explicitly so [tool.uv.sources] below can pin it to PyTorch's
     # CPU wheel index. Sources only apply to direct deps, not transitives — without
     # this line, sentence-transformers pulls the default ~8 GB CUDA wheel on Linux.
     "torch>=2.0,<3",
     "sentence-transformers>=2.2",
 
-    # Function-based mutators (bd-03k)
+    # Function-based mutators
     "nlpaug>=1.1.11",
     "nltk>=3.8",
 

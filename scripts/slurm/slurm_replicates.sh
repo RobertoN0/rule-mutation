@@ -7,8 +7,8 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --gpus-per-task=1
 #SBATCH --mem-per-cpu=8000M
-#SBATCH --output=/home/rnegro/thesis/rule-mutation/logs/%j_%x.out
-#SBATCH --error=/home/rnegro/thesis/rule-mutation/logs/%j_%x.err
+#SBATCH --output=logs/%j_%x.out
+#SBATCH --error=logs/%j_%x.err
 
 #############################################################################
 # Replicate runner: load the model ONCE, run temp>0 replicates of a SINGLE
@@ -81,7 +81,7 @@ else
     echo "ERROR: set CONDITION=norules|withrules (or RULES_OVERRIDE_DIR for override mode)"; exit 1
 fi
 
-REPO_ROOT="${REPO_ROOT:-/home/rnegro/thesis/rule-mutation}"
+REPO_ROOT="${REPO_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}"
 OUTPUT_BASE=${OUTPUT_BASE:-"$REPO_ROOT/experiments/results"}
 NORULES_MAP=${NORULES_MAP:-"$REPO_ROOT/rule_maps/qualified/final_search_norules_map_${LANGUAGES}.json"}
 WITHRULES_MAP=${WITHRULES_MAP:-"$REPO_ROOT/rule_maps/qualified/final_search_map_${MODEL}_${LANGUAGES}.json"}

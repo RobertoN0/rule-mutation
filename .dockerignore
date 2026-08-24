@@ -28,7 +28,7 @@ __pycache__
 .idea
 .ipynb_checkpoints
 
-# Beads runtime state (not needed inside the container)
+# Local issue-tracker state (not needed inside the container)
 .beads
 
 # Heavy local artifacts the replication path does NOT need

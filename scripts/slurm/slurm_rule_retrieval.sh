@@ -8,8 +8,8 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --gpus-per-task=1
 #SBATCH --mem-per-cpu=8000M
-#SBATCH --output=/home/rnegro/thesis/rule-mutation/logs/%j_%x.out
-#SBATCH --error=/home/rnegro/thesis/rule-mutation/logs/%j_%x.err
+#SBATCH --output=logs/%j_%x.out
+#SBATCH --error=logs/%j_%x.err
 
 #############################################################################
 # Rule Retrieval Mapping on DelftBlue, any supported local model.
@@ -70,7 +70,7 @@ REPETITIONS=${REPETITIONS:-1}
 OUTPUT_DIR=${OUTPUT_DIR:-}        # default in the Python script: rule_maps/retrieval_sweeps
 OUTPUT=${OUTPUT:-}
 RESUME=${RESUME:-}
-REPO_ROOT="${REPO_ROOT:-/home/rnegro/thesis/rule-mutation}"
+REPO_ROOT="${REPO_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}"
 
 mkdir -p "$REPO_ROOT/logs"
 exec >"$REPO_ROOT/logs/rule_retrieval_${SLURM_JOB_ID}.out" \
