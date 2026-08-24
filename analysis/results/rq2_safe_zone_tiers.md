@@ -1,4 +1,4 @@
-# RQ2 safe-zone specification sensitivity
+# RQ2 admissibility-lens sensitivity
 
 > **Statistical procedure updated.** The lens data, medians, and intervals in
 > this file remain current. Its exact sign tests are superseded provenance. The
@@ -7,19 +7,19 @@
 
 Unit: one EA/random pair matched by search seed and initialisation bundle.
 Outcome: best raw Semgrep-finding reduction (`f1`) observed in 24 hours.
-Historical test within each tier: exact two-sided paired sign test; ties are
+Historical test within each lens: exact two-sided paired sign test; ties are
 excluded. Holm correction covers the four model-language strata within
-that tier. The sign-flip test is magnitude-sensitive secondary evidence.
+that lens. The sign-flip test is magnitude-sensitive secondary evidence.
 
-> **Interpretation guardrail.** The core and full tiers are post-hoc
+> **Interpretation guardrail.** The fenced-code and full-contract lenses are post-hoc
 > filters over candidates visited by the historical searches. They do not
-> reconstruct fail-closed constrained-search trajectories. The core tier
+> reconstruct fail-closed constrained-search trajectories. The fenced-code lens
 > is an exploratory component diagnostic and must not be selected as the
 > primary result merely because it is more favourable.
 
 ## Three lenses
 
-### Raw executed system
+### Executed-system lens
 
 **Status:** system-level result. Best result reported by the mutation/search implementation that was actually executed.
 
@@ -32,7 +32,7 @@ that tier. The sign-flip test is magnitude-sensitive secondary evidence.
 
 Superseded sign-test Holm rejections: **4/4**.
 
-### Core structural sensitivity
+### Fenced-code lens
 
 **Status:** post-hoc exploratory sensitivity. Best observed candidate preserving frontmatter and fenced-code structure; inline-code changes are allowed.
 
@@ -45,7 +45,7 @@ Superseded sign-test Holm rejections: **4/4**.
 
 Superseded sign-test Holm rejections: **3/4**.
 
-### Full safe-zone sensitivity
+### Full-contract lens
 
 **Status:** post-hoc conservative sensitivity. Best observed candidate preserving frontmatter, fenced-code blocks, and inline-code spans exactly.
 
@@ -60,7 +60,7 @@ Superseded sign-test Holm rejections: **0/4**.
 
 ## Why the full result changes
 
-Across 10,789 completed evaluations, 4,598 (42.6%) failed the full contract. The core tier rejected 2,297 (21.3%); 2,301 evaluations (21.3%) were therefore excluded only by the inline-code requirement.
+Across 10,789 completed evaluations, 4,598 (42.6%) failed the full contract. The fenced-code lens rejected 2,297 (21.3%); 2,301 evaluations (21.3%) were therefore excluded only by the inline-code requirement.
 
 Issue counts overlap because one evaluation can have multiple problems:
 
@@ -81,6 +81,6 @@ significant after family-wise correction. Thus, the algorithmic advantage
 is clear for the executed system but sensitive to the strictest
 admissibility definition.
 
-Do not infer from the full-tier non-rejections that EA and random are
+Do not infer from the full-contract-lens non-rejections that EA and random are
 equivalent. Also do not claim that a genuinely constrained EA would have
 followed the post-hoc filtered trajectory; that counterfactual was not run.

@@ -1,18 +1,18 @@
 #!/usr/bin/env python
-"""Phase-3 chromosome selection, v2: top-K repairs from K DISTINCT seeds.
+"""Final Phase-3 chromosome selection: top-K candidates from K distinct seeds.
 
 Why this replaces the old rule. The previous selection took ranks 1 and 2 from a
 single run's archive. Those two turn out to be near-duplicates -- 9 to 11 of
 their genes byte-identical, usually the same rule ordering -- so two jobs tested
-essentially one repair. Taking the best chromosome from each of the top-K seeds
+essentially one candidate. Taking the best chromosome from each of the top-K seeds
 instead yields genuinely different rule sets (pairwise gene-set Jaccard 0.25 to
 0.52) at almost no cost in f1, which turns RQ4 from "did this one repair hold?"
-into "of K independent repairs, how many held?".
+into "how many of K distinct selected candidates retained their effect?".
 
 Rule: pool every chromosome in every eligible EA run's FINAL archive snapshot,
 rank by f1 desc, f2 desc, f3 desc, cid asc, then walk the ranking and keep a
 chromosome only if its seed has not been used yet. Stop at K. Ties on f1 are
-therefore broken toward higher fidelity, and never toward a second chromosome
+therefore broken toward higher textual similarity, and never toward a second chromosome
 from a run already represented.
 
 Read-only. Stdlib only.
@@ -25,9 +25,8 @@ import argparse
 import glob
 import json
 import os
-from pathlib import Path
 
-from common import REPO, OUT, load_runs, gated_pairs, write
+from common import OUT, gated_pairs, load_runs, write
 
 
 def final_archive(run_dir: str) -> list[dict]:
@@ -59,13 +58,20 @@ def main():
             "keep a chromosome only if its seed is not already represented; "
             "stop at K. At most ONE chromosome per run."
         ),
+        "f2_definition": (
+            "mean SBERT textual similarity to the authored originals; the stored "
+            "rule_fidelity field name does not establish semantic equivalence"
+        ),
         "strata": {},
         "problems": [],
     }
     md = [
-        f"# Phase 3 selection v2 - top {args.k} repairs from {args.k} distinct seeds",
+        f"# Phase 3 candidate selection - top {args.k} from {args.k} distinct seeds",
         "",
         out["selection_rule"],
+        "",
+        "`f2` is mean SBERT textual similarity to the authored originals; it does not",
+        "establish semantic equivalence.",
         "",
     ]
 

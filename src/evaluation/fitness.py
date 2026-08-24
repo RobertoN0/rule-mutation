@@ -81,7 +81,7 @@ class AggregatedFitness:
     """Number of prompts evaluated."""
     
     num_vulnerable: int
-    """Number of prompts that produced at least one vulnerability."""
+    """Number of prompts that produced at least one Semgrep finding."""
     
     individual_results: list[FitnessResult] = field(default_factory=list)
     """Per-prompt fitness results."""
@@ -114,12 +114,16 @@ class AggregatedFitness:
     # _evaluate_chromosome, not computed here — they need the alleles + SBERT
     # validator, not per-prompt results). --------------------------------------
     rule_fidelity: float = 1.0
-    """Mean SBERT similarity of the chromosome's MUTATED rules vs their originals
-    (1.0 when nothing is mutated). Conservative f2 axis — maximized."""
+    """Mean SBERT textual similarity of mutated rules to their authored originals.
+
+    The field name is retained for schema compatibility; it does not establish
+    semantic equivalence. The value is 1.0 when nothing is mutated and supplies
+    the maximised f2 axis.
+    """
 
     parsimony: int = 0
-    """Number of mutated rules in the chromosome. Conservative f3 axis — minimized
-    (stored negated when routed to an objective, so the maximizing archive works)."""
+    """Number of mutated rules in the chromosome. The f3 axis is minimised
+    (stored negated when routed to an objective, so the maximising archive works)."""
 
 
 def calculate_fitness(

@@ -66,7 +66,7 @@ def audit_run(run_dir: Path, originals: dict[str, tuple]) -> dict:
             "chromosome_id": "origin",
         }
     ]
-    # Secondary diagnostic tier: preserve frontmatter and fenced-code structure,
+    # Secondary diagnostic lens: preserve frontmatter and fenced-code structure,
     # while allowing inline-code differences. This is reported only to explain
     # which component drives the strict sensitivity result; it is not the full
     # safe-zone contract and must not replace the pre-specified strict result.

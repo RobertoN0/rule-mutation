@@ -84,7 +84,7 @@ MODEL=llama LANGUAGES=java RULES_MAP=<screened-llama-java-map> \
 ```
 
 Each wrapper writes `qualification_validation.json`; all four results must be
-`VALID`. Then materialize the shared model intersection:
+`VALID`. Then materialise the shared model intersection:
 
 ```bash
 python scripts/setup/materialize_qualified_search_maps.py \
@@ -151,7 +151,8 @@ python scripts/experiments/run_experiment.py \
 
 Swap `--optimizer random_search` for the i.i.d. baseline (same sampler, no
 archive). `--enable-validation` is **required** on real runs (it computes the f2
-rule-fidelity objective); only `--dry-run` may omit it.
+textual-similarity objective, stored as `rule_fidelity`); only `--dry-run` may
+omit it.
 
 ### Choosing the model
 
@@ -185,7 +186,7 @@ run-level outcomes are in `search_summary.json`.
 | `--random-max-changes K` | shared sampler's changes-per-sample cap (default 10) |
 | `--ea-injection-every N` | inject an origin-based random candidate every N main-loop evaluations |
 | `--order-move-weight P` | reorder probability; mutate probability is `1-P` |
-| `--enable-validation` | quality recording; **required** on real runs (feeds f2 fidelity) |
+| `--enable-validation` | quality recording; **required** on real runs (feeds f2 textual similarity) |
 | `--seed N` | reproducibility |
 | `--dry-run` | wire a mock backend (no API calls) to check the plumbing |
 
@@ -402,14 +403,15 @@ back to the SLURM wrapper's env vars (`--as delftblue` to force that form).
 
 ### The three objectives (conservative set, all maximised over the whole chromosome)
 
-- **f1 = `total_raw_reduction`** — raw Semgrep-finding reduction vs. baseline under `--objective-direction minimize` (higher = safer); the primary signal.
-- **f2 = `rule_fidelity`** — mean SBERT similarity of each mutated rule to its original (1.0 = unchanged); needs `--enable-validation`.
+- **f1 = `total_raw_reduction`** — raw Semgrep-finding reduction versus the authored-rules baseline under `--objective-direction minimize` (higher = fewer findings); the primary signal.
+- **f2 = `rule_fidelity`** — mean SBERT textual similarity of each mutated rule to its authored original (1.0 = unchanged); needs `--enable-validation`. The field name is historical and does not establish semantic fidelity.
 - **f3 = `−parsimony`** — negated count of text-mutated rules (fewer edits = higher).
 
 f1's sign depends on `objective_direction` (f1 is negated at search time so the EA always
-maximises): under **minimize** (the repair runs) higher f1 = *safer* code (fewer findings);
-under **maximize** (the secondary adversarial direction) higher f1 = *more vulnerable* code.
-f2/f3 capture how faithfully and minimally the rule set was edited. The
+maximises): under **minimize** (the repair runs) higher f1 means fewer findings;
+under **maximize** (the secondary adversarial direction) higher f1 means more findings.
+Neither direction establishes code security. f2/f3 capture textual similarity
+and edit count. The
 severity-weighted reduction is reported separately and does not drive search.
 
 ### Analysis and validation
@@ -420,7 +422,7 @@ Run the per-run validator after each completed search and again after syncing:
 python scripts/analyze/validate_search_run.py --write <run_dir>
 ```
 
-Analyze a validated matrix with:
+Analyse a validated matrix with:
 
 ```bash
 python scripts/analyze/analyze_search_runs.py \

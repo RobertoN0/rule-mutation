@@ -12,9 +12,9 @@ within a run are dependent. Run-aggregated summaries are the primary evidence.
 
 **Read the two success columns separately.** `positive delta` is computed
 directly as f1 > parent_f1. `archive accept` is
-multi-objective — the archive also rewards fidelity (f2) and parsimony (f3),
+multi-objective — the archive also rewards textual similarity (f2) and parsimony (f3),
 so a move can be kept while f1 gets worse. An operator with a high accept
-rate but a low advance rate is surviving on fidelity, not on security effect.
+rate but a low advance rate is surviving on textual similarity, not on the finding-count effect.
 
 ### llama_java — 583 clean moves, 82 positive-delta, 201 archive-accepted
 
@@ -230,4 +230,3 @@ other operators fixed.
 | add_random_word | +0.0121 |
 | negation_injection | -0.0024 |
 | section_reorder_degrade | -0.0129 |
-

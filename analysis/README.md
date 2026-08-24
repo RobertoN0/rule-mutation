@@ -62,6 +62,10 @@ export ANALYSIS_OUT=/path/to/output/dir
 .venv/bin/python analysis/scripts/rq1_magnitude.py
 ```
 
+Without those overrides, JSON-only checks use this checkout and
+`analysis/results/`. Absolute DelftBlue paths embedded in published JSON are
+recorded provenance, not paths a reviewer is expected to resolve locally.
+
 The final Wilcoxon artifact can be reproduced from the published JSON alone:
 
 ```bash
@@ -70,9 +74,11 @@ The final Wilcoxon artifact can be reproduced from the published JSON alone:
 ```
 
 `make_figures.py` needs Matplotlib, deliberately absent from the frozen project
-environment. The committed figures use Matplotlib 3.10.9. Run it from a
-separate plotting environment with `ANALYSIS_BASE` pointing to a directory
-containing `report/` (the results) and `figures/`.
+environment. The committed figures use Matplotlib 3.10.9. From a separate
+plotting environment, run `python analysis/scripts/make_figures.py`; it reads
+the committed `analysis/results/` and writes `analysis/figures/`. Set
+`ANALYSIS_BASE` only when using the historical `report/` plus `figures/`
+layout.
 
 ## Interpretation
 

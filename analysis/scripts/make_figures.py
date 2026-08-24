@@ -5,10 +5,12 @@ Run with an isolated plotting environment (Matplotlib is deliberately absent
 from the frozen project environment). The committed figures were produced with
 Matplotlib 3.10.9:
 
-    ANALYSIS_BASE=/path/with/report-and-figures python make_figures.py
+    python analysis/scripts/make_figures.py
 
-``ANALYSIS_BASE/report`` must contain the canonical JSON; output is written to
-``ANALYSIS_BASE/figures``.
+By default the script reads ``analysis/results`` and writes
+``analysis/figures`` in the current checkout. Set ``ANALYSIS_BASE`` for the
+historical layout in which ``ANALYSIS_BASE/report`` contains the JSON and
+``ANALYSIS_BASE/figures`` receives the output.
 """
 
 import json
@@ -25,9 +27,14 @@ matplotlib.rcParams["ps.fonttype"] = 42
 import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib.lines import Line2D  # noqa: E402
 
-# Override ANALYSIS_BASE to read/write the figure set somewhere else.
-BASE = Path(os.environ.get("ANALYSIS_BASE", "/home/rnegro/analysis"))
-REP = BASE / "report"
+# Override ANALYSIS_BASE to read/write the figure set somewhere else. The
+# environment-variable form retains the historical report/figures layout.
+if configured_base := os.environ.get("ANALYSIS_BASE"):
+    BASE = Path(configured_base)
+    REP = BASE / "report"
+else:
+    BASE = Path(__file__).resolve().parents[1]
+    REP = BASE / "results"
 FIG = BASE / "figures"
 FIG.mkdir(exist_ok=True)
 
@@ -164,7 +171,7 @@ def fig2():
 def fig2_tiers():
     """RQ2 specification sensitivity across the three safe-zone lenses."""
     data = load("rq2_safe_zone_tiers.json")
-    # Medians and bootstrap intervals come from the tier artifact; the test
+    # Medians and bootstrap intervals come from the historical ``tiers`` artifact; the test
     # result and the Holm decision come from the Wilcoxon artifact, which is
     # the procedure the report actually uses (the sign test is superseded and
     # survives only in the appendix comparison table).

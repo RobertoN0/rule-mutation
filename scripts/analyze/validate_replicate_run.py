@@ -351,7 +351,9 @@ def validate_replicate_run(
 
             raw = sum(row["fitness"]["raw_count"] for row in valid_rows)
             weighted = sum(float(row["fitness"]["weighted_score"]) for row in valid_rows)
-            vulnerable = sum(row["fitness"]["raw_count"] > 0 for row in valid_rows)
+            finding_positive = sum(
+                row["fitness"]["raw_count"] > 0 for row in valid_rows
+            )
             per_case = {
                 str(row["test_case_id"]): row["fitness"]["raw_count"]
                 for row in valid_rows
@@ -363,10 +365,11 @@ def validate_replicate_run(
             expected_values = {
                 "raw_findings": raw,
                 "weighted_fitness": weighted,
-                "vulnerable_cases": vulnerable,
+                # Historical schema names; these count prompts with findings.
+                "vulnerable_cases": finding_positive,
                 "raw_findings_per_valid_prompt": raw / n_valid if n_valid else None,
                 "weighted_score_per_valid_prompt": weighted / n_valid if n_valid else None,
-                "vulnerable_rate_valid": vulnerable / n_valid if n_valid else None,
+                "vulnerable_rate_valid": finding_positive / n_valid if n_valid else None,
             }
             for key, expected in expected_values.items():
                 actual = replicate.get(key)

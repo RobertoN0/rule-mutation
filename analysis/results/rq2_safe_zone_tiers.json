@@ -5,29 +5,29 @@
   "outcome": "best raw Semgrep-finding reduction observed in 24 hours",
   "inference_status": "paired data, medians, and intervals are current; sign-test fields are superseded by rq_wilcoxon_effect_sizes.json",
   "primary_test": "exact Wilcoxon signed-rank; stored in rq_wilcoxon_effect_sizes.json",
-  "multiplicity": "Holm correction across four model-language strata separately within each tier; cross-tier comparisons are a nested specification sensitivity, not three independent confirmatory families",
+  "multiplicity": "Holm correction across four model-language strata separately within each lens; cross-lens comparisons are a nested specification sensitivity, not three independent confirmatory families",
   "guardrails": [
-    "core and full tiers are post-hoc filters over historical trajectories",
-    "core tier is exploratory and was defined after discovering the issue",
-    "full-tier non-rejection is not evidence of equivalence",
-    "no tier establishes semantic equivalence of mutated rules"
+    "fenced-code and full-contract lenses are post-hoc filters over historical trajectories",
+    "fenced-code lens is exploratory and was defined after discovering the issue",
+    "full-contract-lens non-rejection is not evidence of equivalence",
+    "no lens establishes semantic equivalence of mutated rules"
   ],
   "excluded": [],
   "tier_definitions": {
     "raw_executed": {
-      "label": "Raw executed system",
+      "label": "Executed-system lens",
       "audit_field": "reported_best_f1",
       "status": "system-level result",
       "description": "Best result reported by the mutation/search implementation that was actually executed."
     },
     "core_structural": {
-      "label": "Core structural sensitivity",
+      "label": "Fenced-code lens",
       "audit_field": "core_structural_best_f1",
       "status": "post-hoc exploratory sensitivity",
       "description": "Best observed candidate preserving frontmatter and fenced-code structure; inline-code changes are allowed."
     },
     "full_contract": {
-      "label": "Full safe-zone sensitivity",
+      "label": "Full-contract lens",
       "audit_field": "strict_best_f1",
       "status": "post-hoc conservative sensitivity",
       "description": "Best observed candidate preserving frontmatter, fenced-code blocks, and inline-code spans exactly."
@@ -440,7 +440,7 @@
       },
       "families": {
         "sign_test_superseded": {
-          "family": "four model-language strata within this tier",
+          "family": "four model-language strata within this lens",
           "holm": {
             "qwen_java": {
               "p": 0.001953125,
@@ -465,7 +465,7 @@
           }
         },
         "magnitude_sensitive_sign_flip": {
-          "family": "four model-language strata within this tier",
+          "family": "four model-language strata within this lens",
           "holm": {
             "qwen_java": {
               "p": 0.001953125,
@@ -877,7 +877,7 @@
       },
       "families": {
         "sign_test_superseded": {
-          "family": "four model-language strata within this tier",
+          "family": "four model-language strata within this lens",
           "holm": {
             "llama_java": {
               "p": 0.00390625,
@@ -902,7 +902,7 @@
           }
         },
         "magnitude_sensitive_sign_flip": {
-          "family": "four model-language strata within this tier",
+          "family": "four model-language strata within this lens",
           "holm": {
             "llama_java": {
               "p": 0.00390625,
@@ -1314,7 +1314,7 @@
       },
       "families": {
         "sign_test_superseded": {
-          "family": "four model-language strata within this tier",
+          "family": "four model-language strata within this lens",
           "holm": {
             "qwen_java": {
               "p": 0.0703125,
@@ -1339,7 +1339,7 @@
           }
         },
         "magnitude_sensitive_sign_flip": {
-          "family": "four model-language strata within this tier",
+          "family": "four model-language strata within this lens",
           "holm": {
             "qwen_python": {
               "p": 0.03125,

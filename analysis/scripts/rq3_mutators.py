@@ -151,7 +151,7 @@ def level1(ea_dirs):
     are NOT the same thing:
 
       * `accepted`    - the archive kept the child. The archive is MULTI-OBJECTIVE
-                        (f1 reduction, f2 fidelity, f3 parsimony), so a child can
+                        (f1 reduction, f2 textual similarity, f3 parsimony), so a child can
                         be accepted on non-dominance while f1 gets WORSE.
       * actual delta  - ``f1 - parent_f1``; strictly positive means improvement.
 
@@ -487,9 +487,9 @@ def main():
     L += [
         "**Read the two success columns separately.** `positive delta` is computed",
         "directly as f1 > parent_f1. `archive accept` is",
-        "multi-objective — the archive also rewards fidelity (f2) and parsimony (f3),",
+        "multi-objective — the archive also rewards textual similarity (f2) and parsimony (f3),",
         "so a move can be kept while f1 gets worse. An operator with a high accept",
-        "rate but a low advance rate is surviving on fidelity, not on security effect.",
+        "rate but a low advance rate is surviving on textual similarity, not on the finding-count effect.",
         "",
     ]
     for key in sorted(rep["level1_single_operator"]):

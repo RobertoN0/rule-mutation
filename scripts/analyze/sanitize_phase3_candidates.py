@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Audit and structurally sanitize selected Phase-3 chromosomes.
+"""Audit and structurally sanitise selected Phase-3 chromosomes.
 
 The original search artifacts are never edited. For every candidate that fails
 the strict safe-zone contract, this script writes a versioned override directory
@@ -8,7 +8,7 @@ the corresponding original CodeGuard rules. Candidate prose and rule ordering
 are retained wherever they are outside those protected regions.
 
 This is a post-hoc repair utility, not a replay of the adaptive search. Its JSON
-manifest deliberately links raw and sanitized hashes so the two treatments
+manifest deliberately links raw and sanitised hashes so the two treatments
 cannot be confused.
 """
 
@@ -284,7 +284,7 @@ def main() -> None:
     parser.add_argument("--original-rules", type=Path, required=True)
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument(
-        "--write", action="store_true", help="write sanitized candidates"
+        "--write", action="store_true", help="write sanitised candidates"
     )
     args = parser.parse_args()
 

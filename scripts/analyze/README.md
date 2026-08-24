@@ -24,7 +24,7 @@ one in-flight candidate after some model calls have already occurred; in that
 case the validator accepts a surplus of at most one population evaluation and
 reports its exact size as a warning.
 
-Analyze a collection of validated matched runs with:
+Analyse a collection of validated matched runs with:
 
 ```bash
 .venv/bin/python scripts/analyze/analyze_search_runs.py \

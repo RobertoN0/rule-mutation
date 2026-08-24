@@ -29,7 +29,7 @@
 #   bf16 compute dtype (Llama-3.3 is bf16-native; fp16 dequant can overflow).
 #
 # Choose wall time at submission from the run objective. Use a short smoke, an
-# extended behavior validation, or the supervisor-approved final allocation.
+# extended behaviour validation, or the supervisor-approved final allocation.
 # Always calibrate from the same frozen population/model; old subset timings
 # are not reliable for final-run sizing.
 #
@@ -43,7 +43,7 @@
 #     sbatch --time=0:40:00 --job-name="ea_llama_smoke" \
 #            scripts/slurm/slurm_ea_llama70b.sh
 #
-#   # Default: EA, 16 cases, 5 shared initialization + 10 main-loop evaluations.
+#   # Default: EA, 16 cases, 5 shared initialisation + 10 main-loop evaluations.
 #   sbatch scripts/slurm/slurm_ea_llama70b.sh
 #
 #   # Full-population final candidate. Wall time is the primary budget.
@@ -91,10 +91,10 @@ SEMGREP_JOBS=${SEMGREP_JOBS:-4}
 # Mutator pool: the full 8-mutator set. EA and random_search do their own
 # constrained random selection over this pool (no pool-level strategy).
 MUTATORS=${MUTATORS:-"synonym_replacement add_random_word verb_weakening negation_injection voice_change paraphrase section_reorder_shuffle section_reorder_degrade"}
-# Validation default ON: the f2 rule-fidelity objective is SBERT-based.
+# Validation default ON: the f2 textual-similarity objective is SBERT-based.
 ENABLE_VALIDATION=${ENABLE_VALIDATION:-1}
 ENABLE_EVAL_CACHE=${ENABLE_EVAL_CACHE:-1}
-# Optimization direction: "minimize" (REPAIR: fewer vulns, default) | "maximize".
+# Optimisation direction: "minimize" (REPAIR: fewer findings, default) | "maximize".
 OBJECTIVE_DIRECTION=${OBJECTIVE_DIRECTION:-minimize}
 ALLOW_UNQUALIFIED_MAP=${ALLOW_UNQUALIFIED_MAP:-0}
 REPO_ROOT=${REPO_ROOT:-/home/rnegro/thesis/rule-mutation}

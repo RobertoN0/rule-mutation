@@ -13,7 +13,8 @@
 #############################################################################
 # Replicate runner: load the model ONCE, run temp>0 replicates of a SINGLE
 # condition under chosen seeds, for one (MODEL, LANGUAGES). One condition per
-# job; choose the wall time at submission and split norules/withrules into jobs.
+# job; choose the wall time at submission and split no-rules/authored-rules
+# conditions (internally norules/withrules) into jobs.
 #
 # Per-replicate results flush to replicates.jsonl (append), and per-prompt
 # records (incl. generated code) to intermediate/<condtag>_seed<NNNN>.jsonl, so a
@@ -21,7 +22,7 @@
 # to the missing seeds resumes the same OUTPUT_DIR.
 #
 # Usage:
-#   # No-rules / with-rules baselines (one condition each):
+#   # No-rules / authored-rules baselines (one condition each):
 #   MODEL=qwen LANGUAGES=python CONDITION=norules sbatch scripts/slurm/slurm_replicates.sh
 #   MODEL=qwen LANGUAGES=python CONDITION=withrules \
 #       BASELINE_REF=experiments/results/<norules_run_dir> sbatch scripts/slurm/slurm_replicates.sh

@@ -9,11 +9,11 @@ replication.
 - `slurm/slurm_rule_retrieval.sh`: retrieve task-to-rule mappings with the
   final task-delimited request.
 - `setup/materialize_retrieval_consensus.py`: validate exactly 20 retrievals
-  and materialize the 11-of-20 consensus maps.
+  and materialise the 11-of-20 consensus maps.
 - `setup/materialize_eligible_population.py`: audit and apply reviewed,
   outcome-independent task exclusions.
 - `analyze/analyze_population_screening.py`: reconcile the complete 20-seed,
-  four-stratum temperature-0.6 screening block and materialize qualification
+  four-stratum temperature-0.6 screening block and materialise qualification
   inputs.
 - `experiments/run_qualification.py`: generate and validate the
   temperature-zero search population for one model, language, and map.
@@ -61,8 +61,9 @@ Validate every completed or gracefully stopped run with:
 
 ## Phase 3 — Replicate selected configurations
 
-- `experiments/run_replicates.py`: repeat no-rules, with-rules, or a selected
-  chromosome at temperature greater than zero.
+- `experiments/run_replicates.py`: repeat no-rules, authored-rules (the internal
+  condition key is `withrules`), or a selected chromosome at temperature
+  greater than zero.
 - `slurm/slurm_replicates.sh`: DelftBlue launcher for replicate runs.
 - `analyze/validate_replicate_run.py`: reconcile one replicate run.
 - `analyze/analyze_replicates.py`: summarise valid paired replicate evidence.

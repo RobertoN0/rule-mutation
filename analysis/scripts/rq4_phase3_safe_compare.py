@@ -43,7 +43,7 @@ QUALIFIED = Path(REPO) / "rule_maps/qualified"
 MANIFEST = Path(
     os.environ.get(
         "PHASE3_SANITIZED_MANIFEST",
-        "/home/rnegro/analysis/phase3_sanitized/manifest.json",
+        str(Path(REPO) / "artifacts/phase3_selected/sanitized/manifest.json"),
     )
 )
 T0_REPORT = OUT / "safe_zone_validation.json"
@@ -271,11 +271,16 @@ def main() -> int:
 
     output = {
         "artifact_type": "rq4_safe_zone_aware_phase3_comparison",
+        "inference_status": (
+            "superseded pairwise-task-set/sign-test inference; retained for provenance "
+            "and the temperature-zero selection gain"
+        ),
+        "superseded_by": "rq5_three_way_baseline_comparison.json",
         "interpretation": (
             "validation-style stochastic resampling of post-selected candidates; "
             "selected candidates share benchmarks, baselines, and model systems"
         ),
-        "baseline_policy": "reuse final original-rules/no-rules temperature-0.6 baselines",
+        "baseline_policy": "reuse final authored-rules/no-rules temperature-0.6 baselines",
         "target_seeds": TARGET_SEEDS,
         "runs": {},
         "pending": [],
@@ -351,7 +356,7 @@ def main() -> int:
     # both the family size and potentially every step-down threshold.
     all_adjusted = holm(all_p_values) if multiplicity_family_complete else {}
     output["multiplicity"] = {
-        "family": "all 20 selected-candidate vs original-rules comparisons",
+        "family": "all 20 selected-candidate vs authored-rules comparisons",
         "n_complete_tests": len(all_p_values),
         "n_planned_tests": 4 * TARGET_K,
         "family_complete": multiplicity_family_complete,
@@ -443,7 +448,7 @@ def main() -> int:
     lines += [
         "",
         f"Multiplicity status: {output['multiplicity']['decision_status']}.",
-        "The planned Holm family contains all 20 candidate-vs-original comparisons.",
+        "The historical Holm family contains all 20 candidate-versus-authored comparisons.",
         "",
         "The five candidates per stratum come from different search seeds but share",
         "the same tasks, baseline generations, model system, and selection procedure;",

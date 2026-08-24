@@ -9,7 +9,7 @@
       "name": "search safe-zone audit",
       "passed": true,
       "required_for_report": true,
-      "detail": "80 runs; 10789 evaluations; 4598 full-invalid; 2297 core-invalid"
+      "detail": "80 runs; 10789 evaluations; 4598 full-contract exclusions; 2297 fenced-code exclusions; 2301 inline-only exclusions"
     },
     {
       "name": "RQ1 compact result",
@@ -33,7 +33,7 @@
       "name": "sanitised T=0 validation",
       "passed": true,
       "required_for_report": true,
-      "detail": "12/12 positive; repair delta range -4 to +1 findings"
+      "detail": "12/12 positive; sanitisation delta range -4 to +1 findings"
     },
     {
       "name": "RQ4 candidate selection",

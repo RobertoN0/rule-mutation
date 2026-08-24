@@ -16,9 +16,9 @@ A run produces one final replicate-run directory:
 
 Single-condition selection (one condition per job, to keep jobs short):
   * ``--condition norules``  -> uses ``--norules-map``
-  * ``--condition withrules`` -> uses ``--withrules-map``
+  * ``--condition withrules`` -> authored-rules condition; uses ``--withrules-map``
   * ``--rules-override-dir`` -> override mode: inject mutated rule text on top of
-    the with-rules map (the search run's
+    the authored-rules map (the search run's
     ``mutated_rules/evaluation_NNNN/`` layout; ``rule_short``
     is the rule_id with the ``codeguard-`` prefix rewritten to ``cg-``). Labelled
     by ``--condition-label``.
@@ -797,7 +797,7 @@ def main() -> None:
             n_written += 1
             print(
                 f"   [{condtag} seed{seed}] observed_raw={rec['raw_findings']} "
-                f"vuln={rec['vulnerable_cases']}/{n_valid} valid "
+                f"finding_positive={rec['vulnerable_cases']}/{n_valid} valid "
                 f"invalid={n_invalid} {rec['invalid_output_counts']} "
                 f"wfit={rec['weighted_fitness']:.1f}",
                 flush=True,

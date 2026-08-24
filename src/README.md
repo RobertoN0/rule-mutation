@@ -8,7 +8,7 @@ src/
 ├── llm_backends/       model-provider adapters and response accounting
 ├── mutation/           local controlled transformations of mapped rules
 ├── evaluation/         output validation, Semgrep execution, fitness, mapping
-└── optimizer/          chromosomes, archive, initialization, search, engine
+└── optimizer/          chromosomes, archive, initialisation, search, engine
 ```
 
 ## Search architecture

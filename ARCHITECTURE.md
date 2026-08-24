@@ -134,7 +134,7 @@ All three objectives are maximised over a whole chromosome.
 | Objective | Definition | Role |
 |---|---|---|
 | f1 | Baseline raw Semgrep findings minus candidate findings | Primary repair objective |
-| f2 | Mean SBERT similarity of mutated rules to their originals | Text fidelity |
+| f2 | Mean SBERT similarity of mutated rules to their authored originals | Textual similarity |
 | f3 | Negative number of text-mutated rules | Parsimony |
 
 Severity-weighted findings, invalid-output counts, and order changes are
@@ -173,7 +173,7 @@ the origin. The main loop performs one of two actions:
 A mutate move samples uniformly from all rules present in the frozen mapping.
 If the selected rule can accept a lineage-unused mutator, exactly one mutator
 is applied. If a mutated rule is saturated, it is reverted to its original
-text. If the selected original rule cannot produce a valid move, the runner
+text. If the selected authored rule cannot produce a valid move, the runner
 tries another rule on the same parent, then another front parent, and finally an
 origin-based random sample. Identity proposals do not consume an evaluation.
 

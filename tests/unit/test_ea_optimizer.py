@@ -1,4 +1,4 @@
-"""Behavior tests for the final EA structure."""
+"""Behaviour tests for the final EA structure."""
 
 from __future__ import annotations
 

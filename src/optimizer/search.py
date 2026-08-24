@@ -1,6 +1,6 @@
 """
 Search algorithms over full rule-set chromosomes: an archive-based EA with random
-initialization + periodic random injection, and an i.i.d. random-search baseline.
+initialisation + periodic random injection, and an i.i.d. random-search baseline.
 
 The unit of search is the whole rule set (a :class:`RuleSetChromosome`): rule-text
 alleles + a global rule-ordering policy. Both runners share one evaluation seam —
@@ -8,22 +8,23 @@ alleles + a global rule-ordering policy. Both runners share one evaluation seam 
 n_reused, n_rerun)`` — a closure provided by the engine that renders every prompt
 from the chromosome and scores the whole rule set.
 
-Objectives — the "conservative" set (adopted 2026-07-10), all MAXIMIZED by the
+Objectives — the "conservative" set (adopted 2026-07-10), all MAXIMISED by the
 Pareto archive:
-    f1 = vulnerability reduction (raw Semgrep-finding delta; sign set by
+    f1 = Semgrep-finding reduction (sign set by
          the engine's ``objective_direction``)
-    f2 = rule fidelity (mean SBERT similarity of mutated rules vs originals)
+    f2 = textual similarity (mean SBERT similarity versus authored originals;
+         stored as ``rule_fidelity`` for schema compatibility)
     f3 = −parsimony (negated count of mutated rules — prefer the smaller edit)
 
 Top-level entry points
 ----------------------
-* :func:`run_ea` — five independent origin-based candidates initialize one
+* :func:`run_ea` — five independent origin-based candidates initialise one
   :class:`ChromosomeArchive`; the main loop alternates local archive moves with
   periodic origin-based injections.
 * :func:`run_random_search` — the same five-candidate prefix followed by
   independent origin-based samples (no carry-forward, no archive).
 * :func:`build_random_chromosome` — the one shared sampler behind random search,
-  EA initialization, and EA injection, so "initialized exactly like random"
+  EA initialisation, and EA injection, so "initialised exactly like random"
   holds by construction.
 """
 
@@ -146,10 +147,11 @@ class RandomBuildResult:
 # ============================================================================
 
 def _objectives(agg: AggregatedFitness) -> tuple[float, float, float]:
-    """Map an AggregatedFitness to the archive's (f1, f2, f3), all maximized.
+    """Map an AggregatedFitness to the archive's (f1, f2, f3), all maximised.
 
-    f1 = vulnerability reduction (``total_raw_reduction``; positive means safer),
-    f2 = rule fidelity (mean SBERT of mutated rules vs originals; 1.0 = unchanged),
+    f1 = Semgrep-finding reduction (``total_raw_reduction``; positive means fewer findings),
+    f2 = textual similarity (mean SBERT versus authored originals; stored as
+         ``rule_fidelity``; 1.0 = unchanged),
     f3 = −parsimony (fewer mutated rules is better; negated so maximizing works).
     """
     return agg.total_raw_reduction, agg.rule_fidelity, -float(agg.parsimony)
@@ -437,7 +439,7 @@ def _validate_genes(
 
 
 # ============================================================================
-# Archive-based EA with random initialization + periodic random injection
+# Archive-based EA with random initialisation + periodic random injection
 # ============================================================================
 
 def run_ea(
@@ -470,7 +472,7 @@ def run_ea(
 ) -> ChromosomeRunResult:
     """Run the final EA: five shared initial samples, then ``main_loop_budget``.
 
-    Initialization evaluations are outside the main-loop budget but remain part
+    Initialisation evaluations are outside the main-loop budget but remain part
     of the total evaluation count. The origin is the baseline and reporting
     reference only; the five initial candidates create the Pareto front.
 
@@ -489,13 +491,13 @@ def run_ea(
         INITIALIZATION_SAMPLES
     ):
         raise ValueError(
-            f"precomputed initialization must contain {INITIALIZATION_SAMPLES} candidates"
+            f"precomputed initialisation must contain {INITIALIZATION_SAMPLES} candidates"
         )
     if (
         precomputed_initialization is not None
         and runner_random_state_after_initialization is None
     ):
-        raise ValueError("precomputed initialization lacks the runner random state")
+        raise ValueError("precomputed initialisation lacks the runner random state")
 
     rng = random.Random(seed)
     archive = ChromosomeArchive(
@@ -720,7 +722,7 @@ def run_ea(
             space.stamp(child)
             if child.cid != prepared.child.cid:
                 raise ValueError(
-                    f"precomputed initialization candidate {index} content hash differs"
+                    f"precomputed initialisation candidate {index} content hash differs"
                 )
             child.f1, child.f2, child.f3 = _objectives(prepared.fitness)
             child.fitness = prepared.fitness
@@ -803,8 +805,8 @@ def run_ea(
     while total_evaluated < INITIALIZATION_SAMPLES:
         if should_stop_fn is not None and should_stop_fn():
             log(
-                "\n⏹️  Graceful stop during initialization — stopping after "
-                f"{last_completed}/{INITIALIZATION_SAMPLES} initialization evaluations"
+                "\n⏹️  Graceful stop during initialisation — stopping after "
+                f"{last_completed}/{INITIALIZATION_SAMPLES} initialisation evaluations"
             )
             termination_reason = "wall_time_limit"
             break
@@ -852,7 +854,7 @@ def run_ea(
             )
             if initialization_identity_retries >= identity_retry_limit:
                 raise IdentityRetryLimitExceeded(
-                    "EA initialization identity retry limit exceeded"
+                    "EA initialisation identity retry limit exceeded"
                 )
             continue
         initialization_identity_retries = 0
@@ -898,7 +900,7 @@ def run_ea(
             runner_random_state_after_initialization=captured_runner_state,
         )
     if not archive.entries:
-        raise RuntimeError("EA initialization completed without creating a Pareto front")
+        raise RuntimeError("EA initialisation completed without creating a Pareto front")
 
     main_loop_started = time.perf_counter()
     while main_loop_evaluated < main_loop_budget:
@@ -1292,7 +1294,7 @@ def run_random_search(
 ) -> ChromosomeRunResult:
     """Run random search with the same five-candidate prefix as the EA.
 
-    The five initialization evaluations are outside ``main_loop_budget`` but
+    The five initialisation evaluations are outside ``main_loop_budget`` but
     remain part of the total evaluation count. Every candidate, including the
     subsequent main-loop candidates, is an independent origin-based sample.
     """
@@ -1306,13 +1308,13 @@ def run_random_search(
         INITIALIZATION_SAMPLES
     ):
         raise ValueError(
-            f"precomputed initialization must contain {INITIALIZATION_SAMPLES} candidates"
+            f"precomputed initialisation must contain {INITIALIZATION_SAMPLES} candidates"
         )
     if (
         precomputed_initialization is not None
         and runner_random_state_after_initialization is None
     ):
-        raise ValueError("precomputed initialization lacks the runner random state")
+        raise ValueError("precomputed initialisation lacks the runner random state")
     rng = random.Random(seed)
 
     iterations: list["IterationResult"] = []
@@ -1340,7 +1342,7 @@ def run_random_search(
             space.stamp(child)
             if child.cid != prepared.child.cid:
                 raise ValueError(
-                    f"precomputed initialization candidate {index} content hash differs"
+                    f"precomputed initialisation candidate {index} content hash differs"
                 )
             child.f1, child.f2, child.f3 = _objectives(prepared.fitness)
             child.fitness = prepared.fitness

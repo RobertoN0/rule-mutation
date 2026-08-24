@@ -17,7 +17,7 @@ artifacts/phase3_selected/
 ```
 
 Directories are named `{model}_{language}_r{rank}_s{search_seed}_{chromosome_id}`,
-so a raw candidate and its sanitized counterpart share a name.
+so a raw candidate and its sanitised counterpart share a name.
 
 ## Raw versus sanitised
 

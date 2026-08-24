@@ -61,8 +61,9 @@ def check() -> dict:
         gate(
             "search safe-zone audit",
             audit_ok,
-            f"80 runs; {evaluations} evaluations; {invalid_full} full-invalid; "
-            f"{invalid_core} core-invalid",
+            f"80 runs; {evaluations} evaluations; {invalid_full} full-contract "
+            f"exclusions; {invalid_core} fenced-code exclusions; "
+            f"{invalid_full - invalid_core} inline-only exclusions",
         )
     )
 
@@ -152,7 +153,7 @@ def check() -> dict:
         gate(
             "sanitised T=0 validation",
             t0_ok,
-            "12/12 positive; repair delta range -4 to +1 findings",
+            "12/12 positive; sanitisation delta range -4 to +1 findings",
         )
     )
 

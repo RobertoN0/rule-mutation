@@ -7,8 +7,9 @@ experiments.
 - `population_eligibility_manifest.json` records the prospective removal of
   one exact duplicate and 30 prompts that explicitly request an output
   language incompatible with their dataset split.
-- `qualified/` contains the final model-specific with-rules maps, matching
-  no-rules maps, and the evidence summaries used to verify them.
+- `qualified/` contains the final model-specific authored-rules maps, matching
+  no-rules maps, and the evidence summaries used to verify them. Historical
+  filenames and condition fields may use the internal label `withrules`.
 
 The final population requires two independent properties:
 

@@ -35,7 +35,7 @@ Positive delta means fewer Semgrep findings than the authored-rules baseline.
 | qwen_python | 5 | raw_structurally_valid | 20 | 26.0 | 0.5 [-2.0, 6.0] | 0.550 | 0.81453 | 1.9% |
 
 Multiplicity status: final.
-The planned Holm family contains all 20 candidate-vs-original comparisons.
+The historical Holm family contains all 20 candidate-versus-authored comparisons.
 
 The five candidates per stratum come from different search seeds but share
 the same tasks, baseline generations, model system, and selection procedure;

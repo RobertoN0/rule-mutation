@@ -2,7 +2,7 @@
 
 **Search-Based Software Testing for LLM Security-Instruction Robustness**
 
-This MSc thesis framework studies how the **phrasing** of **[CodeGuard](https://github.com/cosai-oasis/project-codeguard) security coding guidelines** affects Semgrep findings in LLM-generated code. CodeGuard rules (shipped as the `project-codeguard/` git submodule) are the natural-language security instructions given to a code-generating LLM. The framework applies **controlled mutations** to those rules — rewording, reordering, restructuring, or deliberately weakening them — and uses **Search-Based Software Testing** to find candidates that lead the LLM to generate code with fewer Semgrep findings than the authored rules. Rule fidelity is measured explicitly rather than assumed. The search direction is **repair** (minimise findings); an adversarial direction (maximise) is retained only for secondary experiments.
+This MSc thesis framework studies how the **phrasing** of **[CodeGuard](https://github.com/cosai-oasis/project-codeguard) security coding guidelines** affects Semgrep findings in LLM-generated code. CodeGuard rules (shipped as the `project-codeguard/` git submodule) are the natural-language security instructions given to a code-generating LLM. The framework applies **controlled mutations** to those rules — rewording, reordering, restructuring, or deliberately weakening them — and uses **Search-Based Software Testing** to find candidates that lead the LLM to generate code with fewer Semgrep findings than the authored rules. Textual similarity is measured explicitly; semantic equivalence is not assumed or verified. The search direction is **repair** (minimise findings); an adversarial direction (maximise) is retained only for secondary experiments.
 
 > **Looking for the thesis results?** [EVIDENCE_MAP.md](EVIDENCE_MAP.md) maps every
 > table and figure in the report to the artifact that produced it, names the exact
@@ -10,11 +10,33 @@ This MSc thesis framework studies how the **phrasing** of **[CodeGuard](https://
 > this repository. The results themselves are in [`analysis/results/`](analysis/results/)
 > and the selected rule sets in [`artifacts/phase3_selected/`](artifacts/phase3_selected/).
 
+### Committee review path
+
+A thesis reviewer does not need to inspect every implementation file. The
+shortest evidence-led route is:
+
+1. [`EVIDENCE_MAP.md`](EVIDENCE_MAP.md) — maps each submitted table and figure
+   to its canonical JSON, script, figure, and executed revision.
+2. [`analysis/README.md`](analysis/README.md) — distinguishes the final RQ2/RQ4
+   procedure from retained superseded analyses.
+3. [`analysis/results/`](analysis/results/) and
+   [`analysis/figures/`](analysis/figures/) — the published derived evidence.
+4. [`ARCHITECTURE.md`](ARCHITECTURE.md) and
+   [`IMPLEMENTATION.md`](IMPLEMENTATION.md) — method and field-level contracts.
+5. [`REPLICATION.md`](REPLICATION.md) — what can and cannot be reproduced from
+   the public package.
+
+The individual candidate files under `artifacts/phase3_selected/` support
+provenance and spot checks; the 8.4 GB raw run tree is retained on DelftBlue
+and is not part of this checkout.
+
 ---
 
 ## Quick Start
 
-Dependencies are managed with [`uv`](https://docs.astral.sh/uv/) (Python ≥ 3.11) — one canonical lockfile, deterministic installs, identical locally and on DelftBlue.
+Dependencies are managed with [`uv`](https://docs.astral.sh/uv/) (Python 3.11
+or 3.12) using one canonical lockfile. DelftBlue additionally replaces the
+locked CPU Torch build with the documented CUDA build.
 
 ```bash
 # 1. Install uv
@@ -176,7 +198,7 @@ re-evaluates selected conditions at temperature>0 for statistical analysis.
    evidential reasons. In particular, an incomplete output is never converted
    into a clean zero or described as proof that the task is safe.
 5. **Qualify deterministic search execution.** Generate each positive-evidence
-   task once at temperature zero with its original mapped rules for Qwen and
+   task once at temperature zero with its authored mapped rules for Qwen and
    Llama. Final membership requires a valid target-language output from both
    models. The cross-model intersection freezes 203 Python and 126 Java tasks,
    along with the prompt, map, model, and Semgrep provenance needed by the
@@ -191,7 +213,7 @@ re-evaluates selected conditions at temperature>0 for statistical analysis.
 
 ### Phase 2 — Search experiment
 
-1. **Establish the baseline** by generating and scanning code under the original
+1. **Establish the baseline** by generating and scanning code under the authored
    mapped rules.
 2. **Build a candidate chromosome** by mutating rule text or changing rule order.
 3. **Record mutation quality** using SBERT similarity, instruction adherence,
@@ -199,8 +221,9 @@ re-evaluates selected conditions at temperature>0 for statistical analysis.
 4. **Generate and validate one target-language implementation** for every task.
 5. **Score** valid implementations with Semgrep (raw findings primary; severity
    weighting diagnostic), then assemble whole-chromosome f1 finding-count
-   reduction, f2 mean SBERT rule fidelity, and f3 −parsimony.
-6. **Optimize** with one of two search strategies (`--optimizer`)
+   reduction, f2 mean SBERT textual similarity, and f3 −parsimony. The stored
+   field name `rule_fidelity` is historical.
+6. **Optimise** with one of two search strategies (`--optimizer`)
    over **full rule-set chromosomes** (per-gene rule alleles + a global rule-order gene),
    scored on the objectives (f1 = finding-count reduction, f2 = textual similarity, f3 = −parsimony):
    - **`ea`** — an archive-based, steady-state EA. Five origin-based random
@@ -229,10 +252,10 @@ to its initialisation or main-loop budget.
 
 ### Mutation strategies
 
-The eight operators are controlled rule-text transformations. Fidelity is
-measured explicitly because some operators intentionally weaken or perturb the
-instruction; the framework does not assume that every produced text is
-semantically identical.
+The eight operators are controlled rule-text transformations. Textual
+similarity and auxiliary quality signals are recorded because some operators
+intentionally weaken or perturb the instruction; the framework does not assume
+or verify that a candidate is semantically equivalent to the authored rule.
 
 **Function-based** (deterministic, no extra model request):
 
@@ -318,7 +341,7 @@ comparison.
 The method uses `ARCHIVE_CAP=6`, `MAX_DEPTH=4`,
 `RANDOM_MAX_CHANGES=10`, `EA_INJECTION_EVERY=10`, and
 `ORDER_MOVE_WEIGHT=0.1`. Validation is enabled by default in the wrapper
-because it supplies the f2 fidelity objective.
+because it supplies the f2 textual-similarity objective.
 
 Reproduce any run with `python scripts/experiments/rerun_from_config.py <run_dir>` (backend-aware: API → python entrypoint, DelftBlue → `sbatch`). See [WORKFLOW.md](WORKFLOW.md) for the full DelftBlue round-trip.
 
@@ -331,7 +354,7 @@ Reproduce any run with `python scripts/experiments/rerun_from_config.py <run_dir
 │   ├── mutation/          # 8 mutators + MutatorPool + MutationQualityValidator + ParsedRule
 │   ├── optimizer/         # chromosome + single Pareto archive (chromosome.py), EA + i.i.d. random-search runners (search.py)
 │   │                      #   + shared random sampler; ExperimentEngine orchestration (engine.py)
-│   ├── evaluation/        # Output qualification/normalization, population qualification, Semgrep, fitness
+│   ├── evaluation/        # Output qualification/normalisation, population qualification, Semgrep, fitness
 │   ├── llm_backends/      # Claude / OpenAI / DelftBlue-local backends
 │   └── retrieval/         # Phase 1: task → CodeGuard-rule map builders (local + Anthropic; [retrieval] extra)
 ├── scripts/

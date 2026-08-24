@@ -174,7 +174,7 @@ def load_initialization_bundle(
     identity = manifest.get("identity")
     if identity != expected_identity:
         raise ValueError(
-            "initialization bundle identity differs from the current run; "
+            "initialisation bundle identity differs from the current run; "
             "generate a new bundle for this exact configuration"
         )
     content = {key: value for key, value in manifest.items() if key != "content_sha256"}
@@ -219,7 +219,7 @@ def capture_runtime_random_state(
     mutators: Iterable[Any],
     runner_random_state: object,
 ) -> dict[str, Any]:
-    """Capture all RNG streams used after the shared initialization."""
+    """Capture all RNG streams used after the shared initialisation."""
     import torch
 
     mutator_states = {

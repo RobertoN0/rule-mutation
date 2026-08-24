@@ -1,5 +1,5 @@
 """
-Semgrep runner for evaluating security vulnerabilities in generated code.
+Semgrep runner for counting configured static-analysis findings in generated code.
 
 Used by the SBST rule-set search to score generated code.
 """
@@ -450,7 +450,7 @@ def run_semgrep(
     """Run Semgrep on a code string and return security findings.
     
     Args:
-        code_content: The code to analyze.
+        code_content: The code to analyse.
         language: Programming language (determines file extension).
         rule_config: Semgrep ruleset to use (e.g., "p/security-audit") or a
             local rule file / directory. If omitted, the configured default is used.
@@ -652,7 +652,7 @@ def run_semgrep_batch_dir(
     rule_config: str | None = None,
     strip_fences: bool = True,
 ) -> list[SemgrepResult]:
-    """Analyze a batch and preserve task-level versus systemic failures.
+    """Analyse a batch and preserve task-level versus systemic failures.
 
     ``SemgrepSample`` inputs carry the raw model output, selected code, and any
     pre-analysis validation failure. ``(code, language)`` tuples provide a

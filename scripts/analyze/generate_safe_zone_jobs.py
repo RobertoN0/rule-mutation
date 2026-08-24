@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate SLURM submissions for structurally sanitized Phase-3 candidates."""
+"""Generate SLURM submissions for structurally sanitised Phase-3 candidates."""
 
 from __future__ import annotations
 
@@ -9,9 +9,10 @@ import os
 from pathlib import Path
 
 
-# Defaults to the DelftBlue research worktree this study ran in. Override with
-# RULE_MUTATION_REPO to generate submissions from a different checkout.
-REPO = Path(os.environ.get("RULE_MUTATION_REPO", "/home/rnegro/thesis/rule-mutation"))
+# Default to the current checkout. Override RULE_MUTATION_REPO when generating
+# submissions from an unpacked DelftBlue archive.
+DEFAULT_REPO = Path(__file__).resolve().parents[2]
+REPO = Path(os.environ.get("RULE_MUTATION_REPO", str(DEFAULT_REPO)))
 OUTPUT_BASE = REPO / "experiments/06_safe_zone_validation"
 SLURM = "scripts/slurm/slurm_replicates.sh"
 T0_WALL = {

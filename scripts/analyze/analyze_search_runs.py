@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Analyze validated EA/random-search runs under the primary wall-time budget."""
+"""Analyse validated EA/random-search runs under the primary wall-time budget."""
 
 from __future__ import annotations
 

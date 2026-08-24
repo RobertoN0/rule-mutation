@@ -21,19 +21,20 @@ threshold, or EA parent.
 
 ## Objectives
 
-The archive maximizes:
+The archive maximises:
 
 - f1: raw Semgrep-finding reduction from the origin;
-- f2: mean SBERT fidelity of mutated rules;
+- f2: mean SBERT textual similarity of mutated rules (stored as
+  `rule_fidelity`; this does not establish semantic equivalence);
 - f3: negative number of mutated rules.
 
-## Shared initialization
+## Shared initialisation
 
 Both strategies begin with five independent origin-based random candidates.
 They are outside the main-loop budget, so total logical evaluations equal
 `5 + main_loop_budget`.
 
-Final matched runs load the same strictly keyed initialization bundle. The
+Final matched runs load the same strictly keyed initialisation bundle. The
 bundle restores candidate evidence, search/mutator/Torch RNG states, and the
 evaluation cache at the five-candidate boundary.
 
@@ -84,7 +85,7 @@ running insert/reject counters.
 `_consider_best_ever` runs **before** any of the above, so a candidate counts
 towards the reported best fitness even when the archive rejects it as a
 duplicate or as dominated — this is also what makes the five shared
-initialization candidates eligible to be the reported best.
+initialisation candidates eligible to be the reported best.
 
 ## Random search
 
@@ -97,10 +98,10 @@ evaluated candidate is reported, with the origin as floor.
 `evaluations.jsonl` distinguishes:
 
 - `evaluation_index` from proposal `attempt_index`;
-- initialization from main-loop evaluations;
+- initialisation from main-loop evaluations;
 - completion time within the main loop;
 - evaluated candidates from identity retries;
-- new evaluations from initialization-bundle or cache reuse.
+- new evaluations from initialisation-bundle or cache reuse.
 
 The field-level contract is in
 [IMPLEMENTATION.md](../../IMPLEMENTATION.md#output-schema).

@@ -112,7 +112,8 @@ random search instead, use `--optimizer random_search` (same initialisation and
 sampler, no archive).
 
 `--enable-validation` is **required** on every real run: it computes the f2
-rule-fidelity objective (SBERT similarity of each mutated rule to its original)
+textual-similarity objective (stored as `rule_fidelity`; mean SBERT similarity
+of each mutated rule to its authored original)
 and records the post-hoc quality metadata (instruction adherence, keyword
 retention, etc.) into `evaluations.jsonl` — nothing is rejected. Only `--dry-run`
 may omit it. The run validator checks that the resulting artifacts

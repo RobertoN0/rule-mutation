@@ -206,9 +206,10 @@ export ANALYSIS_OUT=/path/to/output/dir
 ```
 
 `make_figures.py` needs `matplotlib`, which is deliberately absent from the
-frozen environment. The committed figures use Matplotlib 3.10.9; run it from a
-separate plotting environment and set
-`ANALYSIS_BASE` to the directory holding `report/` and `figures/`.
+frozen environment. The committed figures use Matplotlib 3.10.9. From a
+separate plotting environment, run it without path overrides to read
+`analysis/results/` and write `analysis/figures/`. `ANALYSIS_BASE` remains
+available for the historical `report/` plus `figures/` layout.
 
 Without the archived experiment tree the scripts have nothing to read. The
 published JSON in `analysis/results/` is the record of what they produced.

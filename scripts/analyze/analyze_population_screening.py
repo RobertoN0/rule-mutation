@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate population screening and materialize screened maps."""
+"""Validate population screening and materialise screened maps."""
 
 from __future__ import annotations
 
