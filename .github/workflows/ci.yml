@@ -31,5 +31,8 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra dev
 
+      - name: Fetch NLTK data
+        run: uv run python -m nltk.downloader wordnet omw-1.4 averaged_perceptron_tagger averaged_perceptron_tagger_eng
+
       - name: Run unit tests
         run: uv run pytest tests/unit/ -q
