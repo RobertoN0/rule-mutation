@@ -1,8 +1,49 @@
-# CodeGuard SBST Framework
+<h1 align="center">CodeGuard SBST Framework</h1>
 
-**Search-Based Software Testing for LLM Security-Instruction Robustness**
+<p align="center">
+  <strong>Search-based testing of natural-language security rules for LLM code generation.</strong>
+</p>
 
-This MSc thesis framework studies how the **phrasing** of **[CodeGuard](https://github.com/cosai-oasis/project-codeguard) security coding guidelines** affects Semgrep findings in LLM-generated code. CodeGuard rules (shipped as the `project-codeguard/` git submodule) are the natural-language security instructions given to a code-generating LLM. The framework applies **controlled mutations** to those rules — rewording, reordering, restructuring, or deliberately weakening them — and uses **Search-Based Software Testing** to find candidates that lead the LLM to generate code with fewer Semgrep findings than the authored rules. Textual similarity is measured explicitly; semantic equivalence is not assumed or verified. The search direction is **repair** (minimise findings); an adversarial direction (maximise) is retained only for secondary experiments.
+<p align="center">
+  Does a security rule still hold when you reword it? This framework applies controlled mutations to
+  the natural-language security guidelines handed to a code-generating LLM, then uses search-based
+  software testing to find phrasings that change the code the model produces. Textual similarity is
+  measured explicitly; semantic equivalence is not assumed or verified.
+</p>
+
+<p align="center">
+  <a href="https://github.com/RobertoN0/rule-mutation/actions/workflows/ci.yml"><img src="https://github.com/RobertoN0/rule-mutation/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <img src="https://img.shields.io/badge/MSc%20thesis-TU%20Delft-1F5673?style=flat-square" alt="MSc thesis, TU Delft">
+  <img src="https://img.shields.io/badge/Python-3.11%20%7C%203.12-3D4453?style=flat-square&logo=python&logoColor=white" alt="Python 3.11 or 3.12">
+  <img src="https://img.shields.io/badge/License-MIT-2C6248?style=flat-square" alt="MIT License">
+  <img src="https://img.shields.io/badge/Replication-package%20included-2C6248?style=flat-square" alt="Replication package included">
+</p>
+
+<p align="center">
+  <a href="thesis.pdf"><strong>Read the thesis (PDF)</strong></a> ·
+  <a href="EVIDENCE_MAP.md">Evidence map</a> ·
+  <a href="ARCHITECTURE.md">Architecture</a> ·
+  <a href="IMPLEMENTATION.md">Implementation</a> ·
+  <a href="REPLICATION.md">Replication</a> ·
+  <a href="analysis/results/">Results</a>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3D4453?style=flat-square&logo=python&logoColor=white" alt="Python">
+  <img src="https://img.shields.io/badge/PyTorch-3D4453?style=flat-square&logo=pytorch&logoColor=white" alt="PyTorch">
+  <img src="https://img.shields.io/badge/Hugging%20Face-3D4453?style=flat-square&logo=huggingface&logoColor=white" alt="Hugging Face">
+  <img src="https://img.shields.io/badge/LangGraph-3D4453?style=flat-square&logo=langchain&logoColor=white" alt="LangGraph">
+  <img src="https://img.shields.io/badge/Semgrep-3D4453?style=flat-square" alt="Semgrep">
+  <img src="https://img.shields.io/badge/Docker-3D4453?style=flat-square&logo=docker&logoColor=white" alt="Docker">
+  <img src="https://img.shields.io/badge/HPC%20(SLURM)-3D4453?style=flat-square" alt="HPC (SLURM)">
+  <img src="https://img.shields.io/badge/uv-3D4453?style=flat-square" alt="uv">
+</p>
+
+---
+
+**The thesis itself is in this repository: [`thesis.pdf`](thesis.pdf).** *Search-Based Repair Testing
+of CodeGuard Natural-Language Rules for Secure LLM Code Generation*, MSc Computer Science, TU Delft,
+supervised by Dr. Annibale Panichella, 2026.
 
 > **Looking for the thesis results?** [EVIDENCE_MAP.md](EVIDENCE_MAP.md) maps every
 > table and figure in the report to the artifact that produced it, names the exact
