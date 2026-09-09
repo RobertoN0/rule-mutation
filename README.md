@@ -1,7 +1,7 @@
 <h1 align="center">CodeGuard SBST Framework</h1>
 
 <p align="center">
-  <strong>Search-based testing of natural-language security rules for LLM code generation.</strong>
+  <strong> Search-Based Repair Testing of CodeGuard Natural-Language Rules for Secure LLM Code Generation </strong>
 </p>
 
 <p align="center">
